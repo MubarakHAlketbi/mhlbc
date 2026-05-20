@@ -72,3 +72,45 @@ To ensure reliability, contributors should adopt the following optional director
 3. **Expose to Worker:** Ensure `hl_worker.py` passes any new parsed datasets to the UI thread safely.
 4. **Update UI View:** Bind the data to the virtual list model in `app.py` so it renders dynamically.
 5. **Update Docs:** If you discovered a new layout rule or corrected an error in the parser, update the respective `.md` file in `/docs` as part of your Pull Request.
+
+---
+
+## 5. Mandatory Logging & Investigative Features
+
+Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
+
+### Rules
+
+1. **Togglable by design.** Every logging/investigative feature must have a runtime toggle (CLI flag, checkbox, or passed logger object). Verbose mode is **off by default** in production use, and **on by default** during development.
+
+2. **Log every VarInt.** Every variable-length integer decode must emit the raw bytes (hex) and the decoded value. This is the single most common source of stream desync bugs.
+
+3. **Log offsets.** Every pool read must log the stream byte offset before and after the read, plus the total bytes consumed. When parsing later sections (types, functions, opcodes), log the byte offset at the start of each section and each element boundary.
+
+4. **Log every header field.** All header counts (`nints`, `ntypes`, `nfunctions`, etc.), conditional fields (`nbytes`/`nconstants`), `flags`, and `entrypoint` must appear in the log with their decoded values.
+
+5. **Log opcode-level disassembly.** When the bytecode decoder is implemented (Phase 4), every decoded instruction must produce a log entry showing its byte offset, opcode mnemonic, arguments, and target jump addresses.
+
+6. **Log errors with context.** When a parse error occurs, the error message must include the stream byte offset, the section being parsed, and the raw bytes that caused the failure. Never throw a bare message — always attach positional context.
+
+7. **Log file paths.** The log file path must be displayed in the UI status bar when verbose mode is active (already implemented via `VerboseLogger.log_path`).
+
+### Why This Rule Exists
+
+HashLink bytecode has no official public spec. All structure is reverse-engineered from the Haxe compiler source and reference C runtime (`hlc`). Without detailed byte-level logs, contributors waste time guessing offsets, re-reading the same binary sections, and debugging silent stream desyncs that shift every subsequent field by one byte. A complete log from a single successful parse run is often enough to diagnose a bug in an entirely different bytecode version.
+
+### Integration Pattern
+
+```python
+# Every new component should accept an optional logger:
+class TypeParser:
+    def __init__(self, stream, logger: VerboseLogger | None = None):
+        self._logger = logger
+        self._log = lambda tag, msg: logger.log(tag, msg) if logger else None
+```
+
+```python
+# Toggle in the UI — add a QCheckBox for each major subsystem:
+self.cb_verbose_types = QCheckBox("Verbose Type Parsing")
+```
+Existing toggle infrastructure: `VerboseLogger` (hl_logger.py), CLI `--verbose`/`-v` flag (app.py), UI checkbox (app.py). Reuse these instead of inventing a new mechanism.
