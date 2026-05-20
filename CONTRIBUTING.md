@@ -163,6 +163,7 @@ All development work must be done directly on the **`main`** branch. Feature bra
 3. **Expose to Worker:** Ensure `hl_worker.py` passes any new parsed datasets to the UI thread safely.
 4. **Update UI View:** Bind the data to the virtual list model in `app.py` so it renders dynamically.
 5. **Update Docs:** If you discovered a new layout rule or corrected an error in the parser, update the respective `.md` file in `/docs` as part of your Pull Request.
+6. **Update Roadmap:** The **"Development Roadmap"** section in `README.md` must always reflect the true state of the project. Mark items as completed (`[x]`) only when they are fully implemented and tested. If implementation changes scope, update the roadmap description accordingly before merging.
 
 ---
 
