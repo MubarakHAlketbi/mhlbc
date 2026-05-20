@@ -163,7 +163,10 @@ All development work must be done directly on the **`main`** branch. Feature bra
 3. **Expose to Worker:** Ensure `hl_worker.py` passes any new parsed datasets to the UI thread safely.
 4. **Update UI View:** Bind the data to the virtual list model in `app.py` so it renders dynamically.
 5. **Update Docs:** If you discovered a new layout rule or corrected an error in the parser, update the respective `.md` file in `/docs` as part of your Pull Request.
-6. **Update Roadmap:** The **"Development Roadmap"** section in `README.md` must always reflect the true state of the project. Mark items as completed (`[x]`) only when they are fully implemented and tested. If implementation changes scope, update the roadmap description accordingly before merging.
+6. **Keep README.md and CONTRIBUTING.md Accurate:** Before merging, verify that both files reflect the current state of the project:
+   - **`README.md`** — The **"Development Roadmap"** must be true to code (`[x]` only for fully implemented items) and the **"Technical Specifications"** section must match actual parser behavior.
+   - **`CONTRIBUTING.md`** — The **"Project Architecture Overview"** (file layout, separation rules) must match the actual codebase structure, and the **"Utilizing and Maintaining the Knowledge Base"** section must describe how docs are actually organized and used.
+   - If any change to the architecture, file layout, or doc structure was made during implementation, update the corresponding sections in both files.
 
 ---
 
