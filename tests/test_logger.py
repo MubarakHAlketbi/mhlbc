@@ -17,12 +17,11 @@ def log_dir():
 
 
 def check_tag(content: str, tag: str) -> bool:
-    """Check if a left-aligned tag appears in log content.
+    """Check if a tag appears in log content.
     
-    Tag format is [{tag:<12}] which produces [TAG         ] for short tags.
-    We check for f'[{tag}' which works because the tag starts right after '['.
+    Format is [{ts}] [{tag}] {message}.
     """
-    return f"[{tag}" in content
+    return f"[{tag}]" in content
 
 
 class TestLoggerInit:
@@ -88,14 +87,14 @@ class TestLoggerContent:
         entry_lines = [l for l in lines if check_tag(l, "ENTRY")]
         assert len(entry_lines) == 5
 
-    def test_tag_left_aligned(self, log_dir):
+    def test_tag_no_padding(self, log_dir):
         logger = VerboseLogger(log_dir)
         logger.log("XYZ", "msg")
         logger.close()
         with open(logger.log_path, "r") as f:
             content = f.read()
-        # Tag is left-aligned in 12-char field: [XYZ         ]
-        assert "[XYZ" in content
+        # No padding: [XYZ]
+        assert "[XYZ]" in content
 
     def test_flush_on_log(self, log_dir):
         """Log entries are flushed to disk immediately."""

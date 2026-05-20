@@ -20,7 +20,7 @@ class VerboseLogger:
     def log(self, tag: str, message: str):
         """Write a tagged, timestamped log entry."""
         ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-        self._file.write(f"[{ts}] [{tag:<12}] {message}\n")
+        self._file.write(f"[{ts}] [{tag}] {message}\n")
         self._file.flush()
 
     def close(self):
