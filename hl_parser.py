@@ -47,7 +47,11 @@ class HLParser:
             self._logger.log("VARINT", f"{context}: raw=[{hex_repr}] decoded={value}")
 
     def read_varint(self, stream: BinaryIO, context: str = "") -> int:
-        """Reads a variable-length integer according to HashLink specifications."""
+        """Reads a signed variable-length integer according to HashLink specifications.
+        
+        Verified against hashlink/src/code.c hl_read_index().
+        Bit 5 (0x20) is the sign bit for the 2-byte and 4-byte cases.
+        """
         b1_bytes = stream.read(1)
         if not b1_bytes:
             raise HLParserError("Unexpected EOF while reading VarInt.")
@@ -62,7 +66,9 @@ class HLParser:
                 raise HLParserError("Unexpected EOF reading 2-byte VarInt.")
             b2 = b2_bytes[0]
             raw = b1_bytes + b2_bytes
-            value = ((b1 & 0x3F) << 8) | b2
+            value = ((b1 & 0x1F) << 8) | b2
+            if b1 & 0x20:
+                value = -value
             self._log_varint(context, raw, value)
             return value
         else:
@@ -72,6 +78,8 @@ class HLParser:
             b2, b3, b4 = b_rest
             raw = b1_bytes + b_rest
             value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
+            if b1 & 0x20:
+                value = -value
             self._log_varint(context, raw, value)
             return value
 
@@ -189,10 +197,7 @@ class HLParser:
         # 5. Debug Files List
         if self.has_debug:
             if progress_callback: progress_callback("Loading Debug Info...", 90)
-            raw_ndebug_data = stream.read(4)
-            if len(raw_ndebug_data) < 4:
-                raise HLParserError("Failed to read debug files count.")
-            ndebugfiles = struct.unpack("<i", raw_ndebug_data)[0]
+            ndebugfiles = self.read_varint(stream, context="ndebugfiles")
             self._log("POOL", f"ndebugfiles={ndebugfiles}")
             
             self.debug_files = []
@@ -204,7 +209,11 @@ class HLParser:
         self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes")
         if progress_callback: progress_callback("Header and Pool parsing completed.", 100)
 
-    def execute(self, progress_callback=None):
+    def execute(self, stream=None, progress_callback=None):
+        if stream is not None:
+            self.parse_header(stream)
+            self.parse_pools(stream, progress_callback)
+            return
         with open(self.filepath, "rb") as f:
             self.parse_header(f)
             self.parse_pools(f, progress_callback)

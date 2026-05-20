@@ -56,7 +56,94 @@ The files inside `/docs` serve as the technical specifications for this implemen
 
 ---
 
-## 3. Recommended Directory Expansions
+## 3. Testing Framework
+
+All new code must be accompanied by tests. We use **pytest 9.x** with a test-per-feature approach.
+
+### Test Structure
+
+```
+tests/
+  __init__.py            # Package marker
+  hl_helper.py           # Test helpers: build bytecode programmatically
+  test_varint.py         # VarInt encoding/decoding (1-byte, 2-byte, 4-byte, signed)
+  test_parser.py         # Header + pool parsing, integration tests
+  test_logger.py         # VerboseLogger write/flush/close behavior
+```
+
+### Running Tests
+
+```bash
+# From project root:
+pytest                     # All tests, compact output
+pytest -v                  # Verbose (one test per line)
+pytest tests/              # Explicit path
+pytest -x                  # Stop on first failure
+pytest --tb=long           # Full tracebacks
+pytest -k "varint"         # Filter by keyword
+pytest --coverage          # Coverage report (if pytest-cov installed)
+```
+
+### Writing Tests
+
+1. **Put tests in `tests/`** matching the module name: `hl_parser.py` → `test_parser.py`
+2. **Use the `hl_helper.py` builder** to construct bytecode programmatically:
+   ```python
+   from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
+   
+   bc = build_minimal_bytecode(version=5, ints=[1, 2, 3])
+   p = HLParser("/dev/null")
+   p.execute(stream_from_bytes(bc))
+   ```
+3. **Test both valid and invalid input** (edge cases, truncated data, empty pools)
+4. **Test all version branches** (v3, v4, v5) where version-dependent logic exists
+5. **VarInt tests must cover:**
+   - 1-byte values (0-127)
+   - 2-byte values (128-8191)  
+   - 4-byte values (8192 - 2^29-1)
+   - Signed negative values (bit 5 / 0x20)
+   - Round-trip: encode → decode → original value
+   - Truncated stream errors
+6. **No UI dependencies in parser tests** — never import PyQt in test_parser.py
+
+### Test Fixtures
+
+Use `stream_from_bytes()` to wrap constructed bytecode into a `BytesIO` stream that `HLParser` can read:
+
+```python
+from tests.hl_helper import encode_varint, stream_from_bytes, build_header
+
+data = build_header(version=5, nints=2) + encode_ints_pool([10, 20])
+p = HLParser("/dev/null")
+p.parse_header(stream_from_bytes(data))
+```
+
+### Pre-built Bytecode Builder
+
+The `hl_helper.py` module provides functions to construct HL bytecode from Python primitives without needing the Haxe compiler:
+
+| Function | Purpose |
+|----------|---------|
+| `encode_varint(value)` | Encode signed int → VarInt bytes |
+| `build_header(...)` | Build minimal HL file header |
+| `build_ints_pool(vals)` | Build i32 pool |
+| `build_floats_pool(vals)` | Build f64 pool |
+| `build_strings_pool(strs)` | Build string pool |
+| `build_bytes_pool(data, offsets)` | Build v5+ bytes pool |
+| `build_minimal_bytecode(...)` | Build complete parseable .hl blob |
+| `stream_from_bytes(data)` | Wrap bytes as BytesIO for parsing |
+
+### Test Coverage Requirements
+
+- **Header parsing**: All version variants, all conditions (debug, no debug, empty pools)
+- **VarInt**: All size classes, signed values, round-trip, error handling
+- **Pools**: Each pool type, empty/single/many elements, truncated data
+- **Integration**: Full execute() cycle with progress callback
+- **Logger**: File creation, message writing, flush behavior, edge cases
+
+---
+
+## 4. Recommended Directory Expansions
 
 To ensure reliability, contributors should adopt the following optional directories as the project scales:
 
@@ -65,7 +152,7 @@ To ensure reliability, contributors should adopt the following optional director
 
 ---
 
-## 4. Development Workflow
+## 5. Development Workflow
 
 1. **Verify the Spec:** Check `/docs` to see if the structure or behavior you want to implement is already documented.
 2. **Implement in Backend:** Write the raw parsing/decoding logic in `hl_parser.py`.
@@ -75,7 +162,7 @@ To ensure reliability, contributors should adopt the following optional director
 
 ---
 
-## 5. Mandatory Logging & Investigative Features
+## 6. Mandatory Logging & Investigative Features
 
 Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
 
