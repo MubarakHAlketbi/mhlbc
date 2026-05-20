@@ -152,7 +152,11 @@ To ensure reliability, contributors should adopt the following optional director
 
 ---
 
-## 5. Development Workflow
+## 5. Branch Policy
+
+All development work must be done directly on the **`main`** branch. Feature branches may only be created when explicitly requested by the project owner. This ensures a linear history and avoids merge overhead for a project where all contributors are working on the same codebase.
+
+## 6. Development Workflow
 
 1. **Verify the Spec:** Check `/docs` to see if the structure or behavior you want to implement is already documented.
 2. **Implement in Backend:** Write the raw parsing/decoding logic in `hl_parser.py`.
@@ -162,7 +166,7 @@ To ensure reliability, contributors should adopt the following optional director
 
 ---
 
-## 6. Mandatory Logging & Investigative Features
+## 7. Mandatory Logging & Investigative Features
 
 Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
 
