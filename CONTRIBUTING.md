@@ -167,10 +167,15 @@ All development work must be done directly on the **`main`** branch. Feature bra
    - **`README.md`** — The **"Development Roadmap"** must be true to code (`[x]` only for fully implemented items) and the **"Technical Specifications"** section must match actual parser behavior.
    - **`CONTRIBUTING.md`** — The **"Project Architecture Overview"** (file layout, separation rules) must match the actual codebase structure, and the **"Utilizing and Maintaining the Knowledge Base"** section must describe how docs are actually organized and used.
    - If any change to the architecture, file layout, or doc structure was made during implementation, update the corresponding sections in both files.
+7. **Sharpen AGENTS.md When Possible:** The `AGENTS.md` file encodes concise domain knowledge for AI assistants. Keep it lean:
+   - Only modify it if you discovered something that **enhances the domain knowledge** — a new bytecode layout rule, a threading constraint, a parsing pitfall.
+   - Do **not** mix project documentation into it. Project specs (opcode tables, type schemas, version deltas) belong in `docs/`. `AGENTS.md` is a terse persona brief, not a reference manual.
+   - Prefer fewer words over more. If a single sentence can replace a paragraph, rewrite it.
+   - If the discovery is fully covered in `docs/`, reference the doc file rather than duplicating the content in `AGENTS.md`.
 
 ---
 
-## 7. Mandatory Logging & Investigative Features
+## 8. Mandatory Logging & Investigative Features
 
 Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
 
