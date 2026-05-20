@@ -2,11 +2,19 @@
 
 import struct
 import pytest
-from hl_parser import HLParser, HLParserError
+from hl_parser import HLParser, HLParserError, KIND_NAMES
 from tests.hl_helper import (
     encode_varint, build_header, build_ints_pool, build_floats_pool,
     build_strings_pool, build_bytes_pool, build_minimal_bytecode,
     stream_from_bytes,
+    # Type helpers
+    K_VOID, K_UI8, K_UI16, K_I32, K_I64, K_F32, K_F64, K_BOOL, K_BYTES, K_DYN,
+    K_FUN, K_OBJ, K_ARRAY, K_TYPE, K_REF, K_VIRTUAL, K_DYNOBJ, K_ABSTRACT,
+    K_ENUM, K_NULL, K_METHOD, K_STRUCT, K_PACKED, K_GUID,
+    build_type_primitive, build_type_wrapper, build_type_funlike,
+    build_type_objlike, build_type_virtual, build_type_abstract,
+    build_type_enum, build_type_constructors_pool,
+    build_globals_pool, build_natives_pool,
 )
 
 
@@ -360,8 +368,454 @@ class TestIntegration:
             progress_callback=lambda msg, val: calls.append((msg, val)),
         )
         assert len(calls) >= 4  # at least 4 progress stages
-        # Verify progression
+        # Verify progression — final callback is "Parsing completed." at 100
         messages = [c[0] for c in calls]
         values = [c[1] for c in calls]
-        assert messages[-1] == "Header and Pool parsing completed."
+        assert messages[-1] == "Parsing completed."
         assert values[-1] == 100
+
+
+# =============================================================================
+# Type Parsing Tests
+# =============================================================================
+
+
+@pytest.fixture
+def parser():
+    """Create a parser with no logger, usable for type tests."""
+    return HLParser("/dev/null")
+
+
+class TestPrimitiveTypes:
+    """All primitive kinds (0-9, 12-13, 16, 23): just a kind byte, no payload."""
+
+    @pytest.mark.parametrize("kind,expected_name", [
+        (K_VOID, "void"), (K_UI8, "ui8"), (K_UI16, "ui16"),
+        (K_I32, "i32"), (K_I64, "i64"), (K_F32, "f32"), (K_F64, "f64"),
+        (K_BOOL, "bool"), (K_BYTES, "bytes"), (K_DYN, "dyn"),
+        (K_ARRAY, "array"), (K_TYPE, "type"),
+        (K_DYNOBJ, "dynobj"), (K_GUID, "guid"),
+    ])
+    def test_primitive_kind(self, parser, kind, expected_name):
+        bc = build_type_primitive(kind)
+        data = build_type_constructors_pool([bc])
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(data))
+        assert len(parser.types) == 1
+        assert parser.types[0]["kind"] == kind
+        # Verify only the expected keys are present
+        assert set(parser.types[0].keys()) == {"kind"}
+
+    def test_multiple_primitives(self, parser):
+        kinds = [K_VOID, K_I32, K_BOOL, K_DYN, K_ARRAY]
+        type_blobs = [build_type_primitive(k) for k in kinds]
+        data = build_type_constructors_pool(type_blobs)
+        parser.ntypes = len(kinds)
+        parser.parse_types(stream_from_bytes(data))
+        assert len(parser.types) == 5
+        for i, k in enumerate(kinds):
+            assert parser.types[i]["kind"] == k
+
+    def test_zero_types_does_nothing(self, parser):
+        """ntypes=0 means no types are read."""
+        parser.ntypes = 0
+        parser.parse_types(stream_from_bytes(b""))
+        assert parser.types == []
+
+    def test_truncated_kind_byte_raises(self, parser):
+        parser.ntypes = 1
+        with pytest.raises(HLParserError, match="Unexpected EOF.*kind byte"):
+            parser.parse_types(stream_from_bytes(b""))
+
+
+class TestWrapperTypes:
+    """REF(14), NULL(19), PACKED(22): kind byte + VarInt inner_type_index."""
+
+    @pytest.mark.parametrize("kind", [K_REF, K_NULL, K_PACKED])
+    def test_single_wrapper(self, parser, kind):
+        bc = build_type_wrapper(kind, inner_type_idx=42)
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        assert parser.types[0]["kind"] == kind
+        assert parser.types[0]["inner"] == 42
+
+    def test_wrapped_chain(self, parser):
+        """Null<Ref<I32>> → three wrapper types in sequence."""
+        # type[0] = I32 (primitive)
+        # type[1] = REF(type[0])
+        # type[2] = NULL(type[1])
+        t0 = build_type_primitive(K_I32)
+        t1 = build_type_wrapper(K_REF, 0)
+        t2 = build_type_wrapper(K_NULL, 1)
+        data = build_type_constructors_pool([t0, t1, t2])
+        parser.ntypes = 3
+        parser.parse_types(stream_from_bytes(data))
+        assert parser.types[0]["kind"] == K_I32
+        assert parser.types[1]["kind"] == K_REF
+        assert parser.types[1]["inner"] == 0
+        assert parser.types[2]["kind"] == K_NULL
+        assert parser.types[2]["inner"] == 1
+
+    def test_truncated_after_kind(self, parser):
+        """Wrapper type with kind byte but no inner VarInt."""
+        parser.ntypes = 1
+        with pytest.raises(HLParserError, match="Unexpected EOF"):
+            parser.parse_types(stream_from_bytes(bytes([K_REF])))
+
+
+class TestFunLikeTypes:
+    """FUN(10) and METHOD(20): kind + nargs + arg_type[] + return_type."""
+
+    @pytest.mark.parametrize("kind", [K_FUN, K_METHOD])
+    def test_no_args(self, parser, kind):
+        bc = build_type_funlike(kind, arg_type_indices=[], ret_type_idx=K_VOID)
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        assert parser.types[0]["kind"] == kind
+        assert parser.types[0]["nargs"] == 0
+        assert parser.types[0]["args"] == []
+        assert parser.types[0]["ret"] == K_VOID
+
+    @pytest.mark.parametrize("kind", [K_FUN, K_METHOD])
+    def test_with_args(self, parser, kind):
+        bc = build_type_funlike(kind, arg_type_indices=[3, 7], ret_type_idx=3)
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == kind
+        assert t["nargs"] == 2
+        assert t["args"] == [3, 7]
+        assert t["ret"] == 3
+
+    def test_fun_with_many_args(self, parser):
+        args = list(range(10, 20))
+        bc = build_type_funlike(K_FUN, arg_type_indices=args, ret_type_idx=0)
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["nargs"] == 10
+        assert t["args"] == args
+
+
+class TestObjTypes:
+    """OBJ(11) and STRUCT(21): complex compound with fields, protos, bindings."""
+
+    @pytest.mark.parametrize("kind", [K_OBJ, K_STRUCT])
+    def test_minimal_obj(self, parser, kind):
+        """No fields, no protos, no bindings."""
+        bc = build_type_objlike(
+            kind=kind,
+            name_si=0, super_si=0, global_si=0,
+            fields=[], protos=[], bindings=[],
+        )
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == kind
+        assert t["name"] == 0
+        assert t["super"] == 0
+        assert t["global"] == 0
+        assert t["nfields"] == 0
+        assert t["fields"] == []
+        assert t["protos"] == []
+        assert t["bindings"] == []
+
+    def test_obj_with_fields(self, parser):
+        """OBJ with 2 fields, 1 proto, 1 binding."""
+        bc = build_type_objlike(
+            kind=K_OBJ,
+            name_si=5, super_si=0, global_si=1,
+            fields=[
+                (10, 0x1234, 3),   # name=10, hash=0x1234, type=I32
+                (11, 0x5678, 7),   # name=11, hash=0x5678, type=Bool
+            ],
+            protos=[
+                (20, 0x9999, 0, 0),  # name=20, hash=0x9999, findex=0, pindex=0
+            ],
+            bindings=[
+                (0, 1),  # field=0, findex=1
+            ],
+        )
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_OBJ
+        assert t["name"] == 5
+        assert t["super"] == 0
+        assert t["global"] == 1
+        assert t["nfields"] == 2
+        assert t["fields"][0] == {"name": 10, "hash": 0x1234, "type": 3}
+        assert t["fields"][1] == {"name": 11, "hash": 0x5678, "type": 7}
+        assert t["protos"][0] == {"name": 20, "hash": 0x9999, "findex": 0, "pindex": 0}
+        assert t["bindings"][0] == {"field": 0, "findex": 1}
+
+    def test_struct_same_as_obj(self, parser):
+        """STRUCT has identical serialization to OBJ."""
+        bc = build_type_objlike(
+            kind=K_STRUCT,
+            name_si=3, super_si=0, global_si=2,
+            fields=[(0, 1, 3)],
+            protos=[],
+            bindings=[],
+        )
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_STRUCT
+        assert t["name"] == 3
+
+
+class TestVirtualType:
+    """VIRTUAL(15): kind byte + field_count + fields."""
+
+    def test_no_fields(self, parser):
+        bc = build_type_virtual([])
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_VIRTUAL
+        assert t["nfields"] == 0
+        assert t["fields"] == []
+
+    def test_with_fields(self, parser):
+        bc = build_type_virtual([
+            (0, 0xAAA, K_I32),
+            (1, 0xBBB, K_BOOL),
+        ])
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_VIRTUAL
+        assert t["nfields"] == 2
+        assert t["fields"][0] == {"name": 0, "hash": 0xAAA, "type": K_I32}
+        assert t["fields"][1] == {"name": 1, "hash": 0xBBB, "type": K_BOOL}
+
+
+class TestAbstractType:
+    """ABSTRACT(17): kind byte + VarInt name_string_index."""
+
+    def test_abstract(self, parser):
+        bc = build_type_abstract(name_si=42)
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_ABSTRACT
+        assert t["name"] == 42
+
+
+class TestEnumType:
+    """ENUM(18): kind + name + global + n_constructs + constructors."""
+
+    def test_no_constructors(self, parser):
+        bc = build_type_enum(name_si=5, global_si=1, constructs=[])
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_ENUM
+        assert t["name"] == 5
+        assert t["global"] == 1
+        assert t["nconstructs"] == 0
+        assert t["constructs"] == []
+
+    def test_with_constructors(self, parser):
+        bc = build_type_enum(
+            name_si=10, global_si=2,
+            constructs=[
+                (0, [K_I32, K_BOOL]),  # Cons0(i32, bool)
+                (1, [K_F64]),           # Cons1(float64)
+                (2, []),                # Cons2 (no params)
+            ],
+        )
+        parser.ntypes = 1
+        parser.parse_types(stream_from_bytes(bc))
+        t = parser.types[0]
+        assert t["kind"] == K_ENUM
+        assert t["nconstructs"] == 3
+        assert t["constructs"][0] == {"name": 0, "nparams": 2, "params": [K_I32, K_BOOL]}
+        assert t["constructs"][1] == {"name": 1, "nparams": 1, "params": [K_F64]}
+        assert t["constructs"][2] == {"name": 2, "nparams": 0, "params": []}
+
+
+class TestUnknownTypeKind:
+    """Unknown type kinds should raise an error."""
+
+    def test_unknown_kind(self, parser):
+        parser.ntypes = 1
+        with pytest.raises(HLParserError, match="Unknown type kind"):
+            parser.parse_types(stream_from_bytes(bytes([255])))
+
+    def test_sentinel_last(self, parser):
+        """K_LAST(24) sentinel should not be encountered in practice."""
+        parser.ntypes = 1
+        with pytest.raises(HLParserError, match="Unknown type kind"):
+            parser.parse_types(stream_from_bytes(bytes([24])))
+
+
+# =============================================================================
+# Global Parsing Tests
+# =============================================================================
+
+
+class TestGlobalsParsing:
+    """Globals: nglobals × VarInt type_index."""
+
+    def test_no_globals(self, parser):
+        parser.nglobals = 0
+        parser.parse_globals(stream_from_bytes(b""))
+        assert parser.globals == []
+
+    def test_some_globals(self, parser):
+        data = build_globals_pool([K_I32, K_BOOL, K_F64, K_OBJ])
+        parser.nglobals = 4
+        parser.parse_globals(stream_from_bytes(data))
+        assert parser.globals == [K_I32, K_BOOL, K_F64, K_OBJ]
+
+    def test_truncated_stream(self, parser):
+        parser.nglobals = 2
+        with pytest.raises(HLParserError):
+            parser.parse_globals(stream_from_bytes(bytes([0x80])))
+
+
+# =============================================================================
+# Native Parsing Tests
+# =============================================================================
+
+
+class TestNativesParsing:
+    """Natives: each = lib_si + name_si + type_idx + findex."""
+
+    def test_no_natives(self, parser):
+        parser.nnatives = 0
+        parser.parse_natives(stream_from_bytes(b""))
+        assert parser.natives == []
+
+    def test_some_natives(self, parser):
+        natives = [
+            (0, 1, K_FUN, 0),    # lib=0, name=1, type=fun, findex=0
+            (0, 2, K_FUN, 1),    # lib=0, name=2, type=fun, findex=1
+            (1, 3, K_FUN, 2),    # lib=1, name=3, type=fun, findex=2
+        ]
+        data = build_natives_pool(natives)
+        parser.nnatives = len(natives)
+        parser.parse_natives(stream_from_bytes(data))
+        assert len(parser.natives) == 3
+        assert parser.natives[0] == {"lib": 0, "name": 1, "type": K_FUN, "findex": 0}
+        assert parser.natives[1] == {"lib": 0, "name": 2, "type": K_FUN, "findex": 1}
+        assert parser.natives[2] == {"lib": 1, "name": 3, "type": K_FUN, "findex": 2}
+
+    def test_truncated_stream(self, parser):
+        """Partial native entry (only lib, truncated before name)."""
+        parser.nnatives = 1
+        with pytest.raises(HLParserError):
+            parser.parse_natives(stream_from_bytes(bytes([0x01])))
+
+
+# =============================================================================
+# Integration: Types + Globals + Natives in Full Bytecode
+# =============================================================================
+
+
+class TestFullIntegration:
+    """End-to-end parsing with types, globals, and natives."""
+
+    def test_all_sections_empty(self):
+        """Everything zero: no types, no globals, no natives."""
+        bc = build_minimal_bytecode(version=5)
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert p.types == []
+        assert p.globals == []
+        assert p.natives == []
+
+    def test_with_types_and_globals_and_natives_v5(self):
+        """Parse a bytecode with all three sections populated."""
+        types_data = [
+            build_type_primitive(K_I32),        # type[0]
+            build_type_primitive(K_BOOL),       # type[1]
+            build_type_objlike(                 # type[2]: a simple Obj
+                kind=K_OBJ, name_si=0, super_si=0, global_si=0,
+                fields=[(1, 0xABC, K_I32)],
+                protos=[], bindings=[],
+            ),
+            build_type_wrapper(K_REF, 2),       # type[3]: Ref<Obj>
+        ]
+        globals_data = [K_I32, K_BOOL, 2]  # 3 globals
+        natives_data = [(0, 0, K_FUN, 0), (0, 1, K_FUN, 1)]
+
+        bc = build_minimal_bytecode(
+            version=5,
+            ints=[42, 99],
+            strings=["hello"],
+            types=types_data,
+            globals_=globals_data,
+            natives=natives_data,
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+
+        # Verify types
+        assert len(p.types) == 4
+        assert p.types[0]["kind"] == K_I32
+        assert p.types[1]["kind"] == K_BOOL
+        assert p.types[2]["kind"] == K_OBJ
+        assert p.types[2]["fields"][0]["name"] == 1
+        assert p.types[3]["kind"] == K_REF
+        assert p.types[3]["inner"] == 2
+
+        # Verify globals
+        assert p.globals == [K_I32, K_BOOL, 2]
+
+        # Verify natives
+        assert len(p.natives) == 2
+        assert p.natives[0] == {"lib": 0, "name": 0, "type": K_FUN, "findex": 0}
+        assert p.natives[1] == {"lib": 0, "name": 1, "type": K_FUN, "findex": 1}
+
+        # Verify previous sections still correct
+        assert p.version == 5
+        assert p.ints == [42, 99]
+        assert p.strings == ["hello"]
+
+    def test_all_versions_with_types(self):
+        """Types parsing works on v3, v4, v5."""
+        types_data = [build_type_primitive(K_F64)]
+        for ver in [3, 4, 5]:
+            bc = build_minimal_bytecode(
+                version=ver,
+                types=types_data,
+                globals_=[0],
+                natives=[(0, 0, K_FUN, 0)],
+            )
+            p = HLParser("/dev/null")
+            p.execute(stream_from_bytes(bc))
+            assert p.version == ver
+            assert p.types[0]["kind"] == K_F64
+            assert p.globals == [0]
+            assert p.natives[0]["findex"] == 0
+
+    def test_type_stream_position_correct(self):
+        """Verify no bytes lost/skipped between pools and types."""
+        # Build with ints(1) + strings(1) + 1 type
+        types_data = [build_type_primitive(K_I32)]
+        bc = build_minimal_bytecode(
+            version=5,
+            ints=[77],
+            strings=["marker"],
+            types=types_data,
+        )
+        p = HLParser("/dev/null")
+
+        # Parse with a stream, check tell() positions
+        stream = stream_from_bytes(bc)
+        p.parse_header(stream)
+        # After header, tell should be consistent
+        header_end = stream.tell()
+        p.parse_pools(stream)
+        pool_end = stream.tell()
+        p.parse_types(stream)
+        type_end = stream.tell()
+
+        # No bytes should have been lost
+        assert len(bc) == type_end  # consumed exactly to end
+        assert p.ints == [77]
+        assert p.strings == ["marker"]
+        assert p.types[0]["kind"] == K_I32

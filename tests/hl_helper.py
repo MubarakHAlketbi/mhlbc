@@ -111,10 +111,19 @@ def build_minimal_bytecode(
     strings: Optional[list[str]] = None,
     bytes_data: Optional[tuple[bytes, list[int]]] = None,
     has_debug: bool = False,
+    types: Optional[list[bytes]] = None,
+    globals_: Optional[list[int]] = None,
+    natives: Optional[list[tuple[int, int, int, int]]] = None,
 ) -> bytes:
     """Build a complete minimal .hl bytecode blob for testing.
     
     Result is parsed the same way real .hl files are read by HLParser.
+    
+    Args:
+        version: HL bytecode version (3, 4, 5)
+        types: List of serialized type definitions (each is bytes from build_type_*)
+        globals_: List of global type indices
+        natives: List of (lib_si, name_si, type_idx, findex) tuples
     """
     ints = ints or []
     floats = floats or []
@@ -125,6 +134,9 @@ def build_minimal_bytecode(
     nbytes = None
     if version >= 5:
         nbytes = len(bytes_data[1]) if bytes_data else 0
+    ntypes = len(types) if types else 0
+    nglobals = len(globals_) if globals_ else 0
+    nnatives = len(natives) if natives else 0
     
     header = build_header(
         version=version,
@@ -133,7 +145,10 @@ def build_minimal_bytecode(
         nfloats=len(floats),
         nstrings=len(strings),
         nbytes=nbytes,
-        ntypes=0, nglobals=0, nnatives=0, nfunctions=0,
+        ntypes=ntypes,
+        nglobals=nglobals,
+        nnatives=nnatives,
+        nfunctions=0,
         entrypoint=0,
     )
     
@@ -148,7 +163,166 @@ def build_minimal_bytecode(
     if has_debug:
         pools += encode_varint(0)  # ndebugfiles = 0
     
+    # Types section
+    if types:
+        pools += build_type_constructors_pool(types)
+    
+    # Globals section
+    if globals_:
+        pools += build_globals_pool(globals_)
+    
+    # Natives section
+    if natives:
+        pools += build_natives_pool(natives)
+    
     return header + pools
+
+
+# === Type Kind Constants (mirrors hl_parser) ===
+K_VOID     = 0
+K_UI8      = 1
+K_UI16     = 2
+K_I32      = 3
+K_I64      = 4
+K_F32      = 5
+K_F64      = 6
+K_BOOL     = 7
+K_BYTES    = 8
+K_DYN      = 9
+K_FUN      = 10
+K_OBJ      = 11
+K_ARRAY    = 12
+K_TYPE     = 13
+K_REF      = 14
+K_VIRTUAL  = 15
+K_DYNOBJ   = 16
+K_ABSTRACT = 17
+K_ENUM     = 18
+K_NULL     = 19
+K_METHOD   = 20
+K_STRUCT   = 21
+K_PACKED   = 22
+K_GUID     = 23
+
+
+# === Type Building ===
+
+def build_type_primitive(kind: int) -> bytes:
+    """Build a primitive type: just the kind byte (0 payload bytes)."""
+    return bytes([kind])
+
+
+def build_type_wrapper(kind: int, inner_type_idx: int) -> bytes:
+    """Build a wrapper type (REF, NULL, PACKED): kind byte + VarInt inner."""
+    return bytes([kind]) + encode_varint(inner_type_idx)
+
+
+def build_type_funlike(kind: int, arg_type_indices: list[int], ret_type_idx: int) -> bytes:
+    """Build a function-like type (FUN, METHOD): kind + arg_count + args + ret."""
+    data = bytes([kind])
+    data += encode_varint(len(arg_type_indices))
+    for a in arg_type_indices:
+        data += encode_varint(a)
+    data += encode_varint(ret_type_idx)
+    return data
+
+
+def build_type_field(name_si: int, name_hash: int, type_idx: int) -> bytes:
+    """Build a single object/struct field: name_si + hash + type_idx."""
+    return encode_varint(name_si) + encode_varint(name_hash) + encode_varint(type_idx)
+
+
+def build_type_proto(name_si: int, name_hash: int, findex: int, pindex: int) -> bytes:
+    """Build a single proto (method): name_si + hash + findex + pindex."""
+    return encode_varint(name_si) + encode_varint(name_hash) + encode_varint(findex) + encode_varint(pindex)
+
+
+def build_type_binding(field_idx: int, findex: int) -> bytes:
+    """Build a single binding: field_idx + findex."""
+    return encode_varint(field_idx) + encode_varint(findex)
+
+
+def build_type_objlike(
+    kind: int,
+    name_si: int,
+    super_si: int,
+    global_si: int,
+    fields: list[tuple[int, int, int]],
+    protos: list[tuple[int, int, int, int]],
+    bindings: list[tuple[int, int]],
+) -> bytes:
+    """Build an OBJ or STRUCT type: kind + name + super + global + counts + arrays."""
+    data = bytes([kind])
+    data += encode_varint(name_si)
+    data += encode_varint(super_si)
+    data += encode_varint(global_si)
+    data += encode_varint(len(fields))
+    data += encode_varint(len(protos))
+    data += encode_varint(len(bindings))
+    for f in fields:
+        data += build_type_field(*f)
+    for p in protos:
+        data += build_type_proto(*p)
+    for b in bindings:
+        data += build_type_binding(*b)
+    return data
+
+
+def build_type_virtual(fields: list[tuple[int, int, int]]) -> bytes:
+    """Build a VIRTUAL type: kind byte + field_count + fields."""
+    data = bytes([K_VIRTUAL])
+    data += encode_varint(len(fields))
+    for f in fields:
+        data += build_type_field(*f)
+    return data
+
+
+def build_type_abstract(name_si: int) -> bytes:
+    """Build an ABSTRACT type: kind byte + name_si."""
+    return bytes([K_ABSTRACT]) + encode_varint(name_si)
+
+
+def build_type_enum(
+    name_si: int,
+    global_si: int,
+    constructs: list[tuple[int, list[int]]],
+) -> bytes:
+    """Build an ENUM type: kind byte + name + global + nconstructs + constructors."""
+    data = bytes([K_ENUM])
+    data += encode_varint(name_si)
+    data += encode_varint(global_si)
+    data += encode_varint(len(constructs))
+    for c_name, c_params in constructs:
+        data += encode_varint(c_name)
+        data += encode_varint(len(c_params))
+        for p in c_params:
+            data += encode_varint(p)
+    return data
+
+
+def build_type_constructors_pool(types: list[bytes]) -> bytes:
+    """Build a types pool by concatenating type definitions.
+    
+    This is the raw payload that follows the debug files section.
+    The header's ntypes must match len(types).
+    """
+    return b"".join(types)
+
+
+def build_globals_pool(globals: list[int]) -> bytes:
+    """Build a globals pool: nglobals × VarInt type_index."""
+    return b"".join(encode_varint(g) for g in globals)
+
+
+def build_natives_pool(natives: list[tuple[int, int, int, int]]) -> bytes:
+    """Build a natives pool: each native = lib_si + name_si + type_idx + findex."""
+    data = b""
+    for lib, name, type_idx, findex in natives:
+        data += encode_varint(lib)
+        data += encode_varint(name)
+        data += encode_varint(type_idx)
+        data += encode_varint(findex)
+    return data
 
 
 def stream_from_bytes(data: bytes) -> io.BytesIO:

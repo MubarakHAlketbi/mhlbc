@@ -5,8 +5,61 @@ from typing import BinaryIO, Dict, Any, List, Optional, Callable
 
 from hl_logger import VerboseLogger
 
+# === HashLink Type Kind Constants ===
+# From hashlink/src/hl.h hl_type_kind enum
+K_VOID     = 0
+K_UI8      = 1
+K_UI16     = 2
+K_I32      = 3
+K_I64      = 4
+K_F32      = 5
+K_F64      = 6
+K_BOOL     = 7
+K_BYTES    = 8
+K_DYN      = 9
+K_FUN      = 10
+K_OBJ      = 11
+K_ARRAY    = 12
+K_TYPE     = 13
+K_REF      = 14
+K_VIRTUAL  = 15
+K_DYNOBJ   = 16
+K_ABSTRACT = 17
+K_ENUM     = 18
+K_NULL     = 19
+K_METHOD   = 20
+K_STRUCT   = 21
+K_PACKED   = 22
+K_GUID     = 23
+
+# Primitives that have no serialized data beyond the kind byte
+PRIMITIVE_KINDS = frozenset({
+    K_VOID, K_UI8, K_UI16, K_I32, K_I64, K_F32, K_F64,
+    K_BOOL, K_BYTES, K_DYN, K_ARRAY, K_TYPE, K_DYNOBJ, K_GUID,
+})
+
+# Kinds that serialize as: kind byte + VarInt inner_type_index
+WRAPPER_KINDS = frozenset({K_REF, K_NULL, K_PACKED})
+
+# Kinds that serialize as: kind byte + args + return_type (function-like)
+FUN_LIKE_KINDS = frozenset({K_FUN, K_METHOD})
+
+# Human-readable names for kind numbers
+KIND_NAMES = {
+    K_VOID: "void", K_UI8: "ui8", K_UI16: "ui16",
+    K_I32: "i32", K_I64: "i64", K_F32: "f32", K_F64: "f64",
+    K_BOOL: "bool", K_BYTES: "bytes", K_DYN: "dyn",
+    K_FUN: "fun", K_OBJ: "obj", K_ARRAY: "array", K_TYPE: "type",
+    K_REF: "ref", K_VIRTUAL: "virtual", K_DYNOBJ: "dynobj",
+    K_ABSTRACT: "abstract", K_ENUM: "enum", K_NULL: "null",
+    K_METHOD: "method", K_STRUCT: "struct", K_PACKED: "packed",
+    K_GUID: "guid",
+}
+
+
 class HLParserError(Exception):
     pass
+
 
 class HLParser:
     def __init__(self, filepath: str, logger: Optional[VerboseLogger] = None):
@@ -36,6 +89,11 @@ class HLParser:
         self.nfunctions = 0
         self.nconstants = 0
         self.entrypoint = 0
+
+        # Parsed structures (populated after header+pools)
+        self.types: List[dict] = []
+        self.globals: List[int] = []
+        self.natives: List[dict] = []
 
     def _log(self, tag: str, message: str):
         if self._logger:
@@ -207,13 +265,209 @@ class HLParser:
         
         offset_after = stream.tell()
         self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes")
-        if progress_callback: progress_callback("Header and Pool parsing completed.", 100)
+
+    # === Type Parsing ===
+
+    def parse_types(self, stream: BinaryIO, progress_callback=None):
+        """Parse ntypes type definitions from the stream.
+        
+        Each type begins with a 1-byte kind identifier, followed by
+        kind-specific serialized data. See docs/type_system.md.
+        """
+        if progress_callback:
+            progress_callback("Parsing Types...", 50)
+
+        offset_before = stream.tell()
+        self._log("TYPE", f"Starting type read at byte offset {offset_before}, ntypes={self.ntypes}")
+
+        self.types = []
+        for i in range(self.ntypes):
+            t = self._read_one_type(stream, i)
+            self.types.append(t)
+
+        offset_after = stream.tell()
+        self._log("TYPE", f"Read {len(self.types)} types, consumed {offset_after - offset_before} bytes")
+        if progress_callback:
+            progress_callback("Types parsed.", 100)
+
+    def _read_one_type(self, stream: BinaryIO, index: int) -> dict:
+        """Read and return a single type definition."""
+        kind_byte = stream.read(1)
+        if not kind_byte:
+            raise HLParserError(
+                f"Unexpected EOF reading kind byte for type index {index}"
+            )
+        kind = kind_byte[0]
+
+        t = {"kind": kind}
+        self._log("TYPE", f"  type[{index}]: kind={kind} ({KIND_NAMES.get(kind, 'UNKNOWN')})")
+
+        if kind in PRIMITIVE_KINDS:
+            # No additional data beyond the kind byte
+            pass
+
+        elif kind in WRAPPER_KINDS:
+            # kind byte + VarInt inner_type_index
+            inner = self.read_varint(stream, context=f"type[{index}].inner")
+            t["inner"] = inner
+
+        elif kind in FUN_LIKE_KINDS:
+            # kind byte + arg_count + arg_types + return_type
+            nargs = self.read_varint(stream, context=f"type[{index}].nargs")
+            args = []
+            for j in range(nargs):
+                a = self.read_varint(stream, context=f"type[{index}].arg[{j}]")
+                args.append(a)
+            ret = self.read_varint(stream, context=f"type[{index}].ret")
+            t["nargs"] = nargs
+            t["args"] = args
+            t["ret"] = ret
+
+        elif kind == K_OBJ or kind == K_STRUCT:
+            name = self.read_varint(stream, context=f"type[{index}].name")
+            super_idx = self.read_varint(stream, context=f"type[{index}].super")
+            global_idx = self.read_varint(stream, context=f"type[{index}].global")
+            nfields = self.read_varint(stream, context=f"type[{index}].nfields")
+            nprotos = self.read_varint(stream, context=f"type[{index}].nprotos")
+            nbindings = self.read_varint(stream, context=f"type[{index}].nbindings")
+
+            t["name"] = name
+            t["super"] = super_idx
+            t["global"] = global_idx
+            t["nfields"] = nfields
+            t["nprotos"] = nprotos
+            t["nbindings"] = nbindings
+
+            # Fields
+            fields = []
+            for j in range(nfields):
+                f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
+                f_hash = self.read_varint(stream, context=f"type[{index}].field[{j}].hash")
+                f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
+                fields.append({"name": f_name, "hash": f_hash, "type": f_type})
+            t["fields"] = fields
+
+            # Protos (methods)
+            protos = []
+            for j in range(nprotos):
+                p_name = self.read_varint(stream, context=f"type[{index}].proto[{j}].name")
+                p_hash = self.read_varint(stream, context=f"type[{index}].proto[{j}].hash")
+                p_findex = self.read_varint(stream, context=f"type[{index}].proto[{j}].findex")
+                p_pindex = self.read_varint(stream, context=f"type[{index}].proto[{j}].pindex")
+                protos.append({"name": p_name, "hash": p_hash, "findex": p_findex, "pindex": p_pindex})
+            t["protos"] = protos
+
+            # Bindings (static method fields)
+            bindings = []
+            for j in range(nbindings):
+                b_field = self.read_varint(stream, context=f"type[{index}].binding[{j}].field")
+                b_findex = self.read_varint(stream, context=f"type[{index}].binding[{j}].findex")
+                bindings.append({"field": b_field, "findex": b_findex})
+            t["bindings"] = bindings
+
+        elif kind == K_VIRTUAL:
+            nfields = self.read_varint(stream, context=f"type[{index}].nfields")
+            t["nfields"] = nfields
+            fields = []
+            for j in range(nfields):
+                f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
+                f_hash = self.read_varint(stream, context=f"type[{index}].field[{j}].hash")
+                f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
+                fields.append({"name": f_name, "hash": f_hash, "type": f_type})
+            t["fields"] = fields
+
+        elif kind == K_ABSTRACT:
+            name = self.read_varint(stream, context=f"type[{index}].name")
+            t["name"] = name
+
+        elif kind == K_ENUM:
+            name = self.read_varint(stream, context=f"type[{index}].name")
+            global_idx = self.read_varint(stream, context=f"type[{index}].global")
+            nconstructs = self.read_varint(stream, context=f"type[{index}].nconstructs")
+            t["name"] = name
+            t["global"] = global_idx
+            t["nconstructs"] = nconstructs
+            constructs = []
+            for j in range(nconstructs):
+                c_name = self.read_varint(stream, context=f"type[{index}].construct[{j}].name")
+                c_nparams = self.read_varint(stream, context=f"type[{index}].construct[{j}].nparams")
+                params = []
+                for k in range(c_nparams):
+                    p = self.read_varint(stream, context=f"type[{index}].construct[{j}].param[{k}]")
+                    params.append(p)
+                constructs.append({"name": c_name, "nparams": c_nparams, "params": params})
+            t["constructs"] = constructs
+
+        else:
+            raise HLParserError(
+                f"Unknown type kind {kind} at type index {index} (offset {stream.tell() - 1})"
+            )
+
+        return t
+
+    # === Global & Native Parsing ===
+
+    def parse_globals(self, stream: BinaryIO, progress_callback=None):
+        """Parse nglobals global variable type references."""
+        if progress_callback:
+            progress_callback("Parsing Globals...", 55)
+
+        offset_before = stream.tell()
+        self._log("GLOBAL", f"Starting globals read at byte offset {offset_before}, nglobals={self.nglobals}")
+
+        self.globals = []
+        for i in range(self.nglobals):
+            t = self.read_varint(stream, context=f"global[{i}].type")
+            self.globals.append(t)
+
+        offset_after = stream.tell()
+        self._log("GLOBAL", f"Read {len(self.globals)} globals, consumed {offset_after - offset_before} bytes")
+        if progress_callback:
+            progress_callback("Globals parsed.", 60)
+
+    def parse_natives(self, stream: BinaryIO, progress_callback=None):
+        """Parse nnatives native function bindings."""
+        if progress_callback:
+            progress_callback("Parsing Natives...", 65)
+
+        offset_before = stream.tell()
+        self._log("NATIVE", f"Starting natives read at byte offset {offset_before}, nnatives={self.nnatives}")
+
+        self.natives = []
+        for i in range(self.nnatives):
+            lib = self.read_varint(stream, context=f"native[{i}].lib")
+            name = self.read_varint(stream, context=f"native[{i}].name")
+            type_idx = self.read_varint(stream, context=f"native[{i}].type")
+            findex = self.read_varint(stream, context=f"native[{i}].findex")
+            self.natives.append({
+                "lib": lib,
+                "name": name,
+                "type": type_idx,
+                "findex": findex,
+            })
+
+        offset_after = stream.tell()
+        self._log("NATIVE", f"Read {len(self.natives)} natives, consumed {offset_after - offset_before} bytes")
+        if progress_callback:
+            progress_callback("Natives parsed.", 70)
+
+    # === Main Entry Point ===
 
     def execute(self, stream=None, progress_callback=None):
         if stream is not None:
             self.parse_header(stream)
             self.parse_pools(stream, progress_callback)
+            self.parse_types(stream, progress_callback)
+            self.parse_globals(stream, progress_callback)
+            self.parse_natives(stream, progress_callback)
+            if progress_callback:
+                progress_callback("Parsing completed.", 100)
             return
         with open(self.filepath, "rb") as f:
             self.parse_header(f)
             self.parse_pools(f, progress_callback)
+            self.parse_types(f, progress_callback)
+            self.parse_globals(f, progress_callback)
+            self.parse_natives(f, progress_callback)
+            if progress_callback:
+                progress_callback("Parsing completed.", 100)
