@@ -143,7 +143,49 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 
 ---
 
-## 4. Recommended Directory Expansions
+## 4. Workspace Game Targets (`workspace/`)
+
+The `workspace/` directory at the project root holds compiled HashLink game binaries used as real-world test targets.
+
+```
+workspace/
+  Farever/              # Game name
+    hlboot.dat          # Compiled HashLink bytecode (~13 MB)
+  .../
+    hlboot.dat
+```
+
+Each subdirectory is a named game (e.g. `Farever`) containing its `hlboot.dat` file.
+
+### Purpose
+
+- **Benchmarking** — Measure parsing speed, memory usage, and UI responsiveness against large (10+ MB) commercial-scale bytecode.
+- **Regression detection** — A full parse → inspect → decompile pipeline that must complete without errors across all targets.
+- **Edge case discovery** — Real compiler output exposes patterns that hand-crafted test fixtures miss (string encoding variants, unusual type chains, opcode argument layouts).
+
+### Goal
+
+All targets in `workspace/` must be fully parseable, inspectable, and decompilable. A target counts as fully handled when:
+
+1. **Header + pools** parse without errors
+2. **Types, globals, natives, functions** are fully deserialized with correct field counts
+3. **All opcodes** decode to valid instruction objects
+4. **Function names** resolve correctly (via class protos and bindings)
+5. **Control flow graph** reconstructs basic blocks with correct edges
+6. **AST decompilation** produces valid Haxe-like output
+
+Regressions are defined as any target that parsed successfully before a change failing after it.
+
+### Adding a New Target
+
+1. Create `workspace/<game_name>/`
+2. Place the compiled `hlboot.dat` inside
+3. Verify the project can parse it end-to-end
+4. Commit the target (ensure it's not a commercial game without license — prefer free/open-source Haxe games)
+
+---
+
+## 5. Recommended Directory Expansions
 
 To ensure reliability, contributors should adopt the following optional directories as the project scales:
 
@@ -152,11 +194,11 @@ To ensure reliability, contributors should adopt the following optional director
 
 ---
 
-## 5. Branch Policy
+## 6. Branch Policy
 
 All development work must be done directly on the **`main`** branch. Feature branches may only be created when explicitly requested by the project owner. This ensures a linear history and avoids merge overhead for a project where all contributors are working on the same codebase.
 
-## 6. Development Workflow
+## 7. Development Workflow
 
 1. **Verify the Spec:** Check `/docs` to see if the structure or behavior you want to implement is already documented.
 2. **Implement in Backend:** Write the raw parsing/decoding logic in `hl_parser.py`.
@@ -175,7 +217,7 @@ All development work must be done directly on the **`main`** branch. Feature bra
 
 ---
 
-## 8. Mandatory Logging & Investigative Features
+## 9. Mandatory Logging & Investigative Features
 
 Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
 
