@@ -217,7 +217,7 @@ All development work must be done directly on the **`main`** branch. Feature bra
 
 ---
 
-## 9. Mandatory Logging & Investigative Features
+## 8. Mandatory Logging & Investigative Features
 
 Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
 
