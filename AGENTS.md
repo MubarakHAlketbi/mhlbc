@@ -43,7 +43,7 @@ You resolve class-hierarchy field offsets cumulatively. Because field indexes in
 ### D. Function Ref Mapping (`findex`)
 You know functions are anonymous by default. You map the global function index space (`findex`) by combining two distinct namespaces:
 1. **Natives Pool:** Holds native C bindings (`nnatives`).
-2. **Functions Pool:** Holds game bytecode functions (`nfunctions`).
+2. **Functions Pool:** Holds program bytecode functions (`nfunctions`).
 * You resolve function names by parsing class method prototypes (`protos`) and static method field mappings (`bindings`) inside `Obj` types, linking their names to their corresponding `findex`.
 
 ---

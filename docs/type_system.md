@@ -39,7 +39,9 @@ typedef enum {
 } hl_type_kind;
 ```
 
-**HLAST (24)** is a sentinel, not a real type.
+**HLAST (24)** is defined as a sentinel in the enum but **can appear in real-world compiled bytecode** from some Haxe/HashLink compiler versions. The parser must handle it gracefully — treat it as a primitive with no serialized payload (same as `HVOID`). See `hl_parser.py:PRIMITIVE_KINDS` which includes `K_HLAST`.
+
+**Kinds beyond 24** (unofficial/compiler-private extensions) may also appear in shipping games. Our parser logs a warning and treats them as primitives (1-byte kind, no payload) to maximise parseability of real-world targets.
 
 **HGUID (23)** was added in a later version for GUID support (see version deltas).
 

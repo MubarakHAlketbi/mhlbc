@@ -1,13 +1,13 @@
 # Modern HashLink Bytecode Decompiler (GUI)
 
-This project is a lightweight, responsive desktop tool designed to parse, inspect, and decompile HashLink bytecode files (`.hl` or `hlboot.dat`). It serves as an alternative to the original `hlbc` tool suite, addressing design limitations such as UI freezes on large games and strict version pinning.
+This project is a lightweight, responsive desktop tool designed to parse, inspect, and decompile HashLink bytecode files (`.hl` or `hlboot.dat`). It serves as an alternative to the original `hlbc` tool suite, addressing design limitations such as UI freezes on large binaries and strict version pinning.
 
 ---
 
 ## The Core Problem & Our Solutions
 
-The original `hlbc-gui` implemented design patterns that struggled with commercial-scale games:
-* **UI Deadlocks:** Loading large games with 150,000+ items directly into the UI main thread caused immediate locking. This project resolves this by offloading the parsing sequence to a background thread (`QThread`) and utilizing Model-View virtualization (`QAbstractListModel`) to render data on-demand.
+The original `hlbc-gui` implemented design patterns that struggled with commercial-scale binaries:
+* **UI Deadlocks:** Loading large bytecode files with 150,000+ items directly into the UI main thread caused immediate locking. This project resolves this by offloading the parsing sequence to a background thread (`QThread`) and utilizing Model-View virtualization (`QAbstractListModel`) to render data on-demand.
 * **Version Locking:** Hardcoded structure schemas in older tools caused crashes when reading HashLink v5 bytecode. This parser dynamically handles the structural variations between HashLink v3, v4, and v5+.
 * **Complexity Overhead:** Rather than utilizing complex native build setups, this project uses Python 3 and PyQt6 to maintain portability, low dependencies, and quick execution.
 

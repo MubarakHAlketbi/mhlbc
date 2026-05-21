@@ -227,14 +227,16 @@ def build_type_funlike(kind: int, arg_type_indices: list[int], ret_type_idx: int
     return data
 
 
-def build_type_field(name_si: int, name_hash: int, type_idx: int) -> bytes:
-    """Build a single object/struct field: name_si + hash + type_idx."""
-    return encode_varint(name_si) + encode_varint(name_hash) + encode_varint(type_idx)
+def build_type_field(name_si: int, type_idx: int) -> bytes:
+    """Build a single object/struct field: name_si + type_idx.
+    NOTE: field_name_hash is computed by hl_hash_gen at runtime, NOT stored."""
+    return encode_varint(name_si) + encode_varint(type_idx)
 
 
-def build_type_proto(name_si: int, name_hash: int, findex: int, pindex: int) -> bytes:
-    """Build a single proto (method): name_si + hash + findex + pindex."""
-    return encode_varint(name_si) + encode_varint(name_hash) + encode_varint(findex) + encode_varint(pindex)
+def build_type_proto(name_si: int, findex: int, pindex: int) -> bytes:
+    """Build a single proto (method): name_si + findex + pindex.
+    NOTE: proto_name_hash is computed by hl_hash_gen at runtime, NOT stored."""
+    return encode_varint(name_si) + encode_varint(findex) + encode_varint(pindex)
 
 
 def build_type_binding(field_idx: int, findex: int) -> bytes:
@@ -247,8 +249,8 @@ def build_type_objlike(
     name_si: int,
     super_si: int,
     global_si: int,
-    fields: list[tuple[int, int, int]],
-    protos: list[tuple[int, int, int, int]],
+    fields: list[tuple[int, int]],
+    protos: list[tuple[int, int, int]],
     bindings: list[tuple[int, int]],
 ) -> bytes:
     """Build an OBJ or STRUCT type: kind + name + super + global + counts + arrays."""
@@ -268,7 +270,7 @@ def build_type_objlike(
     return data
 
 
-def build_type_virtual(fields: list[tuple[int, int, int]]) -> bytes:
+def build_type_virtual(fields: list[tuple[int, int]]) -> bytes:
     """Build a VIRTUAL type: kind byte + field_count + fields."""
     data = bytes([K_VIRTUAL])
     data += encode_varint(len(fields))

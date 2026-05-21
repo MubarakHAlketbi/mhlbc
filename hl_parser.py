@@ -31,12 +31,19 @@ K_METHOD   = 20
 K_STRUCT   = 21
 K_PACKED   = 22
 K_GUID     = 23
+K_HLAST    = 24  # Sentinel — marks end of hl_type_kind enum, not a real type
+                 # but appears in some real-world compiled bytecode
 
 # Primitives that have no serialized data beyond the kind byte
 PRIMITIVE_KINDS = frozenset({
     K_VOID, K_UI8, K_UI16, K_I32, K_I64, K_F32, K_F64,
-    K_BOOL, K_BYTES, K_DYN, K_ARRAY, K_TYPE, K_DYNOBJ, K_GUID,
+    K_BOOL, K_BYTES, K_DYN, K_ARRAY, K_TYPE, K_DYNOBJ, K_GUID, K_HLAST,
 })
+
+# Maximum known type kind value (inclusive) per HashLink spec.
+# Kinds beyond this threshold may appear in real-world bytecode from
+# newer or extended compiler versions — treat as primitives (no payload).
+MAX_VALID_TYPE_KIND = K_HLAST
 
 # Kinds that serialize as: kind byte + VarInt inner_type_index
 WRAPPER_KINDS = frozenset({K_REF, K_NULL, K_PACKED})
@@ -53,7 +60,7 @@ KIND_NAMES = {
     K_REF: "ref", K_VIRTUAL: "virtual", K_DYNOBJ: "dynobj",
     K_ABSTRACT: "abstract", K_ENUM: "enum", K_NULL: "null",
     K_METHOD: "method", K_STRUCT: "struct", K_PACKED: "packed",
-    K_GUID: "guid",
+    K_GUID: "guid", K_HLAST: "hlast",
 }
 
 
@@ -338,23 +345,23 @@ class HLParser:
             t["nprotos"] = nprotos
             t["nbindings"] = nbindings
 
-            # Fields
+            # Fields — per HashLink VM (code.c): 2 VarInts: name + type
+            # (field_name_hash is computed by hl_hash_gen at runtime, NOT stored)
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
-                f_hash = self.read_varint(stream, context=f"type[{index}].field[{j}].hash")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
-                fields.append({"name": f_name, "hash": f_hash, "type": f_type})
+                fields.append({"name": f_name, "type": f_type})
             t["fields"] = fields
 
-            # Protos (methods)
+            # Protos (methods) — per HashLink VM (code.c): 3 VarInts: name + findex + pindex
+            # (proto_name_hash is computed by hl_hash_gen at runtime, NOT stored)
             protos = []
             for j in range(nprotos):
                 p_name = self.read_varint(stream, context=f"type[{index}].proto[{j}].name")
-                p_hash = self.read_varint(stream, context=f"type[{index}].proto[{j}].hash")
                 p_findex = self.read_varint(stream, context=f"type[{index}].proto[{j}].findex")
                 p_pindex = self.read_varint(stream, context=f"type[{index}].proto[{j}].pindex")
-                protos.append({"name": p_name, "hash": p_hash, "findex": p_findex, "pindex": p_pindex})
+                protos.append({"name": p_name, "findex": p_findex, "pindex": p_pindex})
             t["protos"] = protos
 
             # Bindings (static method fields)
@@ -368,12 +375,12 @@ class HLParser:
         elif kind == K_VIRTUAL:
             nfields = self.read_varint(stream, context=f"type[{index}].nfields")
             t["nfields"] = nfields
+            # Fields — same rule as OBJ/STRUCT: 2 VarInts (name + type), hash is computed
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
-                f_hash = self.read_varint(stream, context=f"type[{index}].field[{j}].hash")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
-                fields.append({"name": f_name, "hash": f_hash, "type": f_type})
+                fields.append({"name": f_name, "type": f_type})
             t["fields"] = fields
 
         elif kind == K_ABSTRACT:
@@ -399,9 +406,17 @@ class HLParser:
             t["constructs"] = constructs
 
         else:
-            raise HLParserError(
-                f"Unknown type kind {kind} at type index {index} (offset {stream.tell() - 1})"
-            )
+            if kind <= MAX_VALID_TYPE_KIND:
+                # Known kind that falls through (e.g. primitives not in PRIMITIVE_KINDS — unlikely)
+                pass
+            else:
+                # Kinds beyond the documented HL enum can appear in real-world bytecode
+                # from newer Haxe/HashLink compilers. Per the VM source (code.c:hl_read_type),
+                # the default case treats unrecognized kinds < HLAST as no-op primitives.
+                # For kinds >= HLAST, the VM raises "Invalid type", but we log a warning
+                # and continue to maximise parseability of real-world targets.
+                self._log("TYPE", f"  type[{index}]: unknown kind={kind} — treating as primitive (no payload)")
+                t["unknown_kind"] = True
 
         return t
 

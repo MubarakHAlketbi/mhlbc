@@ -143,19 +143,19 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 
 ---
 
-## 4. Workspace Game Targets (`workspace/`)
+## 4. Workspace Targets (`workspace/`)
 
-The `workspace/` directory at the project root holds compiled HashLink game binaries used as real-world test targets.
+The `workspace/` directory at the project root holds compiled HashLink binaries used as real-world test targets.
 
 ```
 workspace/
-  Farever/              # Game name
+  Farever/              # Source program name
     hlboot.dat          # Compiled HashLink bytecode (~13 MB)
   .../
     hlboot.dat
 ```
 
-Each subdirectory is a named game (e.g. `Farever`) containing its `hlboot.dat` file.
+Each subdirectory is a named program (e.g. `Farever`) containing its `hlboot.dat` file.
 
 ### Purpose
 
@@ -178,10 +178,10 @@ Regressions are defined as any target that parsed successfully before a change f
 
 ### Adding a New Target
 
-1. Create `workspace/<game_name>/`
+1. Create `workspace/<program_name>/`
 2. Place the compiled `hlboot.dat` inside
 3. Verify the project can parse it end-to-end
-4. Commit the target (ensure it's not a commercial game without license — prefer free/open-source Haxe games)
+4. Commit the target (ensure it's not a commercial program without license — prefer free/open-source Haxe programs)
 
 ---
 
@@ -190,7 +190,7 @@ Regressions are defined as any target that parsed successfully before a change f
 To ensure reliability, contributors should adopt the following optional directories as the project scales:
 
 * **`/tests`**: Unit tests to verify that `hl_parser.py` parses reference binaries correctly without regressions.
-* **`/samples`**: Small, compiled `.hl` or `hlboot.dat` fixtures used to run regression tests across different versions. Do not upload commercial game binaries; instead, use small Haxe compiled test scripts.
+* **`/samples`**: Small, compiled `.hl` or `hlboot.dat` fixtures used to run regression tests across different versions. Do not upload commercial program binaries; instead, use small Haxe compiled test scripts.
 
 ---
 

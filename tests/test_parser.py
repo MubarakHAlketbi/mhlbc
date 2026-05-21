@@ -526,11 +526,11 @@ class TestObjTypes:
             kind=K_OBJ,
             name_si=5, super_si=0, global_si=1,
             fields=[
-                (10, 0x1234, 3),   # name=10, hash=0x1234, type=I32
-                (11, 0x5678, 7),   # name=11, hash=0x5678, type=Bool
+                (10, 3),   # name=10, type=I32
+                (11, 7),   # name=11, type=Bool
             ],
             protos=[
-                (20, 0x9999, 0, 0),  # name=20, hash=0x9999, findex=0, pindex=0
+                (20, 0, 0),  # name=20, findex=0, pindex=0
             ],
             bindings=[
                 (0, 1),  # field=0, findex=1
@@ -544,9 +544,9 @@ class TestObjTypes:
         assert t["super"] == 0
         assert t["global"] == 1
         assert t["nfields"] == 2
-        assert t["fields"][0] == {"name": 10, "hash": 0x1234, "type": 3}
-        assert t["fields"][1] == {"name": 11, "hash": 0x5678, "type": 7}
-        assert t["protos"][0] == {"name": 20, "hash": 0x9999, "findex": 0, "pindex": 0}
+        assert t["fields"][0] == {"name": 10, "type": 3}
+        assert t["fields"][1] == {"name": 11, "type": 7}
+        assert t["protos"][0] == {"name": 20, "findex": 0, "pindex": 0}
         assert t["bindings"][0] == {"field": 0, "findex": 1}
 
     def test_struct_same_as_obj(self, parser):
@@ -554,7 +554,7 @@ class TestObjTypes:
         bc = build_type_objlike(
             kind=K_STRUCT,
             name_si=3, super_si=0, global_si=2,
-            fields=[(0, 1, 3)],
+            fields=[(0, 3)],
             protos=[],
             bindings=[],
         )
@@ -579,16 +579,16 @@ class TestVirtualType:
 
     def test_with_fields(self, parser):
         bc = build_type_virtual([
-            (0, 0xAAA, K_I32),
-            (1, 0xBBB, K_BOOL),
+            (0, K_I32),
+            (1, K_BOOL),
         ])
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
         assert t["kind"] == K_VIRTUAL
         assert t["nfields"] == 2
-        assert t["fields"][0] == {"name": 0, "hash": 0xAAA, "type": K_I32}
-        assert t["fields"][1] == {"name": 1, "hash": 0xBBB, "type": K_BOOL}
+        assert t["fields"][0] == {"name": 0, "type": K_I32}
+        assert t["fields"][1] == {"name": 1, "type": K_BOOL}
 
 
 class TestAbstractType:
@@ -637,18 +637,22 @@ class TestEnumType:
 
 
 class TestUnknownTypeKind:
-    """Unknown type kinds should raise an error."""
+    """Unknown type kinds should be handled gracefully (log warning, continue)."""
 
     def test_unknown_kind(self, parser):
+        """Kind values beyond HLAST are treated as primitives with a warning."""
         parser.ntypes = 1
-        with pytest.raises(HLParserError, match="Unknown type kind"):
-            parser.parse_types(stream_from_bytes(bytes([255])))
+        parser.parse_types(stream_from_bytes(bytes([255])))
+        assert len(parser.types) == 1
+        assert parser.types[0]["kind"] == 255
+        assert parser.types[0].get("unknown_kind") is True
 
     def test_sentinel_last(self, parser):
-        """K_LAST(24) sentinel should not be encountered in practice."""
+        """K_HLAST(24) is a known primitive — parsed without error."""
         parser.ntypes = 1
-        with pytest.raises(HLParserError, match="Unknown type kind"):
-            parser.parse_types(stream_from_bytes(bytes([24])))
+        parser.parse_types(stream_from_bytes(bytes([24])))
+        assert len(parser.types) == 1
+        assert parser.types[0]["kind"] == 24
 
 
 # =============================================================================
@@ -734,7 +738,7 @@ class TestFullIntegration:
             build_type_primitive(K_BOOL),       # type[1]
             build_type_objlike(                 # type[2]: a simple Obj
                 kind=K_OBJ, name_si=0, super_si=0, global_si=0,
-                fields=[(1, 0xABC, K_I32)],
+                fields=[(1, K_I32)],
                 protos=[], bindings=[],
             ),
             build_type_wrapper(K_REF, 2),       # type[3]: Ref<Obj>
