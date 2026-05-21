@@ -18,7 +18,10 @@ class HLParseWorker(QThread):
             parser.execute(progress_callback=self.emit_progress)
             self.finished.emit(parser)
         except Exception as e:
-            self.failed.emit(str(e))
+            error_msg = str(e)
+            if self._logger:
+                self._logger.log("ERROR", f"Parse failed: {error_msg}")
+            self.failed.emit(error_msg)
         finally:
             if self._logger:
                 self._logger.close()

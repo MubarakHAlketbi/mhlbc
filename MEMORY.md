@@ -21,3 +21,11 @@
   - FunctionsListModel and Functions tab in app.py UI.
   - 13 new tests — 168 total passing.
   - README.md updated: Phases 1-3 now checked off.
+
+## Session 3 — May 21, 2026
+- Start: New session initialized.
+- Project state: 168 tests passing, venv at ./venv (Python 3.13.5).
+- README.md: Phases 1-3 [x], Phases 4-5 [ ].
+- 10 commits on main (last: ad0fd22 — Phase 3 function parsing).
+- **Bug fix:** `_skip_opcodes()` had negative-index vulnerability — `op_idx < len()` passed for negative signed VarInts, causing `IndexError`. Fixed with `0 <= op_idx < len()` guard + stream-offset warning log.
+- **Bug fix:** Worker thread errors were never written to verbose log. Fixed: `[ERROR] Parse failed: ...` now logged before closing logger.

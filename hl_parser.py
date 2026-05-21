@@ -587,7 +587,11 @@ class HLParser:
         """
         for i in range(nops):
             op_idx = self.read_varint(stream, context=f"opcode[{i}].idx")
-            nargs = _OPCODE_NARGS[op_idx] if op_idx < len(_OPCODE_NARGS) else 0
+            if 0 <= op_idx < len(_OPCODE_NARGS):
+                nargs = _OPCODE_NARGS[op_idx]
+            else:
+                self._log("OPCODE", f"opcode[{i}]: out-of-range idx={op_idx} — treating as 0-arg nop, stream at offset {stream.tell()}")
+                nargs = 0
             if nargs >= 0:
                 for j in range(nargs):
                     self.read_varint(stream, context=f"opcode[{i}].arg[{j}]")
