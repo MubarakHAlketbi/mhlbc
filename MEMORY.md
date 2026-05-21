@@ -88,4 +88,14 @@
 - **Farever binary:** Original Windows Steam copy is valid (not corrupt). Parser hits ~30 functions before hitting suspicious function entries with nregs=-1 (repeating `a001` VarInt pattern). The function pool likely has placeholder entries the HL runtime handles differently.
 - **Docs updated:** CONTRIBUTING.md (Farever notes), MEMORY.md (this session)
 - **173 tests passing** (2 updated for new malformed handler behavior).
-- **Key takeaway:** Transferring HLB files via text mode truncates them. Always use binary copy (cp) for hlboot.dat.|
+- **Key takeaway:** Transferring HLB files via text mode truncates them. Always use binary copy (cp) for hlboot.dat.
+
+## Session 7 — May 21, 2026
+- Start: New session initialized.
+- Project state: 173 tests passing, Phases 1-3 complete. README Phases 1-3 [x], 4-5 [ ].
+- Last commit: 1660677 (Session 6 — parser bugs fixed, Steam Farever binary analysis).
+- Model switched: deepseek/deepseek-v4-flash → deepseek/deepseek-v4-pro via OpenRouter.
+- Phase 4 (Disassembly/CFG) and Phase 5 (Decompilation/AST) remain pending.
+- **README.md rewritten:** Long-term vision (5 tiers), expanded roadmap with sub-items, "What This Unlocks" table mapping use cases to tiers.
+- **CONTRIBUTING.md enhanced:** Added §11 CLI Support Requirements — architecture, entry points, output formats, exit codes, feature parity, logging parity, testing, CLI-first design principle. Updated §1 separation rules with parser UI-agnostic rule.
+- **CLI implemented:** `cli.py` (633 lines, no PyQt6) — 6 subcommands mirroring GUI tabs (header, pools, types, globals, natives, functions). 3 output formats: human-readable text (default), JSON (`--json`), CSV (`--csv`). Shared flags: `--verbose`, `--verbose-stdout`, `--log-path`, `--warnings-as-errors`. Exit codes per spec (0/1/2/3). String pool resolution for native lib/name and type names. Functions subcommand with `--limit`, summary stats, malformed/missing-name flags. Verified against Farever binary (all subcommands + all formats).

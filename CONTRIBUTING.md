@@ -37,6 +37,7 @@ hl_decompiler/
 ### Separation Rules
 * **No UI in Parser:** `hl_parser.py` must remain completely headless. It must not import PySide/PyQt modules. Communication back to the UI should only occur via callbacks or basic Python data structures.
 * **No Data Processing in UI:** `app.py` should only handle rendering. Any heavy calculations, search filters, or decompilation operations must be offloaded to the parser or dedicated processing threads via `hl_worker.py`.
+* **Parser is UI-agnostic:** The parser must not depend on any specific output medium — GUI, CLI, or headless automation. Both GUI and CLI entry points consume the same parser output data structures. No `if gui:` / `if cli:` branches anywhere in the parser.
 
 ---
 
@@ -395,3 +396,97 @@ Rules:
 - **GUI status bar:** `Version: p3.5.a1fba93-dirty | File: ...`
 
 This ensures every artifact can be traced back to a specific parser build, even when comparing across development sessions.
+
+### 11. CLI Support Requirements
+
+The application must function as both a GUI desktop tool and a CLI pipeline tool with identical parse behavior. The GUI is a convenience layer — the CLI is the automation backbone.
+
+#### 11.1 Architecture
+
+```
+                  ┌─────────────────┐
+                  │   hl_parser.py  │  (headless, no UI deps)
+                  │   hl_worker.py  │  (QThread wrapper)
+                  │   hl_logger.py  │  (shared verbose logger)
+                  └────────┬────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+         app.py       cli.py      (headless automation)
+        (PyQt6 GUI)  (argparse)   (import hl_parser directly)
+```
+
+* **Single parser, many consumers.** No parse logic differences between modes. The same file produces the same output data regardless of entry point.
+* **`hl_worker.py` is GUI-only.** The CLI does not import PyQt or QThread. It runs the parser directly on the calling thread or with a plain `threading.Thread` for progress reporting.
+* **`hl_logger.py` is universal.** Verbose logging works identically in both modes. The log output format is unchanged.
+
+#### 11.2 Entry Point Design
+
+* **`cli.py`** is the CLI entry point. It imports only `hl_parser` and standard library modules. It must not import PyQt6.
+* **`app.py`** remains the GUI entry point. It imports PyQt6 and `hl_parser`.
+* Both share the same argument conventions where possible (e.g., `--verbose`).
+* The CLI must support `--help` for every (sub)command.
+
+#### 11.3 Output Formats
+
+* **Default: human-readable text** — tables, summaries, disassembly listings suitable for terminal display.
+* **`--json` flag: machine-readable JSON** — structured output for piping to `jq`, other scripts, or LLM ingestion.
+* **`--csv` / `--tsv` flag: tabular data** — for spreadsheet import or `awk` processing.
+* The data payload is identical across formats; only the serialization differs.
+* Format selection must not change parse behavior.
+
+#### 11.4 Exit Codes
+
+| Exit Code | Meaning |
+|-----------|---------|
+| `0` | Success — file parsed completely, all requested operations finished |
+| `1` | Parse error — bytecode is corrupt, truncated, or structurally invalid |
+| `2` | Input error — file not found, permission denied, invalid arguments |
+| `3` | Tool error — internal assertion, unexpected exception, unhandled edge case |
+
+* The CLI must never exit `0` if the parser emitted errors or warnings that the caller asked to treat as fatal.
+* Warnings alone do not cause non-zero exit unless `--warnings-as-errors` is set.
+
+#### 11.5 Feature Parity
+
+* **Every feature available in GUI must be accessible via CLI.** This includes: header inspection, pool dumps, type listing, global/native listing, function listing, and (when implemented) disassembly, CFG export, and decompilation output.
+* **The reverse is not required.** CLI-specific features (batch processing, JSON streaming, output redirection) may have no GUI equivalent.
+* **Subcommand structure mirrors the GUI tabs:**
+  ```
+  cli.py header    <file>      → Header tab equivalent
+  cli.py pools     <file>      → Pools tab equivalent
+  cli.py types     <file>      → Types tab equivalent
+  cli.py globals   <file>      → Globals tab equivalent
+  cli.py natives   <file>      → Natives tab equivalent
+  cli.py functions <file>      → Functions tab equivalent
+  cli.py disasm    <file>      → Disassembly tab (Phase 4)
+  cli.py decompile <file>      → Decompilation output (Phase 5)
+  ```
+
+#### 11.6 Logging Parity
+
+* `--verbose` / `-v` enables VerboseLogger output to a file (same format as GUI verbose mode).
+* `--verbose-stdout` redirects verbose log to stdout (for piping, debugging).
+* `--log-path <path>` overrides the default log file location.
+* CLI-produced logs must be indexable by `logalyzer.py` with identical schema.
+
+#### 11.7 Testing CLI
+
+* CLI tests live in `tests/test_cli.py`. They must **not** import PyQt6.
+* Test categories:
+  - **Exit codes:** verify correct codes for success, parse errors, missing files, invalid args.
+  - **Output format:** verify `--json` produces valid JSON with correct structure; `--csv` produces valid CSV.
+  - **Flag combinations:** test `--verbose`, `--json`, `--output`, and other flags together.
+  - **Subcommand routing:** verify each subcommand produces expected output sections.
+  - **Data parity:** parse the same file via CLI and GUI (programmatically), assert identical parsed data.
+  - **Edge cases:** empty pools, truncated files, files with debug info, version variants (v3/v4/v5).
+* Use `subprocess.run()` to invoke `cli.py` in tests, capturing stdout/stderr and exit code.
+* CLI test fixtures should reuse `hl_helper.py` builders (same as parser tests).
+
+#### 11.8 CLI-First Design Principle
+
+New features must expose their core logic through the headless parser first, then add a CLI subcommand, and only then wire a GUI tab. This ensures:
+
+* The feature is testable without a display.
+* The feature is scriptable from day one.
+* The GUI is never the bottleneck for feature availability.
