@@ -291,3 +291,63 @@ python logalyzer.py query logs/parse_dump.db "..."    # Ad-hoc SQL
 ```
 
 Every log produced during development should be indexed with `logalyzer` before investigation begins.
+
+### 10. Versioning & Phase Tags
+
+All parser output (verbose logs, SQLite databases, GUI title bar) carries a version string in the format:
+
+```
+p{phase}.{build}.{commit}[-dirty]
+```
+
+| Component | Meaning | Example |
+|-----------|---------|---------|
+| `p{phase}` | Roadmap phase number (1-5 from README.md) | `p3` |
+| `{build}` | Commits since the latest phase tag | `5` |
+| `{commit}` | Short git hash for precise traceability | `a1fba93` |
+| `-dirty` | Uncommitted changes in working tree | `-dirty` |
+
+Examples:
+
+| `git describe` output | Version string | Meaning |
+|----------------------|----------------|---------|
+| `p3.0` | `p3.0.0` | Phase 3 start, clean tag |
+| `p3.0-5-ga1fba93` | `p3.5.a1fba93` | 5 commits since Phase 3 tag |
+| `p3.0-5-ga1fba93-dirty` | `p3.5.a1fba93-dirty` | Same, with uncommitted changes |
+| (no tags, hash only) | `p0.0.a1fba93` | No phase tag exists yet |
+
+#### Tagging Workflow
+
+Create a phase tag when crossing a README roadmap milestone:
+
+```bash
+# When Phase 3 work is complete and stable:
+git tag p3.0 -m "Phase 3 complete: function parsing, name resolution, opcode skipping"
+
+# After a major sub-milestone within Phase 3:
+git tag p3.1 -m "Phase 3: opcode decoder, disassembly engine"
+
+# When moving to Phase 4:
+git tag p4.0 -m "Phase 4 starts: opcode decoding, CFG visualizer"
+```
+
+Rules:
+
+1. **Tag at Phase 0 only when the repository has no tags yet.** Once any `p*` tag exists, the version scheme is active.
+2. **Always push tags when pushing commits:**
+   ```bash
+   git push --tags origin main
+   ```
+3. **The `{build}` counter resets at each new phase tag.** `p4.0` starts at build 0.
+4. **`-dirty` alerts you that the working tree has uncommitted changes.** Only index dumps and DBs from clean working trees should be treated as reference baselines.
+5. **Do not delete or move phase tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`p3.1`) rather than moving `p3.0`.
+
+#### Where versions appear
+
+- **Verbose log header:** `[APP] Parser version: p3.5.a1fba93-dirty`
+- **SQLite DB** (via `logalyzer info`): `"parser_version": "p3.5.a1fba93-dirty"`
+- **SQLite DB** (via `logalyzer stats`): meta block includes `parser_version`
+- **GUI window title:** `HashLink Bytecode Inspector — p3.5.a1fba93-dirty`
+- **GUI status bar:** `Version: p3.5.a1fba93-dirty | File: ...`
+
+This ensures every artifact can be traced back to a specific parser build, even when comparing across development sessions.

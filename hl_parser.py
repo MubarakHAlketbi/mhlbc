@@ -1,9 +1,102 @@
 import struct
 import io
 import time
+import os
+import subprocess
 from typing import BinaryIO, Dict, Any, List, Optional, Callable
 
 from hl_logger import VerboseLogger
+
+# === Version Identifier ===
+# Format: p{phase}.{build}.{commit}[-dirty]
+#   phase  = roadmap phase (1-5, from README), incremented when crossing milestones
+#   build  = number of commits since the latest {phase} tag (0 if exactly on tag)
+#   commit = short git hash for precise traceability
+#
+# Tag workflow:
+#   git tag p3.0        # Phase 3 starts
+#   git tag p3.1        # Major sub-milestone within Phase 3
+#   git tag p4.0        # Phase 4 starts (resets build counter)
+# Tag format matters — parsed by get_parser_version().
+_PARSER_VERSION = None  # lazy-loaded
+
+_PROJECT_ROOT = None  # lazy-loaded
+
+def _project_root() -> str:
+    global _PROJECT_ROOT
+    if _PROJECT_ROOT is not None:
+        return _PROJECT_ROOT
+    # Walk up from the parser file to find .git
+    _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+    return _PROJECT_ROOT
+
+def get_parser_version() -> str:
+    """Return version string: p{phase}.{build}.{commit}[-dirty].
+
+    Falls back to 'p0.0.unknown' if git is unavailable.
+    """
+    global _PARSER_VERSION
+    if _PARSER_VERSION is not None:
+        return _PARSER_VERSION
+    try:
+        root = _project_root()
+        desc = subprocess.check_output(
+            ["git", "describe", "--tags", "--match", "p*", "--dirty", "--always"],
+            cwd=root,
+            stderr=subprocess.DEVNULL,
+            timeout=2,
+        ).decode("utf-8").strip()
+    except Exception:
+        _PARSER_VERSION = "p0.0.unknown"
+        return _PARSER_VERSION
+
+    # Parse git describe output:
+    #   "p4.0"                    → p4.0.0
+    #   "p4.0-3-gabc1234"        → p4.3.gabc1234
+    #   "p4.0-3-gabc1234-dirty"  → p4.3.gabc1234-dirty
+    #   "abc1234"                 → p0.0.abc1234  (no phase tag yet)
+    #   "abc1234-dirty"           → p0.0.abc1234-dirty
+
+    phase = "0"
+    build = "0"
+    commit = "0"
+    dirty_suffix = ""
+
+    parts = desc.split("-")
+    if len(parts) >= 2 and parts[1].isdigit():
+        # Has a commit count: e.g. ["p4.0", "3", "gabc1234[-dirty]"]
+        tag = parts[0]
+        build = parts[1]
+        rest = "-".join(parts[2:])  # e.g. "gabc1234" or "gabc1234-dirty"
+        phase = tag[1] if tag.startswith("p") and tag[1].isdigit() else "0"
+        # Clean the commit suffix
+        if rest.endswith("-dirty"):
+            dirty_suffix = "-dirty"
+            commit = rest[:-6]
+        else:
+            commit = rest
+    else:
+        # No commit count: exactly on tag, or no phase tag at all
+        first = parts[0]
+        if first.startswith("p") and "." in first:
+            phase = first[1] if first.startswith("p") and first[1].isdigit() else "0"
+            # Check for dirty via the full desc string, since split already consumed it
+            if desc.endswith("-dirty"):
+                dirty_suffix = "-dirty"
+            # build and commit stay "0" (exactly on tag)
+        else:
+            # Raw commit hash, no phase tag
+            commit = first.rstrip("-dirty")
+            if commit.startswith("g"):
+                commit = commit[1:]
+            if desc.endswith("-dirty"):
+                dirty_suffix = "-dirty"
+
+    if commit.startswith("g"):
+        commit = commit[1:]  # strip leading 'g' from git describe
+
+    _PARSER_VERSION = f"p{phase}.{build}.{commit}{dirty_suffix}"
+    return _PARSER_VERSION
 
 # === HashLink Type Kind Constants ===
 # From hashlink/src/hl.h hl_type_kind enum
@@ -178,11 +271,22 @@ class HLParserError(Exception):
     pass
 
 
+# Maximum bytes to scan forward when resyncing from a malformed function
+_RESYNC_MAX_SCAN = 65536  # 64KB should cover any realistic function preamble
+
+# Minimum function header bytes for a plausible function (4 VarInts, each 1 byte)
+_FUNC_HEADER_MIN_BYTES = 4
+
+# Maximum body size fraction of remaining file for a single function
+_FUNC_BODY_MAX_FRACTION = 0.5
+
+
 class HLParser:
     def __init__(self, filepath: str, logger: Optional[VerboseLogger] = None):
         self.filepath = filepath
         self._logger = logger
         self._t_start = 0.0
+        self._file_size = 0  # set during execute()
         
         self.version = 0
         self.flags = 0
@@ -212,6 +316,9 @@ class HLParser:
         self.globals: List[int] = []
         self.natives: List[dict] = []
         self.functions: List[dict] = []
+        
+        # Parse warnings collected during execution
+        self.parse_warnings: List[dict] = []
 
     def _log(self, tag: str, message: str):
         if self._logger:
@@ -258,6 +365,26 @@ class HLParser:
                 value = -value
             self._log_varint(context, raw, value)
             return value
+
+    # ── Robustness Helpers ──────────────────────────────────────────────────
+
+    def _remaining_bytes(self, stream: BinaryIO) -> int:
+        """Return estimated bytes remaining in the stream."""
+        if self._file_size > 0:
+            return max(0, self._file_size - stream.tell())
+        try:
+            cur = stream.tell()
+            stream.seek(0, io.SEEK_END)
+            end = stream.tell()
+            stream.seek(cur)
+            return max(0, end - cur)
+        except (io.UnsupportedOperation, OSError):
+            return 2 ** 31  # unknown → effectively unlimited
+
+    def _warn(self, tag: str, msg: str):
+        """Log a non-fatal warning and record it for downstream inspection."""
+        self._log(tag, msg)
+        self.parse_warnings.append({"tag": tag, "message": msg})
 
     def parse_header(self, stream: BinaryIO):
         """Parses the bytecode header structure dynamically by version."""
@@ -577,15 +704,19 @@ class HLParser:
         if progress_callback:
             progress_callback("Natives parsed.", 70)
 
-    # === Function Parsing ===
+    # ── Function Parsing ──────────────────────────────────────────────────
 
     def _skip_opcodes(self, stream: BinaryIO, nops: int):
         """Skip nops opcodes by reading and discarding their VarInt arguments.
         
         Uses the _OPCODE_NARGS table to know how many VarInts to read per opcode.
         Variable-length opcodes (nargs == -1) read a count VarInt + that many more.
+        
+        Bounded: stops early if stream runs out of data.
         """
         for i in range(nops):
+            if self._remaining_bytes(stream) < 1:
+                break
             op_idx = self.read_varint(stream, context=f"opcode[{i}].idx")
             if 0 <= op_idx < len(_OPCODE_NARGS):
                 nargs = _OPCODE_NARGS[op_idx]
@@ -594,12 +725,172 @@ class HLParser:
                 nargs = 0
             if nargs >= 0:
                 for j in range(nargs):
+                    if self._remaining_bytes(stream) < 1:
+                        break
                     self.read_varint(stream, context=f"opcode[{i}].arg[{j}]")
             else:
                 # Variable-length: read count + count VarInts
                 count = self.read_varint(stream, context=f"opcode[{i}].varcount")
-                for j in range(count):
+                # Bound vararg reading to prevent runaway from corrupted varcount
+                max_varargs = min(count, self._remaining_bytes(stream) // 1)
+                if count != max_varargs:
+                    self._log("OPCODE", f"opcode[{i}]: clamped varcount from {count} to {max_varargs} (remaining bytes)")
+                for j in range(max_varargs):
+                    if self._remaining_bytes(stream) < 1:
+                        break
                     self.read_varint(stream, context=f"opcode[{i}].vararg[{j}]")
+
+    def _read_bounded_varints(self, stream: BinaryIO, count: int, context_fmt: str,
+                              max_bytes: Optional[int] = None) -> List[int]:
+        """Read up to `count` VarInts from the stream, bounded by available data.
+        
+        Returns the list of successfully read values; stops early on EOF or
+        when max_bytes is exceeded.
+        """
+        results: List[int] = []
+        start = stream.tell()
+        for j in range(count):
+            if self._remaining_bytes(stream) < 1:
+                self._log("FUNC", f"EOF while reading {context_fmt.format(j)}, stopping")
+                break
+            if max_bytes is not None and stream.tell() - start >= max_bytes:
+                self._log("FUNC", f"byte limit ({max_bytes}) exceeded for {context_fmt.format(j)}, stopping")
+                break
+            try:
+                val = self.read_varint(stream, context=context_fmt.format(j))
+                results.append(val)
+            except HLParserError:
+                self._log("FUNC", f"read error at {context_fmt.format(j)}, stopping")
+                break
+        return results
+
+    def _scan_for_next_function(self, stream: BinaryIO, start_offset: int,
+                                 func_idx: int, max_scan: int = 1048576,
+                                 min_skip: int = 1) -> Optional[int]:
+        """Scan forward from start_offset looking for the next valid function header.
+        
+        A valid candidate is 4 contiguous VarInts where:
+        - type_idx ∈ [0, ntypes)
+        - findex ∈ [0, nnatives + nfunctions)
+        - nregs >= 0 and plausible (≤ remaining buffer data)
+        - nops >= 0
+        
+        Skips at least `min_skip` bytes before accepting a match to avoid
+        false positives from the malformed function's own byte sequence.
+        
+        Returns the offset where the header was found, or None.
+        Uses a trial-read approach on a copy of the stream to avoid
+        side-effects on failure.
+        """
+        saved = stream.tell()
+        data = stream.read(max_scan)
+        if not data:
+            stream.seek(saved)
+            return None
+
+        data_len = len(data)
+        best_offset = None
+        # Start from min_skip to avoid matching the current (corrupted) position
+        start = min(min_skip, data_len)
+        for offset in range(start, data_len - _FUNC_HEADER_MIN_BYTES + 1):
+            buf = io.BytesIO(data[offset:])
+            try:
+                # Read type_idx silently
+                b1 = buf.read(1)
+                if not b1:
+                    continue
+                b1 = b1[0]
+                if (b1 & 0x80) == 0:
+                    type_idx = b1
+                elif (b1 & 0x40) == 0:
+                    b2 = buf.read(1)
+                    if not b2: continue
+                    type_idx = ((b1 & 0x1F) << 8) | b2[0]
+                    if b1 & 0x20:
+                        continue  # negative → invalid type index
+                else:
+                    b2, b3, b4 = buf.read(1), buf.read(1), buf.read(1)
+                    if not (b2 and b3 and b4): continue
+                    type_idx = ((b1 & 0x1F) << 24) | (b2[0] << 16) | (b3[0] << 8) | b4[0]
+                    if b1 & 0x20:
+                        continue
+                if not (0 <= type_idx < self.ntypes):
+                    continue
+
+                # Read findex
+                b1 = buf.read(1)
+                if not b1: continue
+                b1 = b1[0]
+                if (b1 & 0x80) == 0:
+                    findex = b1
+                elif (b1 & 0x40) == 0:
+                    b2 = buf.read(1)
+                    if not b2: continue
+                    findex = ((b1 & 0x1F) << 8) | b2[0]
+                    if b1 & 0x20: continue
+                else:
+                    b2, b3, b4 = buf.read(1), buf.read(1), buf.read(1)
+                    if not (b2 and b3 and b4): continue
+                    findex = ((b1 & 0x1F) << 24) | (b2[0] << 16) | (b3[0] << 8) | b4[0]
+                    if b1 & 0x20: continue
+                if not (0 <= findex < self.nnatives + self.nfunctions):
+                    continue
+
+                # Read nregs (must be >= 0)
+                b1 = buf.read(1)
+                if not b1: continue
+                b1 = b1[0]
+                if (b1 & 0x80) == 0:
+                    nregs = b1
+                elif (b1 & 0x40) == 0:
+                    b2 = buf.read(1)
+                    if not b2: continue
+                    nregs = ((b1 & 0x1F) << 8) | b2[0]
+                    if b1 & 0x20: continue
+                else:
+                    b2, b3, b4 = buf.read(1), buf.read(1), buf.read(1)
+                    if not (b2 and b3 and b4): continue
+                    nregs = ((b1 & 0x1F) << 24) | (b2[0] << 16) | (b3[0] << 8) | b4[0]
+                    if b1 & 0x20: continue
+                if nregs < 0:
+                    continue
+                # Bound nregs by remaining data in the buffer (each regtype >= 1 byte)
+                buf_remaining = data_len - (offset + buf.tell())
+                if nregs > buf_remaining:
+                    continue
+
+                # Read nops (must be >= 0)
+                b1 = buf.read(1)
+                if not b1: continue
+                b1 = b1[0]
+                if (b1 & 0x80) == 0:
+                    nops = b1
+                elif (b1 & 0x40) == 0:
+                    b2 = buf.read(1)
+                    if not b2: continue
+                    nops = ((b1 & 0x1F) << 8) | b2[0]
+                    if b1 & 0x20: continue
+                else:
+                    b2, b3, b4 = buf.read(1), buf.read(1), buf.read(1)
+                    if not (b2 and b3 and b4): continue
+                    nops = ((b1 & 0x1F) << 24) | (b2[0] << 16) | (b3[0] << 8) | b4[0]
+                    if b1 & 0x20: continue
+                if nops < 0:
+                    continue
+
+                # All 4 VarInts valid → found a candidate
+                best_offset = start_offset + offset
+                break
+            except (OSError, EOFError, IndexError):
+                continue
+
+        if best_offset is not None:
+            stream.seek(best_offset)
+            self._warn("FUNC", f"Resynced to offset {best_offset} for func[{func_idx}] "
+                               f"(skipped {best_offset - saved} bytes of corrupt data)")
+        else:
+            stream.seek(saved)
+        return best_offset
 
     def parse_functions(self, stream: BinaryIO, progress_callback=None):
         """Parse nfunctions function definitions from the stream.
@@ -608,6 +899,9 @@ class HLParser:
         + debug info (if has_debug) + assign list (if has_debug).
         
         The opcodes are skipped (not decoded) — stored as raw bytes for Phase 4.
+        
+        Robust: bounded reads, malformed-function detection, and stream resync
+        for graceful degradation on corrupt/unexpected entries.
         """
         if progress_callback:
             progress_callback("Parsing Functions...", 72)
@@ -616,48 +910,160 @@ class HLParser:
         self._log("FUNC", f"Starting function read at byte offset {offset_before}, nfunctions={self.nfunctions}")
 
         self.functions = []
-        for i in range(self.nfunctions):
+        func_i = 0
+        while func_i < self.nfunctions:
             func_start = stream.tell()
-            type_idx = self.read_varint(stream, context=f"func[{i}].type")
-            findex = self.read_varint(stream, context=f"func[{i}].findex")
-            nregs = self.read_varint(stream, context=f"func[{i}].nregs")
-            nops = self.read_varint(stream, context=f"func[{i}].nops")
+            
+            # If we've drifted too far (past plausible end), resync
+            if self._remaining_bytes(stream) < _FUNC_HEADER_MIN_BYTES:
+                self._warn("FUNC", f"Only {self._remaining_bytes(stream)} bytes remain, "
+                                   f"stopping at func[{func_i}] ({len(self.functions)} parsed)")
+                break
 
-            # Register types
-            reg_types = []
-            for j in range(nregs):
-                rt = self.read_varint(stream, context=f"func[{i}].regtype[{j}]")
-                reg_types.append(rt)
+            # ── Read header ────────────────────────────────────────────────
+            try:
+                type_idx = self.read_varint(stream, context=f"func[{func_i}].type")
+                findex = self.read_varint(stream, context=f"func[{func_i}].findex")
+                nregs = self.read_varint(stream, context=f"func[{func_i}].nregs")
+                nops = self.read_varint(stream, context=f"func[{func_i}].nops")
+            except HLParserError:
+                self._warn("FUNC", f"EOF reading header for func[{func_i}], stopping")
+                break
 
-            # Record raw body start position (before opcodes)
+            # ── Header sanity checks ───────────────────────────────────────
+            func_flags = []
+            malformed = False
+
+            if nops < 0:
+                func_flags.append(f"negative nops={nops}, clamped to 0")
+                nops = 0
+                malformed = True
+            if nregs < 0:
+                func_flags.append(f"negative nregs={nregs}, clamped to 0")
+                nregs = 0
+                malformed = True
+
+            # Bound nregs by available data (each regtype ≥ 1 byte)
+            remaining_before_reg = self._remaining_bytes(stream)
+            max_sane_nregs = remaining_before_reg  # absolute max
+            if nregs > max_sane_nregs:
+                func_flags.append(f"nregs={nregs} exceeds remaining ({remaining_before_reg}), "
+                                  f"capped to {max_sane_nregs}")
+                nregs = max_sane_nregs
+                malformed = True
+
+            if malformed:
+                for flag in func_flags:
+                    self._warn("FUNC", f"func[{func_i}]: {flag}")
+
+            # ── When header is clearly corrupt, skip body and resync ──────
+            if nops <= 0 and malformed:
+                # nops <= 0 means the function has no opcodes, which means
+                # the body parser won't advance the stream past the (non-existent)
+                # opcode data. Combined with potentially large nregs, this causes
+                # irreversible desync. Skip the body entirely and attempt resync.
+                # Estimate how many bytes to skip: the nregs register types each
+                # consume ~1 byte minimum, so skip at least nregs bytes.
+                skip_estimate = min(nregs, 65536)  # cap at 64KB to avoid excess
+                if skip_estimate < 1:
+                    skip_estimate = 1
+                self._warn("FUNC", f"func[{func_i}]: skipping body (nops={nops}, nregs={nregs}), "
+                                   f"attempting resync with skip_estimate={skip_estimate}")
+                next_offset = self._scan_for_next_function(
+                    stream, stream.tell(), func_i + 1,
+                    min_skip=skip_estimate
+                )
+                if next_offset is not None:
+                    # Record a placeholder for the malformed function
+                    func = {
+                        "type": type_idx,
+                        "findex": findex,
+                        "nregs": nregs,
+                        "nops": 0,
+                        "reg_types": [],
+                        "body_offset": 0,
+                        "body_size": 0,
+                        "name": None,
+                        "parent_type": None,
+                        "malformed": True,
+                    }
+                    self.functions.append(func)
+                    self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
+                                     f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-SKIPPED]")
+                    func_i += 1
+                    continue
+                else:
+                    self._warn("FUNC", f"func[{func_i}]: could not resync, stopping function parsing")
+                    break
+
+            # ── Register types ─────────────────────────────────────────────
+            reg_types = self._read_bounded_varints(
+                stream, nregs, f"func[{func_i}].regtype[{{}}]"
+            )
+
+            # ── Opcodes ────────────────────────────────────────────────────
             body_offset = stream.tell()
+            remaining_before_ops = self._remaining_bytes(stream)
+            max_sane_ops = remaining_before_ops  # each opcode ≥ 1 byte
+            if nops > max_sane_ops:
+                self._warn("FUNC", f"func[{func_i}]: nops={nops} exceeds remaining ({remaining_before_ops}), "
+                                   f"capped to {max_sane_ops}")
+                nops = max_sane_ops
+                malformed = True
 
-            # Skip opcodes
             self._skip_opcodes(stream, nops)
 
-            # Debug info (if has_debug)
+            # ── Debug info ─────────────────────────────────────────────────
             if self.has_debug:
                 debug_lines = []
-                for j in range(nops):
-                    dl = self.read_varint(stream, context=f"func[{i}].dline[{j}]")
-                    debug_lines.append(dl)
                 debug_files = []
-                for j in range(nops):
-                    df = self.read_varint(stream, context=f"func[{i}].dfile[{j}]")
-                    debug_files.append(df)
                 debug_offsets = []
                 for j in range(nops):
-                    doff = self.read_varint(stream, context=f"func[{i}].doffset[{j}]")
-                    debug_offsets.append(doff)
-                # Assign list
-                nassigns = self.read_varint(stream, context=f"func[{i}].nassigns")
+                    if self._remaining_bytes(stream) < 1:
+                        break
+                    try:
+                        debug_lines.append(self.read_varint(stream, context=f"func[{func_i}].dline[{j}]"))
+                    except HLParserError:
+                        break
+                for j in range(nops):
+                    if self._remaining_bytes(stream) < 1:
+                        break
+                    try:
+                        debug_files.append(self.read_varint(stream, context=f"func[{func_i}].dfile[{j}]"))
+                    except HLParserError:
+                        break
+                for j in range(nops):
+                    if self._remaining_bytes(stream) < 1:
+                        break
+                    try:
+                        debug_offsets.append(self.read_varint(stream, context=f"func[{func_i}].doffset[{j}]"))
+                    except HLParserError:
+                        break
+
+                # Assign list (bounded)
+                try:
+                    nassigns = self.read_varint(stream, context=f"func[{func_i}].nassigns")
+                except HLParserError:
+                    nassigns = 0
+                remaining_after_assign = self._remaining_bytes(stream)
+                max_sane_assigns = remaining_after_assign  # each assign pair ≥ 2 bytes (2 VarInts)
+                if nassigns > max_sane_assigns:
+                    self._warn("FUNC", f"func[{func_i}]: nassigns={nassigns} exceeds remaining bytes, "
+                                       f"capped to {max_sane_assigns}")
+                    nassigns = max_sane_assigns
+                    malformed = True
                 assign_vars = []
                 assign_regs = []
                 for j in range(nassigns):
-                    av = self.read_varint(stream, context=f"func[{i}].assign_var[{j}]")
-                    assign_vars.append(av)
-                    ar = self.read_varint(stream, context=f"func[{i}].assign_reg[{j}]")
-                    assign_regs.append(ar)
+                    if self._remaining_bytes(stream) < 2:
+                        break  # need at least 2 bytes for a var+reg pair
+                    try:
+                        av = self.read_varint(stream, context=f"func[{func_i}].assign_var[{j}]")
+                        ar = self.read_varint(stream, context=f"func[{func_i}].assign_reg[{j}]")
+                        assign_vars.append(av)
+                        assign_regs.append(ar)
+                    except HLParserError:
+                        break
             else:
                 debug_lines = []
                 debug_files = []
@@ -667,6 +1073,15 @@ class HLParser:
                 nassigns = 0
 
             func_end = stream.tell()
+            body_size = func_end - body_offset
+            remaining_after = self._remaining_bytes(stream)
+
+            # ── Body size sanity check ──────────────────────────────────
+            max_sane_body = self._file_size * _FUNC_BODY_MAX_FRACTION if self._file_size else 2**30
+            if body_size > max_sane_body and not malformed:
+                self._warn("FUNC", f"func[{func_i}]: body_size={body_size} exceeds {max_sane_body} "
+                                   f"(>50% of file), flagging")
+                malformed = True
 
             func = {
                 "type": type_idx,
@@ -675,9 +1090,10 @@ class HLParser:
                 "nops": nops,
                 "reg_types": reg_types,
                 "body_offset": body_offset,
-                "body_size": func_end - body_offset,
+                "body_size": body_size,
                 "name": None,  # resolved later by resolve_function_names
                 "parent_type": None,  # type index of parent class (resolved later)
+                "malformed": malformed,
             }
 
             if self.has_debug:
@@ -690,9 +1106,21 @@ class HLParser:
 
             self.functions.append(func)
 
-            self._log("FUNC", f"  func[{i}]: type={type_idx} findex={findex} "
+            self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
                              f"nregs={nregs} nops={nops} "
-                             f"body_offset={body_offset} body_size={func_end - body_offset}")
+                             f"body_offset={body_offset} body_size={body_size}"
+                             f"{' [MALFORMED]' if malformed else ''}")
+
+            # ── Stream resync for malformed functions ──────────────────
+            if malformed:
+                next_offset = self._scan_for_next_function(
+                    stream, stream.tell(), func_i + 1
+                )
+                if next_offset is None:
+                    self._warn("FUNC", f"func[{func_i}]: could not resync, stopping function parsing")
+                    break
+
+            func_i += 1
 
         offset_after = stream.tell()
         self._log("FUNC", f"Read {len(self.functions)} functions, consumed {offset_after - offset_before} bytes")
@@ -762,7 +1190,20 @@ class HLParser:
     # === Main Entry Point ===
 
     def execute(self, stream=None, progress_callback=None):
+        # Log parser version for diagnostic traceability
+        ver = get_parser_version()
+        self._log("APP", f"Parser version: {ver}")
+        self._log("APP", f"File: {self.filepath}")
+        
         if stream is not None:
+            # Try to determine file size from a seekable stream
+            try:
+                cur = stream.tell()
+                stream.seek(0, io.SEEK_END)
+                self._file_size = stream.tell()
+                stream.seek(cur)
+            except (io.UnsupportedOperation, OSError):
+                self._file_size = 0
             self.parse_header(stream)
             self.parse_pools(stream, progress_callback)
             self.parse_types(stream, progress_callback)
@@ -773,6 +1214,12 @@ class HLParser:
                 progress_callback("Parsing completed.", 100)
             return
         with open(self.filepath, "rb") as f:
+            # Determine file size
+            cur = f.tell()
+            f.seek(0, io.SEEK_END)
+            self._file_size = f.tell()
+            f.seek(cur)
+            
             self.parse_header(f)
             self.parse_pools(f, progress_callback)
             self.parse_types(f, progress_callback)

@@ -262,6 +262,19 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
     conn.execute(
         "INSERT OR REPLACE INTO meta VALUES ('skipped_varint_light', ?)", (str(skipped_varint),)
     )
+    
+    # Extract parser version and source file from APP entries
+    for row in conn.execute(
+        "SELECT msg FROM entries WHERE tag='APP' AND (msg LIKE 'Parser version:%' OR msg LIKE 'File:%')"
+    ).fetchall():
+        msg = row[0]
+        if msg.startswith("Parser version:"):
+            ver = msg.split("Parser version:", 1)[1].strip()
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('parser_version', ?)", (ver,))
+        elif msg.startswith("File:"):
+            fname = msg.split("File:", 1)[1].strip()
+            conn.execute("INSERT OR REPLACE INTO meta VALUES ('source_file', ?)", (fname,))
+    
     conn.commit()
     conn.close()
 
@@ -372,6 +385,10 @@ def show_stats(db_path: str, section: str | None = None) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
+    # Metadata
+    meta_rows = conn.execute("SELECT key, value FROM meta").fetchall()
+    meta = dict(meta_rows)
+
     # Section counts
     tag_filter = f"WHERE tag = '{section}'" if section else ""
     counts = conn.execute(
@@ -379,6 +396,10 @@ def show_stats(db_path: str, section: str | None = None) -> None:
     ).fetchall()
 
     result = {
+        "meta": {
+            k: meta.get(k, "")
+            for k in ["parser_version", "source_file", "source", "total_lines"]
+        },
         "sections": [{"tag": r["tag"], "count": r["cnt"]} for r in counts],
     }
 
@@ -522,6 +543,23 @@ def show_sample(db_path: str, section_tag: str, n: int = 10) -> None:
     conn.close()
 
 
+def show_info(db_path: str) -> None:
+    """Display metadata/version info for a database."""
+    if not Path(db_path).exists():
+        print(f"ERROR: Database not found: {db_path}", file=sys.stderr)
+        sys.exit(1)
+    conn = sqlite3.connect(db_path)
+    rows = conn.execute("SELECT key, value FROM meta ORDER BY key").fetchall()
+    conn.close()
+    if not rows:
+        print(json.dumps({"db": db_path, "meta": {}}, indent=2))
+        return
+    meta = dict(rows)
+    meta["db"] = db_path
+    meta["db_size_mb"] = round(os.path.getsize(db_path) / (1024 * 1024), 1)
+    print(json.dumps(meta, indent=2))
+
+
 # ── CLI ──────────────────────────────────────────────────────────────────────
 
 def main() -> None:
@@ -562,6 +600,10 @@ def main() -> None:
     p_sm.add_argument("--section", required=True, help="Section tag to sample")
     p_sm.add_argument("--n", type=int, default=10, help="Number of samples (default: 10)")
 
+    # info
+    p_i = sub.add_parser("info", help="Show metadata/version info for a database")
+    p_i.add_argument("db", help="Path to SQLite DB")
+
     args = parser.parse_args()
 
     if args.command == "index":
@@ -590,6 +632,9 @@ def main() -> None:
 
     elif args.command == "sample":
         show_sample(args.db, args.section, n=args.n)
+
+    elif args.command == "info":
+        show_info(args.db)
 
 
 if __name__ == "__main__":

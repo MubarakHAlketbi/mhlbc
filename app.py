@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QTabWidget, QStatusBar
 )
 from hl_worker import HLParseWorker
-from hl_parser import HLParser, KIND_NAMES, K_OBJ, K_STRUCT
+from hl_parser import HLParser, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
 from hl_logger import VerboseLogger
 
 
@@ -196,7 +196,8 @@ class FunctionsListModel(QAbstractListModel):
 class DecompilerApp(QMainWindow):
     def __init__(self, verbose: bool = False):
         super().__init__()
-        self.setWindowTitle("HashLink Bytecode Inspector (GUI)")
+        self._version = get_parser_version()
+        self.setWindowTitle(f"HashLink Bytecode Inspector — {self._version}")
         self.resize(800, 600)
 
         self.parser = None
@@ -349,7 +350,9 @@ class DecompilerApp(QMainWindow):
             f"Functions: {parser.nfunctions}"
         )
         self.lbl_info.setText(info_text)
-        self.status_bar.showMessage(f"File: {parser.filepath}", 5000)
+        self.status_bar.showMessage(
+            f"Version: {self._version} | File: {parser.filepath}", 10000
+        )
 
         # Update all virtual list models
         self.strings_model.update_data(parser.strings)

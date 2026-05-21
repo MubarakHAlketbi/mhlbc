@@ -4,3 +4,4 @@ logs/
 .pytest_cache/
 dump.md
 dump.db
+_investigate.py

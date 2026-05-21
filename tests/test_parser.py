@@ -914,11 +914,77 @@ class TestFunctionParsing:
         assert f["nregs"] == 2
 
     def test_truncated_function_raises(self, parser):
-        """Incomplete function header raises error."""
+        """Incomplete function header is caught gracefully with a warning."""
         data = encode_varint(0) + encode_varint(0)  # type + findex, missing nregs
         parser.nfunctions = 1
-        with pytest.raises(HLParserError):
-            parser.parse_functions(stream_from_bytes(data))
+        parser.parse_functions(stream_from_bytes(data))
+        # Parser should stop gracefully, not raise
+        assert len(parser.functions) == 0  # no functions parsed
+        # Either caught by bounds check or EOF during header read
+        assert any("stopping at func" in w["message"] or "EOF reading header" in w["message"]
+                   for w in parser.parse_warnings)
+
+    def test_negative_nops_clamped(self, parser):
+        """Function with nops=-1 is handled gracefully (skipped, resync attempted)."""
+        data = encode_varint(0) + encode_varint(0)  # type=0, findex=0
+        data += encode_varint(0)                    # nregs=0
+        data += encode_varint(-1)                   # nops=-1 (signed VarInt)
+        # No following data → resync fails → parser stops
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.functions) == 0  # no placeholder recorded (resync failed)
+        assert any("negative nops" in w["message"] for w in parser.parse_warnings)
+
+    def test_negative_nregs_clamped(self, parser):
+        """Function with nregs=-1 is handled gracefully (clamped to 0)."""
+        data = encode_varint(0) + encode_varint(0)  # type=0, findex=0
+        data += encode_varint(-1)                   # nregs=-1
+        data += encode_varint(2)                    # nops=2
+        # Opcodes: 2 opcodes (just dummy idx bytes)
+        data += bytes([0, 0])
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.functions) == 1
+        assert parser.functions[0]["nregs"] == 0    # clamped
+        assert parser.functions[0]["malformed"] == True
+        assert any("negative nregs" in w["message"] for w in parser.parse_warnings)
+
+    def test_negative_nops_resync(self, parser):
+        """Malformed function is skipped and resync finds the next valid function."""
+        parser.ntypes = 2   # needed for resync validation
+        parser.nnatives = 0
+        parser.nfunctions = 2
+        # Manually build func1 with nops=-1 (malformed)
+        data = encode_varint(0) + encode_varint(0)   # type=0, findex=0
+        data += encode_varint(1)                      # nregs=1
+        data += encode_varint(-1)                     # nops=-1 (clamped to 0)
+        data += encode_varint(3)                      # reg_type[0] = 3
+        # Second function: normal, valid (use build helper)
+        func2 = build_function_entry(type_idx=1, findex=1, reg_types=[3], opcodes=[67])
+        stream = stream_from_bytes(data + func2)
+        parser.parse_functions(stream)
+        # Should have parsed func1 (malformed)
+        assert len(parser.functions) >= 1
+        assert parser.functions[0]["malformed"]
+        # Resync should find func2
+        resync_msgs = [w["message"] for w in parser.parse_warnings if "Resynced" in w["message"]]
+        assert len(resync_msgs) > 0, \
+            f"No Resynced messages. All warnings: {[w['message'] for w in parser.parse_warnings]}"
+
+    def test_malformed_field_present(self, parser):
+        """Every function dict has a malformed field."""
+        entry = build_function_entry(type_idx=0, findex=0, reg_types=[3], opcodes=[67])
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(entry))
+        assert "malformed" in parser.functions[0]
+        assert parser.functions[0]["malformed"] == False
+
+    def test_parse_warnings_collected(self, parser):
+        """parse_warnings list is populated on non-fatal issues."""
+        data = encode_varint(0) + encode_varint(0)  # type + findex, too short
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.parse_warnings) > 0
 
     def test_integration_with_functions_v5(self):
         """Full bytecode with functions, parsed end-to-end."""
