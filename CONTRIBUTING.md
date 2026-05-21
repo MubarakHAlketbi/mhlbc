@@ -278,3 +278,16 @@ class TypeParser:
 self.cb_verbose_types = QCheckBox("Verbose Type Parsing")
 ```
 Existing toggle infrastructure: `VerboseLogger` (hl_logger.py), CLI `--verbose`/`-v` flag (app.py), UI checkbox (app.py). Reuse these instead of inventing a new mechanism.
+
+### 9. Log Analysis Tooling
+
+The `logalyzer.py` CLI provides SQLite-backed analysis of the verbose logs produced by `hl_logger.py`. Use it to investigate parse errors, detect anomalies, and run ad-hoc SQL queries against large log files without consuming LLM tokens:
+
+```bash
+python logalyzer.py index logs/parse_dump.md        # Import log into SQLite
+python logalyzer.py stats logs/parse_dump.db         # Section counts + anomaly detection
+python logalyzer.py errors logs/parse_dump.db        # Extract errors with context
+python logalyzer.py query logs/parse_dump.db "..."    # Ad-hoc SQL
+```
+
+Every log produced during development should be indexed with `logalyzer` before investigation begins.

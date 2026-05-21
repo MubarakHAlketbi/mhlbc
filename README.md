@@ -76,6 +76,7 @@ hl_decompiler/
 ├── hl_parser.py               # Pure logic, sequential, headless bytecode parser
 ├── hl_worker.py               # PyQt QThread wrapper for background processing
 ├── hl_logger.py               # VerboseLogger for byte-level debug logging
+├── logalyzer.py               # SQLite-backed log analysis CLI (dev tool)
 ├── app.py                     # Qt Virtual View (UI rendering and model logic)
 │
 └── tests/

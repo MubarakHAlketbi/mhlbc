@@ -29,3 +29,18 @@
 - 10 commits on main (last: ad0fd22 — Phase 3 function parsing).
 - **Bug fix:** `_skip_opcodes()` had negative-index vulnerability — `op_idx < len()` passed for negative signed VarInts, causing `IndexError`. Fixed with `0 <= op_idx < len()` guard + stream-offset warning log.
 - **Bug fix:** Worker thread errors were never written to verbose log. Fixed: `[ERROR] Parse failed: ...` now logged before closing logger.
+
+## Session 4 — May 21, 2026
+- Start: New session initialized.
+- Project state: 168 tests passing, Phase 3 complete. README Phases 1-3 [x], 4-5 [ ].
+- **New tool: logalyzer.py** — SQLite-backed log analysis CLI for verbose parser logs.
+  - Subcommands: index, query, errors, stats, sample.
+  - Parses [TAG]-prefixed log lines into structured SQLite rows.
+  - Tested against 571MB dump.md (Farever parse log): 8.2M lines indexed in 28s → 1.5GB DB.
+- **dump.md investigation findings (via logalyzer):**
+  - 1 ERROR: "Unexpected EOF while reading VarInt" at func[78] regtype[7384841].
+  - Root cause: func[2] nops=-1 + missing negative-index guard (fixed in Session 3).
+  - All 9,403 opcodes were out-of-range — parser was reading garbage bytecode body.
+  - func[78] nregs=306M (garbage) — cascade effect from func[2] desync.
+  - 9 functions with inflated regtype counts (>1K), 12 with zero nops.
+- dump.md (571MB) and dump.db (1.5GB) both in .gitignore.
