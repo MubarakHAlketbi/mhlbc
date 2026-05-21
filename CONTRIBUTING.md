@@ -14,14 +14,24 @@ The codebase is strictly separated into three layers to prevent UI deadlocks and
 hl_decompiler/
 │
 ├── docs/                      # The Knowledge Base (Target-of-truth)
-│   ├── opcodes.md             # Registry of all 98 opcodes and arguments
+│   ├── opcodes.md             # Registry of all 102 opcodes and arguments
 │   ├── type_system.md         # Serialization schemas for types (Obj, Virtual, Enum, etc.)
+│   ├── function_format.md     # Function, native, global, constant serialization
 │   ├── version_deltas.md      # HashLink bytecode version variations (v3, v4, v5+)
+│   ├── header_format.md       # Header field layout reference
+│   ├── varint_encoding.md     # Variable-length integer encoding spec
 │   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
 │
 ├── hl_parser.py               # Pure logic, sequential, headless bytecode parser
 ├── hl_worker.py               # PyQt QThread wrapper for background processing
-└── app.py                     # Qt Virtual View (UI rendering and model logic)
+├── hl_logger.py               # VerboseLogger for byte-level debug logging
+├── app.py                     # Qt Virtual View (UI rendering and model logic)
+│
+└── tests/
+    ├── hl_helper.py           # Test helpers: build bytecode programmatically
+    ├── test_varint.py         # VarInt encoding/decoding tests
+    ├── test_parser.py         # Header, pool, type, globals, natives, functions tests
+    └── test_logger.py         # VerboseLogger write/flush/close tests
 ```
 
 ### Separation Rules
@@ -67,7 +77,7 @@ tests/
   __init__.py            # Package marker
   hl_helper.py           # Test helpers: build bytecode programmatically
   test_varint.py         # VarInt encoding/decoding (1-byte, 2-byte, 4-byte, signed)
-  test_parser.py         # Header + pool parsing, integration tests
+  test_parser.py         # Header + pool + types + globals + natives + functions parsing
   test_logger.py         # VerboseLogger write/flush/close behavior
 ```
 
@@ -130,6 +140,13 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 | `build_floats_pool(vals)` | Build f64 pool |
 | `build_strings_pool(strs)` | Build string pool |
 | `build_bytes_pool(data, offsets)` | Build v5+ bytes pool |
+| `build_type_*()` | Build individual type definitions (primitive, wrapper, funlike, objlike, etc.) |
+| `build_type_constructors_pool(types)` | Build types pool from type blobs |
+| `build_globals_pool(globals)` | Build globals pool |
+| `build_natives_pool(natives)` | Build natives pool |
+| `build_opcode_sequence(opcodes)` | Build opcode byte sequence with dummy args |
+| `build_function_entry(type, findex, regs, ops)` | Build single function entry |
+| `build_functions_pool(functions)` | Build functions pool from function entries |
 | `build_minimal_bytecode(...)` | Build complete parseable .hl blob |
 | `stream_from_bytes(data)` | Wrap bytes as BytesIO for parsing |
 
@@ -138,7 +155,12 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 - **Header parsing**: All version variants, all conditions (debug, no debug, empty pools)
 - **VarInt**: All size classes, signed values, round-trip, error handling
 - **Pools**: Each pool type, empty/single/many elements, truncated data
-- **Integration**: Full execute() cycle with progress callback
+- **Types**: All 24 type kinds, compound types (Obj fields/protos/bindings, Enum constructors), unknown kinds
+- **Globals**: Empty, non-empty, truncated
+- **Natives**: Empty, non-empty with correct findex/lib/name/type fields
+- **Functions**: Function headers (type/findex/nregs/nops), register types, opcode skipping with _OPCODE_NARGS, multiple functions, truncated data
+- **Name Resolution**: Proto-based naming, binding-based naming, entrypoint="init", priority rules
+- **Integration**: Full execute() cycle with progress callback across v3/v4/v5
 - **Logger**: File creation, message writing, flush behavior, edge cases
 
 ---

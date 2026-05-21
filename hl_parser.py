@@ -34,6 +34,116 @@ K_GUID     = 23
 K_HLAST    = 24  # Sentinel — marks end of hl_type_kind enum, not a real type
                  # but appears in some real-world compiled bytecode
 
+# === Opcode Argument Count Table ===
+# Maps each opcode index (0-101) to its number of VarInt arguments.
+# From hashlink/src/code.c hl_op_nargs via X-macro formula:
+#   (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
+# -1 = variable-length (opcode-specific handler required)
+_OPCODE_NARGS = [
+    2,  # 0  OMov
+    2,  # 1  OInt
+    2,  # 2  OFloat
+    2,  # 3  OBool
+    2,  # 4  OBytes
+    2,  # 5  OString
+    1,  # 6  ONull
+    3,  # 7  OAdd
+    3,  # 8  OSub
+    3,  # 9  OMul
+    3,  # 10 OSDiv
+    3,  # 11 OUDiv
+    3,  # 12 OSMod
+    3,  # 13 OUMod
+    3,  # 14 OShl
+    3,  # 15 OSShr
+    3,  # 16 OUShr
+    3,  # 17 OAnd
+    3,  # 18 OOr
+    3,  # 19 OXor
+    2,  # 20 ONeg
+    2,  # 21 ONot
+    1,  # 22 OIncr
+    1,  # 23 ODecr
+    2,  # 24 OCall0
+    3,  # 25 OCall1
+    4,  # 26 OCall2  (fixed: R + AR(4) = 2 regs on stream)
+    5,  # 27 OCall3  (fixed: R + AR(5) = 3 regs on stream)
+    6,  # 28 OCall4  (fixed: R + AR(6) = 4 regs on stream)
+    -1, # 29 OCallN  (variable: read count + count regs)
+    -1, # 30 OCallMethod (variable)
+    -1, # 31 OCallThis (variable)
+    -1, # 32 OCallClosure (variable)
+    2,  # 33 OStaticClosure
+    3,  # 34 OInstanceClosure
+    3,  # 35 OVirtualClosure
+    2,  # 36 OGetGlobal
+    2,  # 37 OSetGlobal
+    3,  # 38 OField
+    3,  # 39 OSetField
+    2,  # 40 OGetThis
+    2,  # 41 OSetThis
+    3,  # 42 ODynGet
+    3,  # 43 ODynSet
+    2,  # 44 OJTrue
+    2,  # 45 OJFalse
+    2,  # 46 OJNull
+    2,  # 47 OJNotNull
+    3,  # 48 OJSLt
+    3,  # 49 OJSGte
+    3,  # 50 OJSGt
+    3,  # 51 OJSLte
+    3,  # 52 OJULt
+    3,  # 53 OJUGte
+    3,  # 54 OJNotLt
+    3,  # 55 OJNotGte
+    3,  # 56 OJEq
+    3,  # 57 OJNotEq
+    1,  # 58 OJAlways
+    2,  # 59 OToDyn
+    2,  # 60 OToSFloat
+    2,  # 61 OToUFloat
+    2,  # 62 OToInt
+    2,  # 63 OSafeCast
+    2,  # 64 OUnsafeCast
+    2,  # 65 OToVirtual
+    0,  # 66 OLabel
+    1,  # 67 ORet
+    1,  # 68 OThrow
+    1,  # 69 ORethrow
+    -1, # 70 OSwitch (variable: val_reg + count + 2*count offsets)
+    1,  # 71 ONullCheck
+    2,  # 72 OTrap
+    1,  # 73 OEndTrap
+    3,  # 74 OGetI8
+    3,  # 75 OGetI16
+    3,  # 76 OGetMem
+    3,  # 77 OGetArray
+    3,  # 78 OSetI8
+    3,  # 79 OSetI16
+    3,  # 80 OSetMem
+    3,  # 81 OSetArray
+    1,  # 82 ONew
+    2,  # 83 OArraySize
+    2,  # 84 OType
+    2,  # 85 OGetType
+    2,  # 86 OGetTID
+    2,  # 87 ORef
+    2,  # 88 OUnref
+    2,  # 89 OSetref
+    -1, # 90 OMakeEnum (variable: read count + count regs)
+    2,  # 91 OEnumAlloc
+    2,  # 92 OEnumIndex
+    4,  # 93 OEnumField (fixed: R + AR(4) = 2 regs on stream)
+    3,  # 94 OSetEnumField
+    0,  # 95 OAssert
+    2,  # 96 ORefData
+    3,  # 97 ORefOffset
+    0,  # 98 ONop
+    3,  # 99 OPrefetch
+    3,  # 100 OAsm
+    1,  # 101 OCatch
+]
+
 # Primitives that have no serialized data beyond the kind byte
 PRIMITIVE_KINDS = frozenset({
     K_VOID, K_UI8, K_UI16, K_I32, K_I64, K_F32, K_F64,
@@ -101,6 +211,7 @@ class HLParser:
         self.types: List[dict] = []
         self.globals: List[int] = []
         self.natives: List[dict] = []
+        self.functions: List[dict] = []
 
     def _log(self, tag: str, message: str):
         if self._logger:
@@ -466,6 +577,184 @@ class HLParser:
         if progress_callback:
             progress_callback("Natives parsed.", 70)
 
+    # === Function Parsing ===
+
+    def _skip_opcodes(self, stream: BinaryIO, nops: int):
+        """Skip nops opcodes by reading and discarding their VarInt arguments.
+        
+        Uses the _OPCODE_NARGS table to know how many VarInts to read per opcode.
+        Variable-length opcodes (nargs == -1) read a count VarInt + that many more.
+        """
+        for i in range(nops):
+            op_idx = self.read_varint(stream, context=f"opcode[{i}].idx")
+            nargs = _OPCODE_NARGS[op_idx] if op_idx < len(_OPCODE_NARGS) else 0
+            if nargs >= 0:
+                for j in range(nargs):
+                    self.read_varint(stream, context=f"opcode[{i}].arg[{j}]")
+            else:
+                # Variable-length: read count + count VarInts
+                count = self.read_varint(stream, context=f"opcode[{i}].varcount")
+                for j in range(count):
+                    self.read_varint(stream, context=f"opcode[{i}].vararg[{j}]")
+
+    def parse_functions(self, stream: BinaryIO, progress_callback=None):
+        """Parse nfunctions function definitions from the stream.
+        
+        Each function: type_index + findex + nregs + nops + reg_types + opcodes
+        + debug info (if has_debug) + assign list (if has_debug).
+        
+        The opcodes are skipped (not decoded) — stored as raw bytes for Phase 4.
+        """
+        if progress_callback:
+            progress_callback("Parsing Functions...", 72)
+
+        offset_before = stream.tell()
+        self._log("FUNC", f"Starting function read at byte offset {offset_before}, nfunctions={self.nfunctions}")
+
+        self.functions = []
+        for i in range(self.nfunctions):
+            func_start = stream.tell()
+            type_idx = self.read_varint(stream, context=f"func[{i}].type")
+            findex = self.read_varint(stream, context=f"func[{i}].findex")
+            nregs = self.read_varint(stream, context=f"func[{i}].nregs")
+            nops = self.read_varint(stream, context=f"func[{i}].nops")
+
+            # Register types
+            reg_types = []
+            for j in range(nregs):
+                rt = self.read_varint(stream, context=f"func[{i}].regtype[{j}]")
+                reg_types.append(rt)
+
+            # Record raw body start position (before opcodes)
+            body_offset = stream.tell()
+
+            # Skip opcodes
+            self._skip_opcodes(stream, nops)
+
+            # Debug info (if has_debug)
+            if self.has_debug:
+                debug_lines = []
+                for j in range(nops):
+                    dl = self.read_varint(stream, context=f"func[{i}].dline[{j}]")
+                    debug_lines.append(dl)
+                debug_files = []
+                for j in range(nops):
+                    df = self.read_varint(stream, context=f"func[{i}].dfile[{j}]")
+                    debug_files.append(df)
+                debug_offsets = []
+                for j in range(nops):
+                    doff = self.read_varint(stream, context=f"func[{i}].doffset[{j}]")
+                    debug_offsets.append(doff)
+                # Assign list
+                nassigns = self.read_varint(stream, context=f"func[{i}].nassigns")
+                assign_vars = []
+                assign_regs = []
+                for j in range(nassigns):
+                    av = self.read_varint(stream, context=f"func[{i}].assign_var[{j}]")
+                    assign_vars.append(av)
+                    ar = self.read_varint(stream, context=f"func[{i}].assign_reg[{j}]")
+                    assign_regs.append(ar)
+            else:
+                debug_lines = []
+                debug_files = []
+                debug_offsets = []
+                assign_vars = []
+                assign_regs = []
+                nassigns = 0
+
+            func_end = stream.tell()
+
+            func = {
+                "type": type_idx,
+                "findex": findex,
+                "nregs": nregs,
+                "nops": nops,
+                "reg_types": reg_types,
+                "body_offset": body_offset,
+                "body_size": func_end - body_offset,
+                "name": None,  # resolved later by resolve_function_names
+                "parent_type": None,  # type index of parent class (resolved later)
+            }
+
+            if self.has_debug:
+                func["debug_lines"] = debug_lines
+                func["debug_files"] = debug_files
+                func["debug_offsets"] = debug_offsets
+                func["assign_vars"] = assign_vars
+                func["assign_regs"] = assign_regs
+                func["nassigns"] = nassigns
+
+            self.functions.append(func)
+
+            self._log("FUNC", f"  func[{i}]: type={type_idx} findex={findex} "
+                             f"nregs={nregs} nops={nops} "
+                             f"body_offset={body_offset} body_size={func_end - body_offset}")
+
+        offset_after = stream.tell()
+        self._log("FUNC", f"Read {len(self.functions)} functions, consumed {offset_after - offset_before} bytes")
+
+        # Resolve function names from protos/bindings
+        self._resolve_function_names()
+
+        if progress_callback:
+            progress_callback("Functions parsed.", 85)
+
+    def _resolve_function_names(self):
+        """Assign names to anonymous functions using class protos and bindings.
+        
+        Walks Obj types: protos name methods, bindings name static functions.
+        Entrypoint is always named 'init'.
+        """
+        if not self.functions:
+            return
+
+        # Build a map: findex → function index (within self.functions array)
+        findex_to_idx = {}
+        for i, f in enumerate(self.functions):
+            findex_to_idx[f["findex"]] = i
+
+        # Walk through Obj/Struct types for protos and bindings
+        for t_idx, t in enumerate(self.types):
+            kind = t.get("kind")
+            if kind not in (K_OBJ, K_STRUCT):
+                continue
+            # Protos: class methods
+            for proto in t.get("protos", []):
+                p_findex = proto.get("findex")
+                if p_findex in findex_to_idx:
+                    fn_idx = findex_to_idx[p_findex]
+                    self.functions[fn_idx]["name"] = proto.get("name")
+                    self.functions[fn_idx]["parent_type"] = t_idx
+                    self._log("FUNC", f"  Resolved proto: findex={p_findex} "
+                                      f"→ func[{fn_idx}] name={proto.get('name')} "
+                                      f"type[{t_idx}]")
+            # Bindings: static methods/properties
+            for binding in t.get("bindings", []):
+                b_findex = binding.get("findex")
+                if b_findex in findex_to_idx:
+                    fn_idx = findex_to_idx[b_findex]
+                    field_name = binding.get("field")
+                    if self.functions[fn_idx]["name"] is None:
+                        self.functions[fn_idx]["name"] = field_name
+                    if self.functions[fn_idx]["parent_type"] is None:
+                        self.functions[fn_idx]["parent_type"] = t_idx
+                    self._log("FUNC", f"  Resolved binding: findex={b_findex} "
+                                      f"→ func[{fn_idx}] name={field_name} "
+                                      f"type[{t_idx}]")
+
+        # Special: resolve natives by findex too
+        for nat in self.natives:
+            n_findex = nat.get("findex")
+            if n_findex in findex_to_idx:
+                pass  # natives are in a separate findex space; skip for now
+
+        # Entrypoint is always "init"
+        ep = self.entrypoint
+        if ep in findex_to_idx:
+            fn_idx = findex_to_idx[ep]
+            self.functions[fn_idx]["name"] = "init"
+            self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init")
+
     # === Main Entry Point ===
 
     def execute(self, stream=None, progress_callback=None):
@@ -475,6 +764,7 @@ class HLParser:
             self.parse_types(stream, progress_callback)
             self.parse_globals(stream, progress_callback)
             self.parse_natives(stream, progress_callback)
+            self.parse_functions(stream, progress_callback)
             if progress_callback:
                 progress_callback("Parsing completed.", 100)
             return
@@ -484,5 +774,6 @@ class HLParser:
             self.parse_types(f, progress_callback)
             self.parse_globals(f, progress_callback)
             self.parse_natives(f, progress_callback)
+            self.parse_functions(f, progress_callback)
             if progress_callback:
                 progress_callback("Parsing completed.", 100)

@@ -15,6 +15,8 @@ from tests.hl_helper import (
     build_type_objlike, build_type_virtual, build_type_abstract,
     build_type_enum, build_type_constructors_pool,
     build_globals_pool, build_natives_pool,
+    # Function helpers
+    build_function_entry, build_functions_pool, build_opcode_sequence,
 )
 
 
@@ -823,3 +825,234 @@ class TestFullIntegration:
         assert p.ints == [77]
         assert p.strings == ["marker"]
         assert p.types[0]["kind"] == K_I32
+
+
+# =============================================================================
+# Function Parsing Tests
+# =============================================================================
+
+
+class TestFunctionParsing:
+    """Function entries: type + findex + nregs + nops + reg_types + opcodes."""
+
+    def test_no_functions(self, parser):
+        """nfunctions=0 produces empty functions list."""
+        parser.nfunctions = 0
+        parser.parse_functions(stream_from_bytes(b""))
+        assert parser.functions == []
+
+    def test_single_function_minimal(self, parser):
+        """Minimal function: no regs, no opcodes."""
+        entry = build_function_entry(type_idx=0, findex=42, reg_types=[], opcodes=[])
+        parser.nfunctions = 1
+        parser.entrypoint = 0  # different from function's findex
+        parser.parse_functions(stream_from_bytes(entry))
+        assert len(parser.functions) == 1
+        f = parser.functions[0]
+        assert f["type"] == 0
+        assert f["findex"] == 42
+        assert f["nregs"] == 0
+        assert f["nops"] == 0
+        assert f["reg_types"] == []
+        assert f["name"] is None
+
+    def test_function_with_regs(self, parser):
+        """Function with 3 registers (types 3, 7, 0), no opcodes."""
+        entry = build_function_entry(type_idx=1, findex=5, reg_types=[3, 7, 0], opcodes=[])
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(entry))
+        f = parser.functions[0]
+        assert f["type"] == 1
+        assert f["findex"] == 5
+        assert f["nregs"] == 3
+        assert f["reg_types"] == [3, 7, 0]
+        assert f["nops"] == 0
+
+    def test_function_with_opcodes(self, parser):
+        """Function with registers and opcodes."""
+        regs = [3, 7]  # I32, Bool
+        ops = [66, 67, 1, 0]  # OLabel, ORet, OInt, OMov
+        entry = build_function_entry(type_idx=0, findex=0, reg_types=regs, opcodes=ops)
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(entry))
+        f = parser.functions[0]
+        assert f["type"] == 0
+        assert f["nregs"] == 2
+        assert f["reg_types"] == regs
+        assert f["nops"] == 4
+
+    def test_multiple_functions(self, parser):
+        """Multiple functions in sequence."""
+        fns = [
+            (0, 0, [3], [66, 67]),     # func[0]
+            (1, 1, [7, 3], [1, 2]),    # func[1]
+            (2, 2, [], [66]),           # func[2]
+        ]
+        data = build_functions_pool(fns)
+        parser.nfunctions = 3
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.functions) == 3
+        assert parser.functions[0]["findex"] == 0
+        assert parser.functions[1]["findex"] == 1
+        assert parser.functions[2]["findex"] == 2
+        assert parser.functions[0]["nregs"] == 1
+        assert parser.functions[1]["nregs"] == 2
+        assert parser.functions[2]["nregs"] == 0
+        assert parser.functions[0]["nops"] == 2
+        assert parser.functions[1]["nops"] == 2
+        assert parser.functions[2]["nops"] == 1
+
+    def test_function_with_variable_arg_opcode(self, parser):
+        """Variable-arg opcodes (OCallN = 29) are skipped correctly."""
+        # OCallN: write count=2, then 2 dummy args
+        ops = [29, 67]  # OCallN + ORet
+        entry = build_function_entry(type_idx=0, findex=0, reg_types=[3, 7], opcodes=ops)
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(entry))
+        f = parser.functions[0]
+        assert f["nops"] == 2
+        assert f["nregs"] == 2
+
+    def test_truncated_function_raises(self, parser):
+        """Incomplete function header raises error."""
+        data = encode_varint(0) + encode_varint(0)  # type + findex, missing nregs
+        parser.nfunctions = 1
+        with pytest.raises(HLParserError):
+            parser.parse_functions(stream_from_bytes(data))
+
+    def test_integration_with_functions_v5(self):
+        """Full bytecode with functions, parsed end-to-end."""
+        types_data = [
+            build_type_primitive(K_I32),    # type[0]: I32
+            build_type_primitive(K_F64),    # type[1]: F64
+        ]
+        functions_data = [
+            (0, 0, [3, 7], [66, 67]),   # type=I32, findex=0, regs=[I32,Bool]
+            (1, 1, [7], [1, 0]),         # type=F64, findex=1, regs=[Bool]
+        ]
+        bc = build_minimal_bytecode(
+            version=5,
+            ints=[42],
+            strings=["test"],
+            types=types_data,
+            functions=functions_data,
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert len(p.functions) == 2
+        assert p.functions[0]["type"] == 0
+        assert p.functions[0]["findex"] == 0
+        assert p.functions[0]["nregs"] == 2
+        assert p.functions[0]["reg_types"] == [3, 7]
+        assert p.functions[0]["nops"] == 2
+        assert p.functions[1]["type"] == 1
+        assert p.functions[1]["findex"] == 1
+        assert p.functions[1]["nregs"] == 1
+        assert p.functions[1]["reg_types"] == [7]
+        assert p.functions[1]["nops"] == 2
+        # Verify earlier sections intact
+        assert p.ints == [42]
+        assert p.strings == ["test"]
+        assert len(p.types) == 2
+        assert len(p.globals) == 0
+        assert len(p.natives) == 0
+
+
+class TestFunctionNameResolution:
+    """findex→name resolution via protos, bindings, and entrypoint."""
+
+    def test_function_name_from_proto(self, parser):
+        """Function gets name from class proto."""
+        # Build a simple class with one proto
+        t_void = build_type_primitive(K_VOID)  # type[0]
+        t_obj = build_type_objlike(
+            kind=K_OBJ, name_si=0, super_si=0, global_si=0,
+            fields=[],
+            protos=[(5, 1, 0)],  # name=5 (string index), findex=1
+            bindings=[],
+        )
+        parser.ntypes = 2
+        parser.parse_types(stream_from_bytes(
+            build_type_constructors_pool([t_void, t_obj])
+        ))
+        parser.strings = [None, None, None, None, None, "toString"]
+
+        # One function with findex=1
+        fn_data = build_functions_pool([(0, 1, [], [])])
+        parser.nfunctions = 1
+        parser.natives = []
+        parser.entrypoint = 0  # don't name findex=1 as init
+        parser.parse_functions(stream_from_bytes(fn_data))
+
+        assert len(parser.functions) == 1
+        assert parser.functions[0]["name"] == 5  # name is string index 5
+        assert parser.functions[0]["parent_type"] == 1
+
+    def test_function_name_from_binding(self, parser):
+        """Function gets name from class binding (static method)."""
+        t_void = build_type_primitive(K_VOID)  # type[0]
+        t_obj = build_type_objlike(
+            kind=K_OBJ, name_si=0, super_si=0, global_si=0,
+            fields=[],
+            protos=[],
+            bindings=[(10, 1)],  # field=10 (string index), findex=1
+        )
+        parser.ntypes = 2
+        parser.parse_types(stream_from_bytes(
+            build_type_constructors_pool([t_void, t_obj])
+        ))
+
+        fn_data = build_functions_pool([(0, 1, [], [])])
+        parser.nfunctions = 1
+        parser.natives = []
+        parser.entrypoint = 0
+        parser.parse_functions(stream_from_bytes(fn_data))
+
+        assert parser.functions[0]["name"] == 10  # field index 10
+        assert parser.functions[0]["parent_type"] == 1
+
+    def test_entrypoint_is_named_init(self, parser):
+        """Entrypoint function gets name 'init'."""
+        fn_data = build_functions_pool([
+            (0, 0, [], []),
+            (0, 1, [], []),
+        ])
+        parser.nfunctions = 2
+        parser.natives = []
+        parser.entrypoint = 1  # second function is entrypoint
+        parser.parse_functions(stream_from_bytes(fn_data))
+
+        assert parser.functions[1]["name"] == "init"
+
+    def test_proto_takes_priority_over_binding(self, parser):
+        """Proto name takes priority if both proto and binding target same findex."""
+        # Both proto and binding reference findex=1
+        t_void = build_type_primitive(K_VOID)  # type[0]
+        t_obj = build_type_objlike(
+            kind=K_OBJ, name_si=0, super_si=0, global_si=0,
+            fields=[],
+            protos=[(5, 1, 0)],   # name=5, findex=1
+            bindings=[(10, 1)],   # field=10, findex=1
+        )
+        parser.ntypes = 2
+        parser.parse_types(stream_from_bytes(
+            build_type_constructors_pool([t_void, t_obj])
+        ))
+
+        fn_data = build_functions_pool([(0, 1, [], [])])
+        parser.nfunctions = 1
+        parser.natives = []
+        parser.entrypoint = 0
+        parser.parse_functions(stream_from_bytes(fn_data))
+
+        # Proto sets name=5, then binding sees name is already set, skips
+        assert parser.functions[0]["name"] == 5  # proto won
+
+    def test_function_without_proto_or_binding_remains_unnamed(self, parser):
+        """No proto or binding → name stays None."""
+        fn_data = build_functions_pool([(0, 42, [], [])])
+        parser.nfunctions = 1
+        parser.natives = []
+        parser.entrypoint = 0
+        parser.parse_functions(stream_from_bytes(fn_data))
+        assert parser.functions[0]["name"] is None

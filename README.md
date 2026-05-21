@@ -64,9 +64,25 @@ The header is immediately followed by the data pools:
 ```text
 hl_decompiler/
 │
-├── hl_parser.py       # Sequential file stream reading, header & pool parsing logic
-├── hl_worker.py       # QThread manager preventing GUI freeze during operations
-└── app.py             # Qt Model-View-Controller framework and UI construction
+├── docs/                      # Knowledge base (technical specifications)
+│   ├── opcodes.md             # Registry of all 102 opcodes and arguments
+│   ├── type_system.md         # Type serialization schemas (24 kinds)
+│   ├── function_format.md     # Function, native, global, constant serialization
+│   ├── version_deltas.md      # v3/v4/v5 header and section differences
+│   ├── header_format.md       # Header field layout reference
+│   ├── varint_encoding.md     # Variable-length integer encoding spec
+│   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
+│
+├── hl_parser.py               # Pure logic, sequential, headless bytecode parser
+├── hl_worker.py               # PyQt QThread wrapper for background processing
+├── hl_logger.py               # VerboseLogger for byte-level debug logging
+├── app.py                     # Qt Virtual View (UI rendering and model logic)
+│
+└── tests/
+    ├── hl_helper.py           # Test helpers: build bytecode programmatically
+    ├── test_varint.py         # VarInt encoding/decoding tests
+    ├── test_parser.py         # Header, pool, type, function parsing tests
+    └── test_logger.py         # VerboseLogger write/flush/close tests
 ```
 
 ---
@@ -92,7 +108,7 @@ hl_decompiler/
 ## Development Roadmap
 
 - [x] **Phase 1:** Non-blocking async parser, dynamic version header reading, string pool rendering, virtual list integration.
-- [ ] **Phase 2:** Implement structures parser for Types, Globals, and Native mappings.
-- [ ] **Phase 3:** Map unnamed functions back to class methods (Protos) and static structures (Bindings).
+- [x] **Phase 2:** Implement structures parser for Types (24 kinds), Globals, and Native mappings, with tabbed UI views.
+- [x] **Phase 3:** Map unnamed functions back to class methods (Protos) and static structures (Bindings), with functions tab.
 - [ ] **Phase 4:** Develop opcode decoding for the 98 VM instructions and implement the control flow graph (CFG) visualizer.
 - [ ] **Phase 5:** Complete AST reconstruction for basic decompiler generation.

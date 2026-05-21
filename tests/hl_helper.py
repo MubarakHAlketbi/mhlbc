@@ -114,6 +114,8 @@ def build_minimal_bytecode(
     types: Optional[list[bytes]] = None,
     globals_: Optional[list[int]] = None,
     natives: Optional[list[tuple[int, int, int, int]]] = None,
+    functions: Optional[list[tuple[int, int, list[int], list[int]]]] = None,
+    entrypoint: int = 0,
 ) -> bytes:
     """Build a complete minimal .hl bytecode blob for testing.
     
@@ -124,6 +126,8 @@ def build_minimal_bytecode(
         types: List of serialized type definitions (each is bytes from build_type_*)
         globals_: List of global type indices
         natives: List of (lib_si, name_si, type_idx, findex) tuples
+        functions: List of (type_idx, findex, reg_types, opcodes) tuples
+        entrypoint: Function index for the init function
     """
     ints = ints or []
     floats = floats or []
@@ -137,6 +141,7 @@ def build_minimal_bytecode(
     ntypes = len(types) if types else 0
     nglobals = len(globals_) if globals_ else 0
     nnatives = len(natives) if natives else 0
+    nfunctions = len(functions) if functions else 0
     
     header = build_header(
         version=version,
@@ -148,8 +153,8 @@ def build_minimal_bytecode(
         ntypes=ntypes,
         nglobals=nglobals,
         nnatives=nnatives,
-        nfunctions=0,
-        entrypoint=0,
+        nfunctions=nfunctions,
+        entrypoint=entrypoint,
     )
     
     pools = build_ints_pool(ints)
@@ -174,6 +179,10 @@ def build_minimal_bytecode(
     # Natives section
     if natives:
         pools += build_natives_pool(natives)
+    
+    # Functions section
+    if functions:
+        pools += build_functions_pool(functions)
     
     return header + pools
 
@@ -330,3 +339,97 @@ def build_natives_pool(natives: list[tuple[int, int, int, int]]) -> bytes:
 def stream_from_bytes(data: bytes) -> io.BytesIO:
     """Wrap bytes in a seekable binary stream for parsing."""
     return io.BytesIO(data)
+
+
+# === Function Building ===
+
+# Opcode nargs table mirroring hl_parser._OPCODE_NARGS for test helpers
+_OPCODE_NARGS = [
+    2, 2, 2, 2, 2, 2, 1, 3, 3, 3,  # 0-9
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  # 10-19
+    2, 2, 1, 1, 2, 3, 4, 5, 6, -1, # 20-29
+    -1, -1, -1, 2, 3, 3, 2, 2, 3, 3, # 30-39
+    2, 2, 3, 3, 2, 2, 2, 2, 3, 3, # 40-49
+    3, 3, 3, 3, 3, 3, 3, 3, 1, 2, # 50-59
+    2, 2, 2, 2, 2, 0, 1, 1, 1, -1, # 60-69
+    1, 2, 1, 3, 3, 3, 3, 3, 3, 3, # 70-79
+    3, 1, 2, 2, 2, 2, 2, 2, 2, -1, # 80-89
+    -1, 2, 2, 4, 3, 0, 2, 3, 0, 3, # 90-99
+    3, 1,  # 100 OAsm, 101 OCatch
+]
+
+def build_opcode_sequence(opcodes: list[int]) -> bytes:
+    """Build a sequence of opcode bytes from a list of opcode indices.
+    
+    Each opcode index is encoded as a VarInt, followed by its argument VarInts.
+    For fixed-arg opcodes, each arg is encoded as VarInt(0) (dummy register/pool index).
+    For variable-arg opcodes, a count VarInt is written followed by that many dummy VarInts.
+    
+    Args:
+        opcodes: List of opcode indices to encode (args are filled with zeros).
+    """
+    data = b""
+    for op in opcodes:
+        data += encode_varint(op)
+        nargs = _OPCODE_NARGS[op] if op < len(_OPCODE_NARGS) else 0
+        if nargs >= 0:
+            for _ in range(nargs):
+                data += encode_varint(0)
+        else:
+            # Variable args: write count=0 (no actual args)
+            data += encode_varint(0)
+    return data
+
+
+def build_function_body(
+    reg_types: list[int],
+    opcodes: list[int],
+    has_debug: bool = False,
+) -> bytes:
+    """Build the full body of a function entry (everything after nops).
+    
+    Returned bytes: reg_types + opcodes + debug_info(if has_debug) + assigns(if has_debug).
+    """
+    data = b""
+    # Register types
+    for rt in reg_types:
+        data += encode_varint(rt)
+    # Opcodes
+    data += build_opcode_sequence(opcodes)
+    # Debug info (if has_debug)
+    if has_debug:
+        for _ in opcodes:
+            data += encode_varint(0)  # debug line
+        for _ in opcodes:
+            data += encode_varint(0)  # debug file
+        for _ in opcodes:
+            data += encode_varint(0)  # debug offset
+        data += encode_varint(0)  # nassigns = 0
+    return data
+
+
+def build_function_entry(
+    type_idx: int,
+    findex: int,
+    reg_types: list[int],
+    opcodes: list[int],
+    has_debug: bool = False,
+) -> bytes:
+    """Build a single function entry.
+    
+    Format: type_idx + findex + nregs + nops + reg_types + opcodes + debug.
+    """
+    data = encode_varint(type_idx)
+    data += encode_varint(findex)
+    data += encode_varint(len(reg_types))
+    data += encode_varint(len(opcodes))
+    data += build_function_body(reg_types, opcodes, has_debug)
+    return data
+
+
+def build_functions_pool(functions: list[tuple[int, int, list[int], list[int]]]) -> bytes:
+    """Build a functions pool from a list of (type_idx, findex, reg_types, opcodes) tuples."""
+    data = b""
+    for type_idx, findex, reg_types, opcodes in functions:
+        data += build_function_entry(type_idx, findex, reg_types, opcodes)
+    return data

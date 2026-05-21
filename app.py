@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QTabWidget, QStatusBar
 )
 from hl_worker import HLParseWorker
-from hl_parser import HLParser, KIND_NAMES
+from hl_parser import HLParser, KIND_NAMES, K_OBJ, K_STRUCT
 from hl_logger import VerboseLogger
 
 
@@ -150,6 +150,49 @@ class NativesListModel(QAbstractListModel):
         self.endResetModel()
 
 
+class FunctionsListModel(QAbstractListModel):
+    """Memory-efficient model for the functions pool."""
+    def __init__(self, parser=None):
+        super().__init__()
+        self._parser = parser
+        self._data = parser.functions if parser else []
+
+    def rowCount(self, parent=QModelIndex()):
+        return len(self._data)
+
+    def data(self, index, role=Qt.ItemDataRole.DisplayRole):
+        if not index.isValid():
+            return None
+        if role == Qt.ItemDataRole.DisplayRole:
+            f = self._data[index.row()]
+            name = f.get("name")
+            if name is not None:
+                name_str = str(name)
+                if isinstance(name, int) and self._parser and self._parser.strings:
+                    if name < len(self._parser.strings):
+                        name_str = self._parser.strings[name]
+                name_part = f"name={name_str}"
+            else:
+                name_part = "name=?"
+            parent_type = f.get("parent_type", None)
+            if parent_type is not None:
+                parent_part = f" type[{parent_type}]"
+            else:
+                parent_part = ""
+            return (f"[{index.row()}] type={f['type']} "
+                    f"findex={f['findex']} "
+                    f"{name_part}"
+                    f"{parent_part} "
+                    f"regs={f['nregs']} ops={f['nops']}")
+        return None
+
+    def update_data(self, parser):
+        self.beginResetModel()
+        self._parser = parser
+        self._data = parser.functions if parser else []
+        self.endResetModel()
+
+
 class DecompilerApp(QMainWindow):
     def __init__(self, verbose: bool = False):
         super().__init__()
@@ -165,6 +208,7 @@ class DecompilerApp(QMainWindow):
         self.types_model = TypesListModel()
         self.globals_model = GlobalsListModel()
         self.natives_model = NativesListModel()
+        self.functions_model = FunctionsListModel()
 
         self.setup_ui()
 
@@ -232,6 +276,16 @@ class DecompilerApp(QMainWindow):
         self.list_natives.setModel(self.natives_model)
         natives_layout.addWidget(self.list_natives)
         self.tabs.addTab(natives_widget, "Natives")
+
+        # Functions tab
+        functions_widget = QWidget()
+        functions_layout = QVBoxLayout(functions_widget)
+        self.lbl_functions_title = QLabel("Function Definitions:")
+        functions_layout.addWidget(self.lbl_functions_title)
+        self.list_functions = QListView()
+        self.list_functions.setModel(self.functions_model)
+        functions_layout.addWidget(self.list_functions)
+        self.tabs.addTab(functions_widget, "Functions")
 
         layout.addWidget(self.tabs)
 
@@ -302,12 +356,14 @@ class DecompilerApp(QMainWindow):
         self.types_model.update_data(parser)
         self.globals_model.update_data(parser)
         self.natives_model.update_data(parser)
+        self.functions_model.update_data(parser)
 
         # Update tab labels with counts
         self.tabs.setTabText(0, f"Strings ({parser.nstrings})")
         self.tabs.setTabText(1, f"Types ({parser.ntypes})")
         self.tabs.setTabText(2, f"Globals ({parser.nglobals})")
         self.tabs.setTabText(3, f"Natives ({parser.nnatives})")
+        self.tabs.setTabText(4, f"Functions ({parser.nfunctions})")
 
     def on_parse_failure(self, error_message: str):
         self.btn_open.setEnabled(True)
