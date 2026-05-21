@@ -205,6 +205,36 @@ Regressions are defined as any target that parsed successfully before a change f
 3. Verify the project can parse it end-to-end
 4. Commit the target (ensure it's not a commercial program without license — prefer free/open-source Haxe programs)
 
+### Farever Target Notes
+
+The **Farever** target (`workspace/Farever/hlboot.dat`) is a real-world HashLink bytecode
+from the Steam game Farever (Haxe/Heaps engine). Two copies exist:
+
+| Source | MD5 | Size | Notes |
+|--------|-----|------|-------|
+| Windows (Steam) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Original game file |
+| Workspace (initial) | `70250a679ed6cf7b658b0b3753213262` | 13,218,460 | **Truncated copy** (-92KB) |
+
+The initial workspace copy was transferred incorrectly (likely via text-mode copy),
+producing a truncated file that caused false "corrupt binary" conclusions.
+Always verify with the Steam copy.
+
+**Function pool analysis (clean copy):**
+- Header parses cleanly: v4, has_debug=True, nfunctions=45365
+- Function pool starts at byte 2,981,430, 10,329,974 bytes total (avg 228 bytes/function)
+- func[0]: valid (nops=3527, nregs=132)
+- func[1]: nregs=12735, **nops=-1** (malformed). The `a001` VarInt encoding with sign bit
+  set causes signed decode to -1. If read as unsigned: nops=1.
+- Subsequent functions have a repeating pattern where the 3rd VarInt field (nregs)
+  is always `a001` (= -1 signed), suggesting either:
+  a) The function pool has placeholder entries that the HL runtime skips
+  b) The function count in the header includes padding entries
+  c) A format variation that differs from the standard v4 spec
+
+**Parser behavior:** ~30 functions parse before cascading desync from corrupt entries.
+The parser gracefully detects corruption (warnings, malformed flags, no crashes).
+The Farever target remains a robustness regression target, not a completeness benchmark.
+
 ---
 
 ## 5. Recommended Directory Expansions
@@ -291,6 +321,20 @@ python logalyzer.py query logs/parse_dump.db "..."    # Ad-hoc SQL
 ```
 
 Every log produced during development should be indexed with `logalyzer` before investigation begins.
+
+### 9.1 Log Analysis Workflow (AI Agents)
+
+**Never analyze a raw dump.md with grep/Python reads while logalyzer is indexing.** This is a known antipattern from previous sessions — firing a background index then immediately querying the raw file directly wastes tokens, duplicates work, and fragments the analysis.
+
+**Correct workflow:**
+
+1. **Index first** — `logalyzer.py index dump.md` (takes ~30s for 600MB)
+2. **Wait for it** — if using background mode, poll or block on completion before starting analysis
+3. **Query the DB** — use `logalyzer stats`, `errors`, `query`, `sample` to answer questions from the structured SQLite store
+
+Rationale: the indexed DB supports instant ad-hoc SQL queries, deduplicated counts, tag/section filtering, and anomaly detection. grep/Python on the raw file re-implements what the DB already provides, and produces incomplete results (no cross-section joins, no byte-offset arithmetic, no deduplication).
+
+If indexing is already running in background, do NOT touch the raw file. Wait for the exit code, then use the DB.
 
 ### 10. Versioning & Phase Tags
 

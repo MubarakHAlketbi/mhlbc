@@ -871,7 +871,7 @@ class TestFunctionParsing:
     def test_function_with_opcodes(self, parser):
         """Function with registers and opcodes."""
         regs = [3, 7]  # I32, Bool
-        ops = [66, 67, 1, 0]  # OLabel, ORet, OInt, OMov
+        ops = [67, 68, 2, 1]  # OLabel, ORet, OInt, OMov
         entry = build_function_entry(type_idx=0, findex=0, reg_types=regs, opcodes=ops)
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
@@ -884,9 +884,10 @@ class TestFunctionParsing:
     def test_multiple_functions(self, parser):
         """Multiple functions in sequence."""
         fns = [
-            (0, 0, [3], [66, 67]),     # func[0]
-            (1, 1, [7, 3], [1, 2]),    # func[1]
-            (2, 2, [], [66]),           # func[2]
+            # Old indices shifted +1: OLabel=67, ORet=68; OMov=2, OInt=3
+            (0, 0, [3], [67, 68]),     # func[0]: OLabel, ORet
+            (1, 1, [7, 3], [2, 3]),    # func[1]: OMov, OInt
+            (2, 2, [], [67]),           # func[2]: OLabel
         ]
         data = build_functions_pool(fns)
         parser.nfunctions = 3
@@ -905,7 +906,7 @@ class TestFunctionParsing:
     def test_function_with_variable_arg_opcode(self, parser):
         """Variable-arg opcodes (OCallN = 29) are skipped correctly."""
         # OCallN: write count=2, then 2 dummy args
-        ops = [29, 67]  # OCallN + ORet
+        ops = [30, 68]  # OCallN + ORet
         entry = build_function_entry(type_idx=0, findex=0, reg_types=[3, 7], opcodes=ops)
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
@@ -925,14 +926,15 @@ class TestFunctionParsing:
                    for w in parser.parse_warnings)
 
     def test_negative_nops_clamped(self, parser):
-        """Function with nops=-1 is handled gracefully (skipped, resync attempted)."""
+        """Function with nops=-1 is handled gracefully (reads through, records malformed)."""
         data = encode_varint(0) + encode_varint(0)  # type=0, findex=0
         data += encode_varint(0)                    # nregs=0
         data += encode_varint(-1)                   # nops=-1 (signed VarInt)
-        # No following data → resync fails → parser stops
+        # No following data → malformed recorded, then loop exits
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(data))
-        assert len(parser.functions) == 0  # no placeholder recorded (resync failed)
+        assert len(parser.functions) == 1  # malformed placeholder recorded
+        assert parser.functions[0]["malformed"]
         assert any("negative nops" in w["message"] for w in parser.parse_warnings)
 
     def test_negative_nregs_clamped(self, parser):
@@ -950,8 +952,8 @@ class TestFunctionParsing:
         assert any("negative nregs" in w["message"] for w in parser.parse_warnings)
 
     def test_negative_nops_resync(self, parser):
-        """Malformed function is skipped and resync finds the next valid function."""
-        parser.ntypes = 2   # needed for resync validation
+        """Malformed function is read through and next function is parsed directly."""
+        parser.ntypes = 2   # needed for type validation
         parser.nnatives = 0
         parser.nfunctions = 2
         # Manually build func1 with nops=-1 (malformed)
@@ -960,20 +962,19 @@ class TestFunctionParsing:
         data += encode_varint(-1)                     # nops=-1 (clamped to 0)
         data += encode_varint(3)                      # reg_type[0] = 3
         # Second function: normal, valid (use build helper)
-        func2 = build_function_entry(type_idx=1, findex=1, reg_types=[3], opcodes=[67])
+        func2 = build_function_entry(type_idx=1, findex=1, reg_types=[3], opcodes=[68])
         stream = stream_from_bytes(data + func2)
         parser.parse_functions(stream)
-        # Should have parsed func1 (malformed)
-        assert len(parser.functions) >= 1
+        # Should have parsed both functions
+        assert len(parser.functions) >= 2
         assert parser.functions[0]["malformed"]
-        # Resync should find func2
-        resync_msgs = [w["message"] for w in parser.parse_warnings if "Resynced" in w["message"]]
-        assert len(resync_msgs) > 0, \
-            f"No Resynced messages. All warnings: {[w['message'] for w in parser.parse_warnings]}"
+        assert not parser.functions[1]["malformed"]
+        assert parser.functions[1]["type"] == 1
+        assert parser.functions[1]["findex"] == 1
 
     def test_malformed_field_present(self, parser):
         """Every function dict has a malformed field."""
-        entry = build_function_entry(type_idx=0, findex=0, reg_types=[3], opcodes=[67])
+        entry = build_function_entry(type_idx=0, findex=0, reg_types=[3], opcodes=[68])
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
         assert "malformed" in parser.functions[0]

@@ -65,14 +65,18 @@ VarInt: opcode_count (nops)
 --- Register types (nregs times) ---
 VarInt: register_type_index
 
---- Opcodes (nops times) ---
-VarInt: opcode_index (0-101)
+|--- Opcodes (nops times) ---
+|**single byte:** opcode_index (0-103)
 opcode-dependent arguments (see opcodes.md)
+|Full opcode encoding per hl_read_opcode:
+|  1 byte: opcode index (hl_read_b, NOT a VarInt)
+|  nargs × INDEX() signed VarInts (for fixed-arg opcodes)
+|  or vararg encoding for OCallN/OSwitch/etc. (see opcodes.md)
 
---- Debug info (if has_debug) ---
-nops × VarInt: source_line_numbers
-nops × VarInt: source_file_indices (into debug_files)
-nops × VarInt: source_file_offsets
+|--- Debug info (RLE-encoded, if has_debug) ---
+RLE-encoded (file_index, line) per opcode, NOT flat VarInt arrays.
+See hl_read_debug_infos in hashlink/src/code.c for the RLE format.
+Single control-byte encoding with run-length, file-change, and delta modes.
 
 --- Assign list (v3+, if has_debug) ---
 VarInt: nassigns

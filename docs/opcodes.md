@@ -10,22 +10,37 @@
 
 Each opcode takes 3 conceptual argument slots. The argument types are defined as:
 
-| Code | Macro | Meaning | Encoding |
-|------|-------|---------|----------|
-| 0 | `X` | Unused | Nothing |
-| 1 | `R` | Register (written destination) | VarInt |
-| 2 | `R_NW` | Register (read-only source) | VarInt |
-| 3 | `C` | Constant pool index | VarInt |
-| 4 | `G` | Global table index | VarInt |
-| 5 | `AR` | Argument count (used as count prefix) | VarInt for count, then N register VarInts |
-| 6 | `J` | Jump offset (instruction delta) | VarInt (signed) |
-| -1 | `VAR_ARGS` | Variable argument list | VarInt count, then N register VarInts |
+|| Code | Macro | Meaning | Encoding |
+||------|-------|---------|----------|
+|| 0 | `X` | Unused | Nothing |
+|| 1 | `R` | Register (written destination) | signed VarInt |
+|| 2 | `R_NW` | Register (read-only source) | signed VarInt |
+|| 3 | `C` | Constant pool index | signed VarInt |
+|| 4 | `G` | Global table index | signed VarInt |
+|| 5 | `AR` | Argument count (fixed or variable) | Fixed: from OP constant. Variable: **single byte** count, then N signed VarInts |
+|| 6 | `J` | Jump offset (instruction delta) | signed VarInt |
+|| -1 | `VAR_ARGS` | Variable argument list | p1=INDEX, p2=INDEX, **single byte** count, then count × INDEX values |
 
-**Special encoding rule for OCall2/OCall3/OCall4/OEnumField:**
-When argument slot `_b` is `AR` and `_c` is a constant (4, 5, 6, or 4), the count is the constant value (not read from the stream). The registers are read directly.
+**Opcode index encoding:** The opcode index itself is a **single byte** (READ/hl_read_b), **not** a VarInt. This matches the HL reference at `hashlink/src/code.c`:
+```c
+o->op = (hl_op)READ();  // single byte
+```
 
-**CallN / CallMethod / CallThis / CallClosure / Switch / MakeEnum:**
-When `_c` is `VAR_ARGS` (-1), a VarInt count is read from the stream, followed by that many register VarInts.
+**Arg encoding for vararg opcodes (nargs == -1 in hl_op_nargs):**
+For OCallN, OCallMethod, OCallThis, OCallClosure, OMakeEnum:
+```
+p1 = INDEX()         — signed VarInt (register)
+p2 = INDEX()         — signed VarInt (register/type)
+p3 = READ()          — single byte count
+extra[0..p3-1] = INDEX()  — p3 × signed VarInts
+```
+For OSwitch:
+```
+p1 = UINDEX()        — unsigned VarInt (register)
+p2 = UINDEX()        — unsigned VarInt (case count)
+extra[0..p2-1] = UINDEX()  — p2 × unsigned VarInts (case offsets)
+p3 = UINDEX()        — unsigned VarInt (default offset)
+```
 
 ---
 

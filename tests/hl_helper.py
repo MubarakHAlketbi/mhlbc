@@ -344,40 +344,48 @@ def stream_from_bytes(data: bytes) -> io.BytesIO:
 # === Function Building ===
 
 # Opcode nargs table mirroring hl_parser._OPCODE_NARGS for test helpers
+# Opcode index is a single byte (READ/hl_read_b). Args are signed VarInts.
+# Auto-generated from hashlink/src/opcodes.h (104 opcodes).
 _OPCODE_NARGS = [
-    2, 2, 2, 2, 2, 2, 1, 3, 3, 3,  # 0-9
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  # 10-19
-    2, 2, 1, 1, 2, 3, 4, 5, 6, -1, # 20-29
-    -1, -1, -1, 2, 3, 3, 2, 2, 3, 3, # 30-39
-    2, 2, 3, 3, 2, 2, 2, 2, 3, 3, # 40-49
-    3, 3, 3, 3, 3, 3, 3, 3, 1, 2, # 50-59
-    2, 2, 2, 2, 2, 0, 1, 1, 1, -1, # 60-69
-    1, 2, 1, 3, 3, 3, 3, 3, 3, 3, # 70-79
-    3, 1, 2, 2, 2, 2, 2, 2, 2, -1, # 80-89
-    -1, 2, 2, 4, 3, 0, 2, 3, 0, 3, # 90-99
-    3, 1,  # 100 OAsm, 101 OCatch
+    0, 2, 2, 2, 2, 2, 2, 1, 3, 3,  #  0-  9
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  # 10- 19
+    3, 2, 2, 1, 1, 2, 3, 4, 5, 6,  # 20- 29
+    -1, -1, -1, -1, 2, 3, 3, 2, 2, 3,  # 30- 39
+    3, 2, 2, 3, 3, 2, 2, 2, 2, 3,  # 40- 49
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 1,  # 50- 59
+    2, 2, 2, 2, 2, 2, 2, 0, 1, 1,  # 60- 69
+    1, -1, 1, 2, 1, 3, 3, 3, 3, 3,  # 70- 79
+    3, 3, 3, 1, 2, 2, 2, 2, 2, 2,  # 80- 89
+    2, -1, 2, 2, 4, 3, 0, 2, 3, 0,  # 90- 99
+    3, 3, 1, 0,  # 100-103
 ]
 
 def build_opcode_sequence(opcodes: list[int]) -> bytes:
     """Build a sequence of opcode bytes from a list of opcode indices.
-    
-    Each opcode index is encoded as a VarInt, followed by its argument VarInts.
-    For fixed-arg opcodes, each arg is encoded as VarInt(0) (dummy register/pool index).
-    For variable-arg opcodes, a count VarInt is written followed by that many dummy VarInts.
-    
+
+    Per HL reference (code.c hl_read_opcode):
+    - Opcode index is a single byte (READ/hl_read_b), not a VarInt.
+    - Args are INDEX (signed VarInts) with dummy value 0.
+    - Vararg opcodes: p1=INDEX(0), p2=INDEX(0), byte count, count × INDEX(0).
+
     Args:
         opcodes: List of opcode indices to encode (args are filled with zeros).
     """
     data = b""
     for op in opcodes:
-        data += encode_varint(op)
+        # Opcode index is a single byte (hl_read_b)
+        if op > 255:
+            raise ValueError(f"Opcode index {op} exceeds byte range [0, 255]")
+        data += bytes([op])
         nargs = _OPCODE_NARGS[op] if op < len(_OPCODE_NARGS) else 0
         if nargs >= 0:
             for _ in range(nargs):
                 data += encode_varint(0)
         else:
-            # Variable args: write count=0 (no actual args)
-            data += encode_varint(0)
+            # Variable args: p1=INDEX(0), p2=INDEX(0), byte count=0, then no extra
+            data += encode_varint(0)  # p1
+            data += encode_varint(0)  # p2
+            data += bytes([0])        # count = 0 (single byte)
     return data
 
 
@@ -396,14 +404,17 @@ def build_function_body(
         data += encode_varint(rt)
     # Opcodes
     data += build_opcode_sequence(opcodes)
-    # Debug info (if has_debug)
+    # Debug info (RLE-encoded per hl_read_debug_infos)
     if has_debug:
-        for _ in opcodes:
-            data += encode_varint(0)  # debug line
-        for _ in opcodes:
-            data += encode_varint(0)  # debug file
-        for _ in opcodes:
-            data += encode_varint(0)  # debug offset
+        # Simple RLE: file=0, then run-length of N entries with line=0, delta=0
+        n = len(opcodes)
+        data += bytes([0x01, 0x00])  # file change → curfile=0
+        if n <= 15:
+            data += bytes([0x02 | (n << 2)])  # run-length count=N, delta=0
+        else:
+            # Fallback for >15 opcodes (unlikely in tests): emit individually
+            for _ in range(n):
+                data += bytes([0x04])  # single entry, delta=0
         data += encode_varint(0)  # nassigns = 0
     return data
 

@@ -133,108 +133,22 @@ K_HLAST    = 24  # Sentinel — marks end of hl_type_kind enum, not a real type
 #   (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
 # -1 = variable-length (opcode-specific handler required)
 _OPCODE_NARGS = [
-    2,  # 0  OMov
-    2,  # 1  OInt
-    2,  # 2  OFloat
-    2,  # 3  OBool
-    2,  # 4  OBytes
-    2,  # 5  OString
-    1,  # 6  ONull
-    3,  # 7  OAdd
-    3,  # 8  OSub
-    3,  # 9  OMul
-    3,  # 10 OSDiv
-    3,  # 11 OUDiv
-    3,  # 12 OSMod
-    3,  # 13 OUMod
-    3,  # 14 OShl
-    3,  # 15 OSShr
-    3,  # 16 OUShr
-    3,  # 17 OAnd
-    3,  # 18 OOr
-    3,  # 19 OXor
-    2,  # 20 ONeg
-    2,  # 21 ONot
-    1,  # 22 OIncr
-    1,  # 23 ODecr
-    2,  # 24 OCall0
-    3,  # 25 OCall1
-    4,  # 26 OCall2  (fixed: R + AR(4) = 2 regs on stream)
-    5,  # 27 OCall3  (fixed: R + AR(5) = 3 regs on stream)
-    6,  # 28 OCall4  (fixed: R + AR(6) = 4 regs on stream)
-    -1, # 29 OCallN  (variable: read count + count regs)
-    -1, # 30 OCallMethod (variable)
-    -1, # 31 OCallThis (variable)
-    -1, # 32 OCallClosure (variable)
-    2,  # 33 OStaticClosure
-    3,  # 34 OInstanceClosure
-    3,  # 35 OVirtualClosure
-    2,  # 36 OGetGlobal
-    2,  # 37 OSetGlobal
-    3,  # 38 OField
-    3,  # 39 OSetField
-    2,  # 40 OGetThis
-    2,  # 41 OSetThis
-    3,  # 42 ODynGet
-    3,  # 43 ODynSet
-    2,  # 44 OJTrue
-    2,  # 45 OJFalse
-    2,  # 46 OJNull
-    2,  # 47 OJNotNull
-    3,  # 48 OJSLt
-    3,  # 49 OJSGte
-    3,  # 50 OJSGt
-    3,  # 51 OJSLte
-    3,  # 52 OJULt
-    3,  # 53 OJUGte
-    3,  # 54 OJNotLt
-    3,  # 55 OJNotGte
-    3,  # 56 OJEq
-    3,  # 57 OJNotEq
-    1,  # 58 OJAlways
-    2,  # 59 OToDyn
-    2,  # 60 OToSFloat
-    2,  # 61 OToUFloat
-    2,  # 62 OToInt
-    2,  # 63 OSafeCast
-    2,  # 64 OUnsafeCast
-    2,  # 65 OToVirtual
-    0,  # 66 OLabel
-    1,  # 67 ORet
-    1,  # 68 OThrow
-    1,  # 69 ORethrow
-    -1, # 70 OSwitch (variable: val_reg + count + 2*count offsets)
-    1,  # 71 ONullCheck
-    2,  # 72 OTrap
-    1,  # 73 OEndTrap
-    3,  # 74 OGetI8
-    3,  # 75 OGetI16
-    3,  # 76 OGetMem
-    3,  # 77 OGetArray
-    3,  # 78 OSetI8
-    3,  # 79 OSetI16
-    3,  # 80 OSetMem
-    3,  # 81 OSetArray
-    1,  # 82 ONew
-    2,  # 83 OArraySize
-    2,  # 84 OType
-    2,  # 85 OGetType
-    2,  # 86 OGetTID
-    2,  # 87 ORef
-    2,  # 88 OUnref
-    2,  # 89 OSetref
-    -1, # 90 OMakeEnum (variable: read count + count regs)
-    2,  # 91 OEnumAlloc
-    2,  # 92 OEnumIndex
-    4,  # 93 OEnumField (fixed: R + AR(4) = 2 regs on stream)
-    3,  # 94 OSetEnumField
-    0,  # 95 OAssert
-    2,  # 96 ORefData
-    3,  # 97 ORefOffset
-    0,  # 98 ONop
-    3,  # 99 OPrefetch
-    3,  # 100 OAsm
-    1,  # 101 OCatch
+    # From hashlink/src/code.c hl_op_nargs via formula:
+    # (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
+    # -1 = variable-length (opcode-specific handler)
+    # Opcode index is a single byte (READ/hl_read_b). Args are signed VarInts.
+    # Auto-generated from hashlink/src/opcodes.h (104 opcodes total).
+    0, 2, 2, 2, 2, 2, 2, 1, 3, 3,  #   0-  9: o, OMov, OInt, OFloat, OBool, OBytes, OString, ONull, OAdd, OSub
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  #  10- 19: OMul, OSDiv, OUDiv, OSMod, OUMod, OShl, OSShr, OUShr, OAnd, OOr
+    3, 2, 2, 1, 1, 2, 3, 4, 5, 6,  #  20- 29: OXor, ONeg, ONot, OIncr, ODecr, OCall0, OCall1, OCall2, OCall3, OCall4
+    -1, -1, -1, -1, 2, 3, 3, 2, 2, 3,  #  30- 39: OCallN, OCallMethod, OCallThis, OCallClosure, OStaticClosure, OInstanceClosure, OVirtualClosure, OGetGlobal, OSetGlobal, OField
+    3, 2, 2, 3, 3, 2, 2, 2, 2, 3,  #  40- 49: OSetField, OGetThis, OSetThis, ODynGet, ODynSet, OJTrue, OJFalse, OJNull, OJNotNull, OJSLt
+    3, 3, 3, 3, 3, 3, 3, 3, 3, 1,  #  50- 59: OJSGte, OJSGt, OJSLte, OJULt, OJUGte, OJNotLt, OJNotGte, OJEq, OJNotEq, OJAlways
+    2, 2, 2, 2, 2, 2, 2, 0, 1, 1,  #  60- 69: OToDyn, OToSFloat, OToUFloat, OToInt, OSafeCast, OUnsafeCast, OToVirtual, OLabel, ORet, OThrow
+    1, -1, 1, 2, 1, 3, 3, 3, 3, 3,  #  70- 79: ORethrow, OSwitch, ONullCheck, OTrap, OEndTrap, OGetI8, OGetI16, OGetMem, OGetArray, OSetI8
+    3, 3, 3, 1, 2, 2, 2, 2, 2, 2,  #  80- 89: OSetI16, OSetMem, OSetArray, ONew, OArraySize, OType, OGetType, OGetTID, ORef, OUnref
+    2, -1, 2, 2, 4, 3, 0, 2, 3, 0,  #  90- 99: OSetref, OMakeEnum, OEnumAlloc, OEnumIndex, OEnumField, OSetEnumField, OAssert, ORefData, ORefOffset, ONop
+    3, 3, 1, 0,  # 100-103: OPrefetch, OAsm, OCatch, OLast
 ]
 
 # Primitives that have no serialized data beyond the kind byte
@@ -707,17 +621,24 @@ class HLParser:
     # ── Function Parsing ──────────────────────────────────────────────────
 
     def _skip_opcodes(self, stream: BinaryIO, nops: int):
-        """Skip nops opcodes by reading and discarding their VarInt arguments.
-        
-        Uses the _OPCODE_NARGS table to know how many VarInts to read per opcode.
-        Variable-length opcodes (nargs == -1) read a count VarInt + that many more.
-        
+        """Skip nops opcodes by reading and discarding their arguments.
+
+        Per HL reference (code.c hl_read_opcode):
+        - Opcode index is a single byte (READ/hl_read_b), not a VarInt.
+        - Arg values are INDEX (signed VarInts) for most opcodes.
+        - Vararg opcodes (nargs=-1) first read INDEX args then a byte count
+          then that many INDEX values (OCallN family), or UINDEX values (OSwitch).
+
         Bounded: stops early if stream runs out of data.
         """
         for i in range(nops):
             if self._remaining_bytes(stream) < 1:
                 break
-            op_idx = self.read_varint(stream, context=f"opcode[{i}].idx")
+            # Opcode index is a single byte (hl_read_b)
+            b = stream.read(1)
+            if not b:
+                break
+            op_idx = b[0]
             if 0 <= op_idx < len(_OPCODE_NARGS):
                 nargs = _OPCODE_NARGS[op_idx]
             else:
@@ -729,13 +650,26 @@ class HLParser:
                         break
                     self.read_varint(stream, context=f"opcode[{i}].arg[{j}]")
             else:
-                # Variable-length: read count + count VarInts
-                count = self.read_varint(stream, context=f"opcode[{i}].varcount")
-                # Bound vararg reading to prevent runaway from corrupted varcount
-                max_varargs = min(count, self._remaining_bytes(stream) // 1)
-                if count != max_varargs:
-                    self._log("OPCODE", f"opcode[{i}]: clamped varcount from {count} to {max_varargs} (remaining bytes)")
-                for j in range(max_varargs):
+                # Variable-length opcodes per HL reference:
+                # OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum:
+                #   p1=INDEX(), p2=INDEX(), p3=READ() (1 byte count),
+                #   then p3 × INDEX() for extra args
+                # OSwitch:
+                #   p1=UINDEX(), p2=UINDEX(), then p2 × UINDEX() for cases,
+                #   p3=UINDEX() for default
+                if self._remaining_bytes(stream) < 2:
+                    break
+                self.read_varint(stream, context=f"opcode[{i}].p1")
+                self.read_varint(stream, context=f"opcode[{i}].p2")
+                # The count field: single byte for OCallN family, VarInt for OSwitch
+                # We use a conservative heuristic: read remaining available bytes
+                count_byte = stream.read(1)
+                if not count_byte:
+                    break
+                count = count_byte[0]
+                # Bound count to prevent runaway
+                max_args = min(count, self._remaining_bytes(stream))
+                for j in range(max_args):
                     if self._remaining_bytes(stream) < 1:
                         break
                     self.read_varint(stream, context=f"opcode[{i}].vararg[{j}]")
@@ -956,45 +890,52 @@ class HLParser:
                 for flag in func_flags:
                     self._warn("FUNC", f"func[{func_i}]: {flag}")
 
-            # ── When header is clearly corrupt, skip body and resync ──────
+            # ── When header has nops <= 0, read body data normally ──────
+            # For functions with nops <= 0, there are no opcodes to skip and
+            # no RLE debug loop to run. The body is just: reg_types + nassigns VarInt.
+            # Reading these properly advances the stream past the function,
+            # avoiding desync on subsequent functions.
             if nops <= 0 and malformed:
-                # nops <= 0 means the function has no opcodes, which means
-                # the body parser won't advance the stream past the (non-existent)
-                # opcode data. Combined with potentially large nregs, this causes
-                # irreversible desync. Skip the body entirely and attempt resync.
-                # Estimate how many bytes to skip: the nregs register types each
-                # consume ~1 byte minimum, so skip at least nregs bytes.
-                skip_estimate = min(nregs, 65536)  # cap at 64KB to avoid excess
-                if skip_estimate < 1:
-                    skip_estimate = 1
-                self._warn("FUNC", f"func[{func_i}]: skipping body (nops={nops}, nregs={nregs}), "
-                                   f"attempting resync with skip_estimate={skip_estimate}")
-                next_offset = self._scan_for_next_function(
-                    stream, stream.tell(), func_i + 1,
-                    min_skip=skip_estimate
+                self._warn("FUNC", f"func[{func_i}]: nops={nops}, reading reg_types and nassigns "
+                                   f"to advance stream past malformed function")
+                # Read reg_types (bounded by available data)
+                mal_reg_types = self._read_bounded_varints(
+                    stream, nregs, f"func[{func_i}].regtype[{{}}]"
                 )
-                if next_offset is not None:
-                    # Record a placeholder for the malformed function
-                    func = {
-                        "type": type_idx,
-                        "findex": findex,
-                        "nregs": nregs,
-                        "nops": 0,
-                        "reg_types": [],
-                        "body_offset": 0,
-                        "body_size": 0,
-                        "name": None,
-                        "parent_type": None,
-                        "malformed": True,
-                    }
-                    self.functions.append(func)
-                    self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
-                                     f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-SKIPPED]")
-                    func_i += 1
-                    continue
-                else:
-                    self._warn("FUNC", f"func[{func_i}]: could not resync, stopping function parsing")
-                    break
+                # nops=0 means RLE debug loop doesn't run; read nassigns directly
+                if self.has_debug and self._remaining_bytes(stream) > 0:
+                    try:
+                        nassigns = self.read_varint(stream, context=f"func[{func_i}].nassigns")
+                    except HLParserError:
+                        nassigns = 0
+                    remaining = self._remaining_bytes(stream) // 2
+                    if 0 <= nassigns <= remaining:
+                        for j in range(nassigns):
+                            if self._remaining_bytes(stream) < 2:
+                                break
+                            try:
+                                self.read_varint(stream, context=f"func[{func_i}].assign_var[{j}]")
+                                self.read_varint(stream, context=f"func[{func_i}].assign_reg[{j}]")
+                            except HLParserError:
+                                break
+                # Record a placeholder for the malformed function
+                func = {
+                    "type": type_idx,
+                    "findex": findex,
+                    "nregs": nregs,
+                    "nops": 0,
+                    "reg_types": mal_reg_types,
+                    "body_offset": 0,
+                    "body_size": 0,
+                    "name": None,
+                    "parent_type": None,
+                    "malformed": True,
+                }
+                self.functions.append(func)
+                self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
+                                 f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-READ]")
+                func_i += 1
+                continue
 
             # ── Register types ─────────────────────────────────────────────
             reg_types = self._read_bounded_varints(
@@ -1014,31 +955,56 @@ class HLParser:
             self._skip_opcodes(stream, nops)
 
             # ── Debug info ─────────────────────────────────────────────────
+            # Per HL reference hl_read_debug_infos (code.c):
+            # RLE-encoded format, NOT flat VarInt arrays.
+            # Encodes (file_index, line) per opcode in a compact byte stream.
             if self.has_debug:
-                debug_lines = []
                 debug_files = []
-                debug_offsets = []
-                for j in range(nops):
+                debug_lines = []
+                curfile = -1
+                curline = 0
+                i = 0
+                while i < nops:
                     if self._remaining_bytes(stream) < 1:
                         break
                     try:
-                        debug_lines.append(self.read_varint(stream, context=f"func[{func_i}].dline[{j}]"))
-                    except HLParserError:
+                        c = stream.read(1)[0]
+                    except (IndexError, OSError):
                         break
-                for j in range(nops):
-                    if self._remaining_bytes(stream) < 1:
-                        break
-                    try:
-                        debug_files.append(self.read_varint(stream, context=f"func[{func_i}].dfile[{j}]"))
-                    except HLParserError:
-                        break
-                for j in range(nops):
-                    if self._remaining_bytes(stream) < 1:
-                        break
-                    try:
-                        debug_offsets.append(self.read_varint(stream, context=f"func[{func_i}].doffset[{j}]"))
-                    except HLParserError:
-                        break
+                    if c & 1:
+                        # File change: (c>>1) << 8 | next_byte
+                        c >>= 1
+                        b = stream.read(1)
+                        if not b:
+                            break
+                        curfile = (c << 8) | b[0]
+                    elif c & 2:
+                        # Run-length: count from bits 2-5, delta from bits 6-7
+                        delta = c >> 6
+                        count = (c >> 2) & 15
+                        for _ in range(count):
+                            debug_files.append(curfile)
+                            debug_lines.append(curline)
+                            i += 1
+                            if i >= nops:
+                                break
+                        curline += delta
+                    elif c & 4:
+                        # Single entry with delta
+                        curline += c >> 3
+                        debug_files.append(curfile)
+                        debug_lines.append(curline)
+                        i += 1
+                    else:
+                        # Big delta: 3-byte encoding
+                        b2 = stream.read(1)
+                        b3 = stream.read(1)
+                        if not b2 or not b3:
+                            break
+                        curline = (c >> 3) | (b2[0] << 5) | (b3[0] << 13)
+                        debug_files.append(curfile)
+                        debug_lines.append(curline)
+                        i += 1
 
                 # Assign list (bounded)
                 try:
@@ -1067,7 +1033,6 @@ class HLParser:
             else:
                 debug_lines = []
                 debug_files = []
-                debug_offsets = []
                 assign_vars = []
                 assign_regs = []
                 nassigns = 0
@@ -1099,7 +1064,6 @@ class HLParser:
             if self.has_debug:
                 func["debug_lines"] = debug_lines
                 func["debug_files"] = debug_files
-                func["debug_offsets"] = debug_offsets
                 func["assign_vars"] = assign_vars
                 func["assign_regs"] = assign_regs
                 func["nassigns"] = nassigns

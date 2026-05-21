@@ -46,6 +46,23 @@ You know functions are anonymous by default. You map the global function index s
 2. **Functions Pool:** Holds program bytecode functions (`nfunctions`).
 * You resolve function names by parsing class method prototypes (`protos`) and static method field mappings (`bindings`) inside `Obj` types, linking their names to their corresponding `findex`.
 
+### E. Opcode Encoding (Corrected Per HL Reference)
+The `hl_read_opcode` function in `hashlink/src/code.c` defines the encoding:
+- **Opcode index:** single byte (`hl_read_b`), NOT a VarInt. This was a historical bug in earlier parser versions.
+- **Fixed args:** INDEX/UINDEX signed/unsigned VarInts depending on the opcode's arg type slot.
+- **Vararg ops (OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum):** p1=INDEX, p2=INDEX, p3=READ (single byte count), then p3 × INDEX values.
+- **OSwitch:** p1=UINDEX, p2=UINDEX, then p2 × UINDEX case offsets, p3=UINDEX default.
+- The `_OPCODE_NARGS` table (104 entries) is auto-generated from `hashlink/src/opcodes.h` via the HL formula: `(_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))`.
+
+### F. Debug Info Encoding (RLE)
+The `hl_read_debug_infos` function in `hashlink/src/code.c` defines a compact RLE format:
+- Encodes (file_index, line) per opcode, NOT flat VarInt arrays.
+- Control byte `c` with bit flags:
+  - Bit 0 (0x01): file change — 2-byte encoding: `curfile = (c>>1) << 8 | next_byte`
+  - Bit 1 (0x02): run-length — `delta = c>>6`, `count = (c>>2)&15`, fill `count` entries, then `curline += delta`
+  - Bit 2 (0x04): single entry with delta: `curline += c>>3`, emit one (file, line)
+  - No bits: big delta — `curline = (c>>3) | (b2<<5) | (b3<<13)` (3 bytes total)
+
 ---
 
 ## 2. Desktop UI Architecture & Thread Constraints

@@ -73,4 +73,19 @@
 |  - Tagging workflow documented in CONTRIBUTING.md §10
 |- **Cleanup:** `_investigate.py` removed from tracking and .gitignored.
 |- **173 tests passing** (5 new tests added this session).
-|
+
+## Session 6 — May 21, 2026
+- Start: New session initialized.
+- Project state: 173 tests passing, Phase 3 complete.
+- **Dump analysis:** 8,283,581 lines indexed → 58/45,359 functions parsed. Found 7 anomalies.
+- **HL reference comparison:** hashlink/src/code.c revealed opcode index is single byte (not VarInt), debug info is RLE-encoded (not flat arrays).
+- **Bug fixes:**
+  - Opcode index: `read_varint` → `stream.read(1)` (1 byte)
+  - `_OPCODE_NARGS`: 104 entries, auto-generated from HL formula
+  - Vararg count: single byte (not VarInt) for OCallN family
+  - Debug info: RLE-encoded per `hl_read_debug_infos` in code.c
+  - Malformed function handler: reads reg_types + nassigns directly instead of blind skip + resync (fixes cascading desync)
+- **Farever binary:** Original Windows Steam copy is valid (not corrupt). Parser hits ~30 functions before hitting suspicious function entries with nregs=-1 (repeating `a001` VarInt pattern). The function pool likely has placeholder entries the HL runtime handles differently.
+- **Docs updated:** CONTRIBUTING.md (Farever notes), MEMORY.md (this session)
+- **173 tests passing** (2 updated for new malformed handler behavior).
+- **Key takeaway:** Transferring HLB files via text mode truncates them. Always use binary copy (cp) for hlboot.dat.|
