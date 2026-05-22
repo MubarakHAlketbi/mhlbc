@@ -98,7 +98,7 @@ The `nops` field counts the number of **instructions**, not bytes. Each instruct
 
 The debug tables provide a per-instruction mapping back to original Haxe source:
 - `source_line_numbers[i]` = line number for instruction i
-- `source_file_indices[i]` = index into `debug_files` (the string pool index for the filename)
+- `source_file_indices[i]` = index into the debug file string table (`parser.debug_files`), NOT the main string pool
 - `source_file_offsets[i]` = byte offset within the source file (for inline functions, closures, etc.)
 
 ---

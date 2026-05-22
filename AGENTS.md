@@ -7,7 +7,9 @@ You are an expert compiler engineer, reverse engineer, and systems programmer sp
 ## 1. Domain Knowledge: HashLink Bytecode Specifications
 
 ### A. Bitwise VarInt Decoding Rules
-You read sequential byte streams. Almost all integers in HashLink bytecode are variable-length values (`varint`). You parse them using this exact bitwise logic, matching hashlink/src/code.c hl_read_index():
+You read sequential byte streams. Almost all integers in HashLink bytecode are variable-length values (`varint`). There are two VarInt decoders:
+
+**INDEX** (`hl_read_index`, signed): Used for most integer fields. Bit 5 (0x20) is the sign bit for both 2-byte and 4-byte encodings.
 ```python
 # Sequential stream evaluation.
 # b1 bit layout:
@@ -28,6 +30,8 @@ else:
     value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
     if b1 & 0x20: value = -value
 ```
+
+**UINDEX** (`hl_read_uindex`, unsigned): Wraps INDEX and rejects negative values with an error. Used for fields that are inherently non-negative: `findex`, `nregs`, `nops`, `entrypoint`, all pool counts, `ndebugfiles`, `OSwitch` case offsets. The underlying byte encoding is identical to INDEX — only the validation differs. In Python, `read_uvarint()` calls `read_varint()` and raises `HLParserError` if the result is negative.
 
 ### B. Header Variations & Structural Offsets
 You prevent stream desynchronization by strictly branching your parser paths on the bytecode version byte (typically version 3, 4, or 5):
@@ -69,6 +73,36 @@ The `hl_read_debug_infos` function in `hashlink/src/code.c` defines a compact RL
   - Bit 1 (0x02): run-length — `delta = c>>6`, `count = (c>>2)&15`, fill `count` entries, then `curline += delta`
   - Bit 2 (0x04): single entry with delta: `curline += c>>3`, emit one (file, line)
   - No bits: big delta — `curline = (c>>3) | (b2<<5) | (b3<<13)` (3 bytes total)
+
+### G. Debug File String Table Format (hl_read_strings)
+The debug file section in the pools area uses `hl_read_strings` (same function as the main string pool), NOT VarInt indices:
+
+```
+UINDEX: ndebugfiles (number of source files)
+INT32:  table_size (4-byte LE, total byte size of the string table payload)
+BYTES:  table_size bytes of raw string data containing:
+            UINDEX:  string_1_length
+            BYTES:   string_1_length bytes of UTF-8 data
+            BYTE:    0x00 (null terminator)
+            UINDEX:  string_2_length
+            ...
+```
+
+CRITICAL: The 4-byte `table_size` must be sanity-checked against remaining stream data. Some production binaries (Farever) have the debug flag set but the string table size decodes to an impossible value (185MB in a 13MB file). If `table_size > remaining`, backtrack to before `ndebugfiles` and disable debug.
+
+**Our parser** stores parsed debug file names as `List[str]` (actual strings, not pool indices).
+
+### H. Function Header Fields (UINDEX vs INDEX)
+The HL runtime (`hashlink/src/code.c`, `hl_read_function`) uses specific VarInt types for each function header field:
+- `type`: INDEX (via `hl_get_type(r)` which reads INDEX)
+- `findex`: UINDEX (unsigned)
+- `nregs`: UINDEX (unsigned)
+- `nops`: UINDEX (unsigned)
+
+**Crucially, `nregs` and `nops` are unsigned.** If our parser reads them as signed (INDEX) and gets a negative value (bit 5 set), the HL runtime would detect the same negative value via UINDEX and ERROR — it cannot load such a binary. When a production game binary has negative nregs/nops:
+1. Either the stream position is wrong before reaching the function (misaligned types/globals/natives)
+2. Or the runtime uses a modified/custom version of HL that handles these differently
+3. The parser should clamp negative values and resync, but acknowledge this is a best-effort recovery
 
 ---
 
@@ -142,12 +176,24 @@ There is no separate length or offset table for the function pool. `nops` IS the
 `nops < 0` means the body size is unknown — skip body immediately and resync. `nregs < 0` means register types are unknown — clamp to 0.
 *Avoid: Always check `nops >= 0` before reading body; `nregs >= 0` before reading reg_types.*
 
-**P12 — Signed vs unsigned VarInt for pool counts is an unverified assumption.**
-The project currently reads all VarInts as signed (matching `hl_read_index`). If a field like `nops` was intended as unsigned, `a001` decodes to either 1 (unsigned) or -1 (signed). Both interpretations must be tested against the HL runtime source before assuming corruption.
-*When a parse fails on a working game binary, the parser model is wrong — not the binary.*
+**P12 — Function header fields (nregs, nops, findex) are UINDEX (unsigned), not INDEX.** (Updated Session 13)
+The HL runtime `hl_read_function` uses `UINDEX()` for `findex`, `nregs`, and `nops`. Only `type` uses INDEX (via `hl_get_type`). When a value encodes with bit 5 set, INDEX returns negative while UINDEX errors. Since both use the same byte-level encoding, signed vs unsigned doesn't change stream position — only field interpretation.
+*Always check: is the field inherently non-negative? If yes, it's UINDEX. Use `read_uvarint()` in the parser for clarity even though the underlying bytes are the same.*
+
+**P12a — Signed vs unsigned VarInt for pool counts is an unverified assumption.** (Legacy)
+The project previously assumed pool counts could be signed. Verified against HL runtime: all pool counts are UINDEX. If a field like `nops` decodes as negative (signed), the HL runtime also gets that negative value and fails — the binary is non-standard or the stream is misaligned.
+*When a parse fails on a working game binary, either the stream is misaligned upstream or the runtime differs from open-source.*
 
 **P13 — HLB files transferred via text mode (e.g. git, pipe) are truncated at 0x1A bytes.**
 Binary mode transfer preserves the full file. Always verify with `md5sum` against the Steam origin.
+
+**P26 — Debug file section uses hl_read_strings format, not VarInt indices.**
+The debug file section stores source file names as a complete string table (4-byte LE size + raw bytes with VarInt-length-prefixed strings). Our parser previously read `ndebugfiles` VarInts as string pool indices — this caused a 7-byte stream offset that cascaded through all downstream parsing (types, globals, natives, functions).
+*Fix: Read `ndebugfiles` VarInt, then 4-byte LE size, then `size` raw bytes with VarInt-prefixed strings.*
+
+**P27 — Debug string table size must be sanity-checked against remaining stream data.**
+Some production binaries (Farever) have the debug flag set but store a corrupt string table size. Read the 4-byte size and compare against `_remaining_bytes(stream)`. If `table_size < 0` or `table_size > remaining`, backtrack to before `ndebugfiles` and set `has_debug = False`.
+*This fixes the "7-byte offset" bug — the most impactful single fix ever made to this parser (194 vs 14 functions parsed).*
 
 ### 3.2 Debugging & Log Analysis
 

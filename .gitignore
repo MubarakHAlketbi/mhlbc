@@ -10,3 +10,4 @@ _investigate.py
 .coverage
 workspace/*/decompiled/
 workspace/*/*.log/
+plan.md

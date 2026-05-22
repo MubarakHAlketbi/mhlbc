@@ -228,21 +228,12 @@ The initial workspace copy was transferred incorrectly (likely via text-mode cop
 producing a truncated file that caused false "corrupt binary" conclusions.
 Always verify with the Steam copy.
 
-**Function pool analysis (clean copy):**
-- Header parses cleanly: v4, has_debug=True, nfunctions=45365
-- Function pool starts at byte 2,981,430, 10,329,974 bytes total (avg 228 bytes/function)
-- func[0]: valid (nops=3527, nregs=132)
-- func[1]: nregs=12735, **nops=-1** (malformed). The `a001` VarInt encoding with sign bit
-  set causes signed decode to -1. If read as unsigned: nops=1.
-- Subsequent functions have a repeating pattern where the 3rd VarInt field (nregs)
-  is always `a001` (= -1 signed), suggesting either:
-  a) The function pool has placeholder entries that the HL runtime skips
-  b) The function count in the header includes padding entries
-  c) A format variation that differs from the standard v4 spec
-
-**Parser behavior:** ~30 functions parse before cascading desync from corrupt entries.
-The parser gracefully detects corruption (warnings, malformed flags, no crashes).
-The Farever target remains a robustness regression target, not a completeness benchmark.
+**Function pool analysis (clean copy, updated Session 13):**
+- Header: v4, flags=1 (has_debug bit set), nfunctions=45365, ntypes=43844, nglobals=28399
+- **Debug info is corrupt**: The debug flag is set but the string table size decodes to 185MB (impossible in a 13MB file). The parser detects this, backtracks, and sets `has_debug = False`. This **7-byte offset** was the root cause of all earlier function pool corruption.
+- After the debug fix: **194 / 45365 functions parse** (190 valid, 4 malformed) — up from ~30 (Session 12) and ~14 (Session 8). The remaining 45,171 functions are unreachable because the 190 valid functions (many with nops > 10,000) consume all available buffer space.
+- The HL runtime (`hashlink/src/code.c`) would also fail to parse this binary (UINDEX rejects the negative nregs/nops values). The game runs via a custom/modified HL runtime.
+- The Farever target remains a robustness regression target, not a completeness benchmark. It validates that the parser handles corrupt debug info, negative VarInts, oversize nregs/nops, and EOF gracefully without crashing.
 
 ---
 

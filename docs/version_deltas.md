@@ -93,11 +93,13 @@ In v2-v3, `nconstants` is implicitly 0.
 
 ### Debug Tables (all versions, if has_debug)
 
+Debug file source names are stored as a string table in the pools area (4-byte LE size + VarInt-length-prefixed strings). Per-opcode, RLE-encoded debug info contains:
+
 ```
-nops × VarInt: source line numbers
-nops × VarInt: source file index (into debug_files)
-nops × VarInt: source file offset (byte position in source file)
+nops RLE records: (file_index, line_number)
 ```
+
+Where `file_index` is an index into the debug file string table (`parser.debug_files`), NOT the main string pool. See AGENTS.md §1.G for the complete debug file table format.
 
 ### Assign Lists (v3+, if has_debug)
 
