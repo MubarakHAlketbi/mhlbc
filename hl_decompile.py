@@ -90,6 +90,7 @@ class FunctionSig:
     is_method: bool                        # True if this is a class method
     parent_class: Optional[str]            # class name if is_method
     has_this: bool = False                 # True if register 0 is 'this'
+    func_index: int = -1                   # Index into parser.functions (for orphan tracking)
 
 
 @dataclass
@@ -1464,7 +1465,8 @@ class ClassBuilder:
                 if cls is not None:
                     classes[cls.name] = cls
                     for m in cls.methods + cls.static_methods:
-                        assigned_funcs.add(m)
+                        if m.func_index >= 0:
+                            assigned_funcs.add(m.func_index)
             elif kind == K_ENUM:
                 enum = self._build_enum(t_idx, t)
                 if enum is not None:
@@ -1606,6 +1608,7 @@ class ClassBuilder:
                     is_method=True,
                     parent_class=parent_name,
                     has_this=True,
+                    func_index=i,
                 )
         return None
 
@@ -1632,6 +1635,7 @@ class ClassBuilder:
                     is_method=False,
                     parent_class=None,
                     has_this=False,
+                    func_index=i,
                 )
         return None
 

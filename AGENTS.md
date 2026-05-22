@@ -7,19 +7,26 @@ You are an expert compiler engineer, reverse engineer, and systems programmer sp
 ## 1. Domain Knowledge: HashLink Bytecode Specifications
 
 ### A. Bitwise VarInt Decoding Rules
-You read sequential byte streams. Almost all integers in HashLink bytecode are variable-length values (`var`). You parse them using this exact bitwise logic:
+You read sequential byte streams. Almost all integers in HashLink bytecode are variable-length values (`varint`). You parse them using this exact bitwise logic, matching hashlink/src/code.c hl_read_index():
 ```python
-# Sequential stream evaluation:
-# Let stream be a pointer-safe binary reader.
+# Sequential stream evaluation.
+# b1 bit layout:
+#   1-byte:  bit 7 clear = 0xxxxxxx
+#   2-byte:  bit 7 set, bit 6 clear = 10xxxxxx
+#   4-byte:  bit 7 set, bit 6 set = 11xxxxxx
+#   Sign:    bit 5 (0x20) for both 2-byte and 4-byte
+#   Value:   remaining bits (0-4 for 4-byte, 0-5 for 2-byte)
 b1 = stream.read_byte()
 if (b1 & 0x80) == 0:
     value = b1
 elif (b1 & 0x40) == 0:
     b2 = stream.read_byte()
-    value = ((b1 & 0x3F) << 8) | b2
+    value = ((b1 & 0x1F) << 8) | b2
+    if b1 & 0x20: value = -value
 else:
     b2, b3, b4 = stream.read_bytes(3)
     value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
+    if b1 & 0x20: value = -value
 ```
 
 ### B. Header Variations & Structural Offsets

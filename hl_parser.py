@@ -247,7 +247,7 @@ class HLParser:
         """Reads a signed variable-length integer according to HashLink specifications.
         
         Verified against hashlink/src/code.c hl_read_index().
-        Bit 5 (0x20) is the sign bit for the 2-byte and 4-byte cases.
+        Bit 5 (0x20) is the sign bit for both 2-byte and 4-byte cases.
         """
         b1_bytes = stream.read(1)
         if not b1_bytes:
@@ -275,7 +275,7 @@ class HLParser:
             b2, b3, b4 = b_rest
             raw = b1_bytes + b_rest
             value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
-            if b1 & 0x20:
+            if b1 & 0x20:  # HL reference: bit 5 is sign for both 2-byte and 4-byte
                 value = -value
             self._log_varint(context, raw, value)
             return value

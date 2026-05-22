@@ -32,7 +32,7 @@ def encode_varint(value: int) -> bytes:
 
 
 def _encode_signed_varint(value: int) -> bytes:
-    """Encode a negative HL VarInt using the sign bit (0x20)."""
+    """Encode a negative HL VarInt using sign bit 5 (0x20)."""
     abs_val = -value
     if abs_val < 0x2000:
         b1 = 0x80 | 0x20 | ((abs_val >> 8) & 0x1F)

@@ -54,12 +54,12 @@ For **any** Haxe/HL game, the toolkit aims to enable:
 
 ### 1. Variable-Length Integer (VarInt) Decoding
 
-HashLink bytecode compresses almost all integers as Variable-Length Ints (VarInts) spanning 1, 2, or 4 bytes:
+HashLink bytecode compresses almost all integers as Variable-Length Ints (VarInts) spanning 1, 2, or 4 bytes. All values are signed; the sign bit is bit 5 (0x20) for both 2-byte and 4-byte encodings:
 
 1. Read 1 byte (`b1`).
-2. If `(b1 & 0x80) == 0`: Value is `b1` (1-byte integer).
-3. If `(b1 & 0x40) == 0`: Read 1 additional byte (`b2`). Value is `((b1 & 0x3F) << 8) | b2` (2-byte integer).
-4. Else: Read 3 additional bytes (`b2`, `b3`, `b4`). Value is `((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4` (4-byte integer).
+2. If `(b1 & 0x80) == 0`: Value is `b1` (1-byte integer, 0..127).
+3. If `(b1 & 0x40) == 0`: Read 1 additional byte (`b2`). Value is `((b1 & 0x1F) << 8) | b2`. If `b1 & 0x20`, negate (2-byte signed integer).
+4. Else: Read 3 additional bytes (`b2`, `b3`, `b4`). Value is `((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4`. If `b1 & 0x20`, negate (4-byte signed integer, 29-bit).
 
 ### 2. Bytecode Header Structure
 

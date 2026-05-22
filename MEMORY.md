@@ -43,36 +43,36 @@
   - All 9,403 opcodes were out-of-range — parser was reading garbage bytecode body.
   - func[78] nregs=306M (garbage) — cascade effect from func[2] desync.
   - 9 functions with inflated regtype counts (>1K), 12 with zero nops.
-| 46|- dump.md (571MB) and dump.db (1.5GB) both in .gitignore.
-|
-|## Session 5 — May 21, 2026
-|- Start: New session initialized.
-|- Project state: 168 tests passing, Phase 3 complete. README Phases 1-3 [x], 4-5 [ ].
-|- Previous sessions: logalyzer tool created, dump.md investigation completed.
-|- Ready for Phase 4 (opcode decoding / CFG) or Phase 5 (AST reconstruction).
-|
-|## Session 5 — May 21, 2026 (continued)
-|- **Robustness layer implemented** for function pool parsing:
-|  - `_remaining_bytes()` — file-size-aware bounds on all body reads
-|  - `_read_bounded_varints()` — reads up to count VarInts, bounded by available data
-|  - `_scan_for_next_function()` — forward scan for next valid header (4 valid VarInts)
-|  - **nops < 0**: detects, warns, skips body immediately, resyncs with nregs-based min_skip
-|  - **nregs < 0**: clamps to 0, warns
-|  - **Corrupted varcount**: clamped to remaining bytes (prevents runaway OCallN/OMakeEnum)
-|  - **`parse_warnings`**: collected for downstream consumers
-|  - **`malformed` flag**: each function dict has a `malformed` field
-|  - **173 tests** (5 new: negative nops, negative nregs, resync, malformed field, parse_warnings)
-|  - Farever binary: detects func[2] nops=-1, skips body, resyncs — but the function pool corruption is irreversible (2 valid functions of 45,127)
-|- **Fundamental limitation**: HashLink bytecode has no function-length field. nops IS the length. When it's corrupted, recovery is heuristic and limited.
-|  - Phase 4+ can proceed using the valid functions or a different target binary.
-|
-|## Session 5 — Commit
-|- **Versioning system implemented:** `g{gate}.{build}.{commit}[-dirty]` format, tagged g3.0 (legacy p3.0 preserved).
-|  - Logged in verbose logs, stored in SQLite meta table, shown in GUI title bar
-|  - `logalyzer.py info` subcommand added, `stats` now shows meta block
-|  - Tagging workflow documented in CONTRIBUTING.md §10
-|- **Cleanup:** `_investigate.py` removed from tracking and .gitignored.
-|- **173 tests passing** (5 new tests added this session).
+- dump.md (571MB) and dump.db (1.5GB) both in .gitignore.
+
+## Session 5 — May 21, 2026
+- Start: New session initialized.
+- Project state: 168 tests passing, Phase 3 complete. README Phases 1-3 [x], 4-5 [ ].
+- Previous sessions: logalyzer tool created, dump.md investigation completed.
+- Ready for Phase 4 (opcode decoding / CFG) or Phase 5 (AST reconstruction).
+
+## Session 5 — May 21, 2026 (continued)
+- **Robustness layer implemented** for function pool parsing:
+  - `_remaining_bytes()` — file-size-aware bounds on all body reads
+  - `_read_bounded_varints()` — reads up to count VarInts, bounded by available data
+  - `_scan_for_next_function()` — forward scan for next valid header (4 valid VarInts)
+  - **nops < 0**: detects, warns, skips body immediately, resyncs with nregs-based min_skip
+  - **nregs < 0**: clamps to 0, warns
+  - **Corrupted varcount**: clamped to remaining bytes (prevents runaway OCallN/OMakeEnum)
+  - **`parse_warnings`**: collected for downstream consumers
+  - **`malformed` flag**: each function dict has a `malformed` field
+  - **173 tests** (5 new: negative nops, negative nregs, resync, malformed field, parse_warnings)
+  - Farever binary: detects func[2] nops=-1, skips body, resyncs — but the function pool corruption is irreversible (2 valid functions of 45,127)
+- **Fundamental limitation**: HashLink bytecode has no function-length field. nops IS the length. When it's corrupted, recovery is heuristic and limited.
+  - Phase 4+ can proceed using the valid functions or a different target binary.
+
+## Session 5 — Commit
+- **Versioning system implemented:** `g{gate}.{build}.{commit}[-dirty]` format, tagged g3.0 (legacy p3.0 preserved).
+  - Logged in verbose logs, stored in SQLite meta table, shown in GUI title bar
+  - `logalyzer.py info` subcommand added, `stats` now shows meta block
+  - Tagging workflow documented in CONTRIBUTING.md §10
+- **Cleanup:** `_investigate.py` removed from tracking and .gitignored.
+- **173 tests passing** (5 new tests added this session).
 
 ## Session 6 — May 21, 2026
 - Start: New session initialized.
@@ -170,3 +170,19 @@
   - GUI: Decompilation tab (#7) in app.py with dark-themed source display.
   - 54 new tests in `test_decompile.py` — 278 total passing.
   - README Gate 5 now [x].
+
+## Session 12 — May 22, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 278 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: 0588ab6 (Session 11: Gate 5 — decompilation engine).
+- **Bug fix: `TypeError: unhashable type: 'FunctionSig'`** in hl_decompile.py ClassBuilder.build() (line 1467).
+  - Root cause: `assigned_funcs: Set[int]` was typed for integers but received `FunctionSig` objects from `cls.methods + cls.static_methods`. FunctionSig is a @dataclass with a List field, making it unhashable.
+  - Fix: Added `func_index: int = -1` field to `FunctionSig` dataclass. Populated it in `_sig_from_proto()` and `_sig_from_findex()`. Changed `assigned_funcs.add(m)` to `assigned_funcs.add(m.func_index)` with a `>= 0` guard.
+  - Farever `decompile_all()` no longer crashes: 38 classes, 26 enums, 10 functions decompiled, 0 errors.
+- **VarInt encoder bug fix (4-byte signed):** `tests/hl_helper.py` `_encode_signed_varint()` had `((abs_val >> 16) & 0x1F)` instead of `((abs_val >> 24) & 0x1F)` for 4-byte signed path. Caused bits 16-20 to go into b1 instead of bits 24-28. Decoder was already correct per HL reference (bit 5 sign for both 2-byte and 4-byte). Confirmed against `hashlink/src/code.c`.
+- **AGENTS.md VarInt spec** updated: added missing sign bit handling, corrected mask (0x1F not 0x3F for 2-byte).
+- **README.md VarInt spec** updated: added signed encoding details.
+- **HL reference verified:** Both 2-byte and 4-byte use bit 5 (0x20) for sign, value mask is 0x1F (5 bits) for both cases.
+- **Log analysis:** Indexed 622MB Farever log — 8,261,081 lines, 0 errors. All 13,348 opcodes out-of-range due to genuine function pool corruption (nregs=-1/nops=-1 at func[2]).
+- **278 tests still passing.**
