@@ -67,7 +67,7 @@
 |  - Phase 4+ can proceed using the valid functions or a different target binary.
 |
 |## Session 5 — Commit
-|- **Versioning system implemented:** `p{phase}.{build}.{commit}[-dirty]` format, tagged p3.0.
+|- **Versioning system implemented:** `g{gate}.{build}.{commit}[-dirty]` format, tagged g3.0 (legacy p3.0 preserved).
 |  - Logged in verbose logs, stored in SQLite meta table, shown in GUI title bar
 |  - `logalyzer.py info` subcommand added, `stats` now shows meta block
 |  - Tagging workflow documented in CONTRIBUTING.md §10
@@ -99,3 +99,22 @@
 - **README.md rewritten:** Long-term vision (5 tiers), expanded roadmap with sub-items, "What This Unlocks" table mapping use cases to tiers.
 - **CONTRIBUTING.md enhanced:** Added §11 CLI Support Requirements — architecture, entry points, output formats, exit codes, feature parity, logging parity, testing, CLI-first design principle. Updated §1 separation rules with parser UI-agnostic rule.
 - **CLI implemented:** `cli.py` (633 lines, no PyQt6) — 6 subcommands mirroring GUI tabs (header, pools, types, globals, natives, functions). 3 output formats: human-readable text (default), JSON (`--json`), CSV (`--csv`). Shared flags: `--verbose`, `--verbose-stdout`, `--log-path`, `--warnings-as-errors`. Exit codes per spec (0/1/2/3). String pool resolution for native lib/name and type names. Functions subcommand with `--limit`, summary stats, malformed/missing-name flags. Verified against Farever binary (all subcommands + all formats).
+
+## Session 8 — May 21, 2026
+- Start: New session initialized.
+- **Terminology change: Phase → Gate throughout.** Version format changed from `p{phase}` to `g{gate}`. All docs updated (README.md, CONTRIBUTING.md, MEMORY.md). `hl_parser.py` version logic now handles both `p*` and `g*` git tags for backward compatibility.
+- Project state: 173 tests passing, Gates 1-3 complete. README Gates 1-3 [x], 4-5 [ ].
+- Last commit: 8d7ce11 (Session 7 — CLI support, README vision, CONTRIBUTING.md CLI rules).
+- Clean working tree, no uncommitted changes (before Session 8 work).
+- Gate 4 (Disassembly Engine & CFG) and Gate 5 (AST Reconstruction / Decompilation) remain pending.
+- **LLM-in-the-loop decision:** Evaluated for Gate 4/5. Conclusion: hallucinations would poison verifiable output. Shelved as Gate 6 (exploratory) — a post-decompilation readability pass that only annotates deterministic output, never reconstructs it. No LLM in critical path.
+- **Gate 4 COMPLETE:**
+  - **CRITICAL BUGFIX:** `_OPCODE_NARGS` had dummy entry at index 0 since Phase 3 — all opcode lookups off by one. Fixed in hl_parser.py, hl_disasm.py, tests/hl_helper.py.
+  - `hl_disasm.py` (1013 lines): 7 classes — Instruction, OpcodeDecoder, JumpResolver, RegisterTracker, CFGBuilder, StructureAnalyzer, Disassembler.
+  - 9 pieces: opcode decoder, register tracking, jump resolution, CFG builder, loop detection, branch structure labeling (if/else, while, switch), CFG visualizer GUI tab, opcode verbose logging, validation.
+  - CLI: `disasm` subcommand with `--function`, `--cfg`, `--json`, `--csv`.
+  - Parser extended: `_raw_data` field, `opcode_start`/`opcode_end` per function, execute() reads full file into memory.
+  - 26 new tests in tests/test_disasm.py.
+  - **199 tests total passing** (173 + 26).
+  - README Gate 4 now [x].
+- Model: deepseek/deepseek-v4-flash via OpenRouter.

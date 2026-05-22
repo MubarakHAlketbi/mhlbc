@@ -128,27 +128,22 @@ K_HLAST    = 24  # Sentinel — marks end of hl_type_kind enum, not a real type
                  # but appears in some real-world compiled bytecode
 
 # === Opcode Argument Count Table ===
-# Maps each opcode index (0-101) to its number of VarInt arguments.
+# Maps each opcode index (0-102) to its number of VarInt arguments.
 # From hashlink/src/code.c hl_op_nargs via X-macro formula:
 #   (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
 # -1 = variable-length (opcode-specific handler required)
 _OPCODE_NARGS = [
-    # From hashlink/src/code.c hl_op_nargs via formula:
-    # (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
-    # -1 = variable-length (opcode-specific handler)
-    # Opcode index is a single byte (READ/hl_read_b). Args are signed VarInts.
-    # Auto-generated from hashlink/src/opcodes.h (104 opcodes total).
-    0, 2, 2, 2, 2, 2, 2, 1, 3, 3,  #   0-  9: o, OMov, OInt, OFloat, OBool, OBytes, OString, ONull, OAdd, OSub
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  #  10- 19: OMul, OSDiv, OUDiv, OSMod, OUMod, OShl, OSShr, OUShr, OAnd, OOr
-    3, 2, 2, 1, 1, 2, 3, 4, 5, 6,  #  20- 29: OXor, ONeg, ONot, OIncr, ODecr, OCall0, OCall1, OCall2, OCall3, OCall4
-    -1, -1, -1, -1, 2, 3, 3, 2, 2, 3,  #  30- 39: OCallN, OCallMethod, OCallThis, OCallClosure, OStaticClosure, OInstanceClosure, OVirtualClosure, OGetGlobal, OSetGlobal, OField
-    3, 2, 2, 3, 3, 2, 2, 2, 2, 3,  #  40- 49: OSetField, OGetThis, OSetThis, ODynGet, ODynSet, OJTrue, OJFalse, OJNull, OJNotNull, OJSLt
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 1,  #  50- 59: OJSGte, OJSGt, OJSLte, OJULt, OJUGte, OJNotLt, OJNotGte, OJEq, OJNotEq, OJAlways
-    2, 2, 2, 2, 2, 2, 2, 0, 1, 1,  #  60- 69: OToDyn, OToSFloat, OToUFloat, OToInt, OSafeCast, OUnsafeCast, OToVirtual, OLabel, ORet, OThrow
-    1, -1, 1, 2, 1, 3, 3, 3, 3, 3,  #  70- 79: ORethrow, OSwitch, ONullCheck, OTrap, OEndTrap, OGetI8, OGetI16, OGetMem, OGetArray, OSetI8
-    3, 3, 3, 1, 2, 2, 2, 2, 2, 2,  #  80- 89: OSetI16, OSetMem, OSetArray, ONew, OArraySize, OType, OGetType, OGetTID, ORef, OUnref
-    2, -1, 2, 2, 4, 3, 0, 2, 3, 0,  #  90- 99: OSetref, OMakeEnum, OEnumAlloc, OEnumIndex, OEnumField, OSetEnumField, OAssert, ORefData, ORefOffset, ONop
-    3, 3, 1, 0,  # 100-103: OPrefetch, OAsm, OCatch, OLast
+     2,  2,  2,  2,  2,  2,  1,  3,  3,  3,
+     3,  3,  3,  3,  3,  3,  3,  3,  3,  3,
+     2,  2,  1,  1,  2,  3,  4,  5,  6, -1,
+    -1, -1, -1,  2,  3,  3,  2,  2,  3,  3,
+     2,  2,  3,  3,  2,  2,  2,  2,  3,  3,
+     3,  3,  3,  3,  3,  3,  3,  3,  1,  2,
+     2,  2,  2,  2,  2,  2,  0,  1,  1,  1,
+    -1,  1,  2,  1,  3,  3,  3,  3,  3,  3,
+     3,  3,  1,  2,  2,  2,  2,  2,  2,  2,
+    -1,  2,  2,  4,  3,  0,  2,  3,  0,  3,
+     3,  1,  0,
 ]
 
 # Primitives that have no serialized data beyond the kind byte
@@ -233,6 +228,9 @@ class HLParser:
         
         # Parse warnings collected during execution
         self.parse_warnings: List[dict] = []
+
+        # Raw bytecode data (populated during execute() for disassembler access)
+        self._raw_data: Optional[bytes] = None
 
     def _log(self, tag: str, message: str):
         if self._logger:
@@ -927,6 +925,8 @@ class HLParser:
                     "reg_types": mal_reg_types,
                     "body_offset": 0,
                     "body_size": 0,
+                    "opcode_start": 0,
+                    "opcode_end": 0,
                     "name": None,
                     "parent_type": None,
                     "malformed": True,
@@ -953,6 +953,7 @@ class HLParser:
                 malformed = True
 
             self._skip_opcodes(stream, nops)
+            opcode_end = stream.tell()  # byte offset right after last opcode arg
 
             # ── Debug info ─────────────────────────────────────────────────
             # Per HL reference hl_read_debug_infos (code.c):
@@ -1056,6 +1057,8 @@ class HLParser:
                 "reg_types": reg_types,
                 "body_offset": body_offset,
                 "body_size": body_size,
+                "opcode_start": body_offset,   # byte offset of first opcode
+                "opcode_end": opcode_end,       # byte offset after last opcode arg
                 "name": None,  # resolved later by resolve_function_names
                 "parent_type": None,  # type index of parent class (resolved later)
                 "malformed": malformed,
@@ -1165,6 +1168,8 @@ class HLParser:
                 cur = stream.tell()
                 stream.seek(0, io.SEEK_END)
                 self._file_size = stream.tell()
+                stream.seek(0)
+                self._raw_data = stream.read()
                 stream.seek(cur)
             except (io.UnsupportedOperation, OSError):
                 self._file_size = 0
@@ -1178,17 +1183,15 @@ class HLParser:
                 progress_callback("Parsing completed.", 100)
             return
         with open(self.filepath, "rb") as f:
-            # Determine file size
-            cur = f.tell()
-            f.seek(0, io.SEEK_END)
-            self._file_size = f.tell()
-            f.seek(cur)
-            
-            self.parse_header(f)
-            self.parse_pools(f, progress_callback)
-            self.parse_types(f, progress_callback)
-            self.parse_globals(f, progress_callback)
-            self.parse_natives(f, progress_callback)
-            self.parse_functions(f, progress_callback)
+            # Read entire file into memory for disassembler access
+            self._raw_data = f.read()
+            self._file_size = len(self._raw_data)
+            buf = io.BytesIO(self._raw_data)
+            self.parse_header(buf)
+            self.parse_pools(buf, progress_callback)
+            self.parse_types(buf, progress_callback)
+            self.parse_globals(buf, progress_callback)
+            self.parse_natives(buf, progress_callback)
+            self.parse_functions(buf, progress_callback)
             if progress_callback:
                 progress_callback("Parsing completed.", 100)

@@ -4,11 +4,12 @@ from PyQt6.QtCore import Qt, QAbstractListModel, QModelIndex
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QFileDialog, QListView, QLabel, QProgressBar, QMessageBox,
-    QCheckBox, QTabWidget, QStatusBar
+    QCheckBox, QTabWidget, QStatusBar, QComboBox, QTextEdit, QGroupBox
 )
 from hl_worker import HLParseWorker
 from hl_parser import HLParser, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
 from hl_logger import VerboseLogger
+from hl_disasm import Disassembler
 
 
 def format_type(parser, type_dict: dict, index: int) -> str:
@@ -288,6 +289,27 @@ class DecompilerApp(QMainWindow):
         functions_layout.addWidget(self.list_functions)
         self.tabs.addTab(functions_widget, "Functions")
 
+        # CFG tab
+        cfg_widget = QWidget()
+        cfg_layout = QVBoxLayout(cfg_widget)
+        
+        cfg_toolbar = QHBoxLayout()
+        self.cfg_func_combo = QComboBox()
+        self.cfg_func_combo.setMinimumWidth(300)
+        cfg_toolbar.addWidget(QLabel("Function:"))
+        cfg_toolbar.addWidget(self.cfg_func_combo)
+        cfg_refresh_btn = QPushButton("Show CFG")
+        cfg_refresh_btn.clicked.connect(self.on_show_cfg)
+        cfg_toolbar.addWidget(cfg_refresh_btn)
+        cfg_toolbar.addStretch()
+        cfg_layout.addLayout(cfg_toolbar)
+        
+        self.cfg_text = QTextEdit()
+        self.cfg_text.setReadOnly(True)
+        self.cfg_text.setFontFamily("monospace")
+        cfg_layout.addWidget(self.cfg_text)
+        self.tabs.addTab(cfg_widget, "CFG")
+
         layout.addWidget(self.tabs)
 
         # Progress Indicators
@@ -367,6 +389,72 @@ class DecompilerApp(QMainWindow):
         self.tabs.setTabText(2, f"Globals ({parser.nglobals})")
         self.tabs.setTabText(3, f"Natives ({parser.nnatives})")
         self.tabs.setTabText(4, f"Functions ({parser.nfunctions})")
+
+        # Populate CFG function selector
+        self.cfg_func_combo.clear()
+        valid_funcs = [(i, f) for i, f in enumerate(parser.functions) 
+                       if not f.get("malformed") and f.get("nops", 0) > 0]
+        for i, f in valid_funcs:
+            name = f.get("name") or f"func[{i}]"
+            self.cfg_func_combo.addItem(f"[{i}] {name} ({f['nops']} ops)", i)
+        if valid_funcs:
+            self.cfg_func_combo.setCurrentIndex(0)
+
+    def on_show_cfg(self):
+        """Display the CFG for the selected function."""
+        if not hasattr(self, 'parser') or not self.parser:
+            return
+        idx = self.cfg_func_combo.currentData()
+        if idx is None:
+            return
+        func = self.parser.functions[idx]
+        
+        try:
+            disasm = Disassembler(self.parser)
+            instrs = disasm.disassemble_function(idx)
+            if not instrs:
+                self.cfg_text.setPlainText("(no instructions decoded)")
+                return
+            
+            cfg = disasm.build_cfg(idx)
+            if not cfg:
+                self.cfg_text.setPlainText("(no CFG blocks)")
+                return
+            
+            lines = []
+            name = func.get("name") or f"func[{idx}]"
+            lines.append(f"=== CFG for [{idx}] {name} ===")
+            lines.append(f"nops={func['nops']}  nregs={func['nregs']}  findex={func['findex']}")
+            lines.append(f"{len(cfg)} basic blocks\n")
+            
+            for blk in cfg:
+                ops = [i.mnemonic for i in blk.instructions]
+                loop_mark = " [LOOP]" if blk.is_loop_header else ""
+                struct = f" [{blk.structure}]" if blk.structure else ""
+                lines.append(f"Block {blk.id}: @{blk.start_ip}..{blk.end_ip} "
+                           f"{', '.join(ops)}{loop_mark}{struct}")
+                
+                # Show instructions in block
+                for instr in blk.instructions:
+                    extra = ""
+                    if instr.jump_target is not None:
+                        extra = f"  → @{instr.jump_target}"
+                    elif instr.jump_cases is not None:
+                        extra = f"  → [cases] def=@{instr.jump_default}"
+                    lines.append(f"  @{instr.index:<4} {instr.mnemonic:<14} "
+                               f"{instr._format_args()}{extra}")
+                
+                # Edges
+                if blk.successors:
+                    lines.append(f"  succ → [{', '.join(f'Block {s}' for s in blk.successors)}]")
+                if blk.predecessors:
+                    lines.append(f"  pred ← [{', '.join(f'Block {p}' for p in blk.predecessors)}]")
+                lines.append("")
+            
+            self.cfg_text.setPlainText("\n".join(lines))
+            
+        except Exception as e:
+            self.cfg_text.setPlainText(f"(CFG error: {e})")
 
     def on_parse_failure(self, error_message: str):
         self.btn_open.setEnabled(True)

@@ -12,6 +12,7 @@ import csv as _csv
 
 from hl_parser import HLParser, HLParserError, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
 from hl_logger import VerboseLogger
+from hl_disasm import Disassembler, format_disassembly
 
 # ── Exit codes per CONTRIBUTING.md §11.4 ────────────────────────────────────
 EX_OK = 0
@@ -494,6 +495,106 @@ def cmd_functions(args):
             print(f"  ... ({len(funcs_list) - limit} more — use --limit N)")
 
 
+def cmd_disasm(args):
+    parser = _parse_and_load(args.file, _make_logger(args))
+    disasm = Disassembler(parser)
+    
+    func_indices = args.function if args.function else range(len(parser.functions))
+    if isinstance(func_indices, int):
+        func_indices = [func_indices]
+    
+    first = True
+    for fi in func_indices:
+        if fi < 0 or fi >= len(parser.functions):
+            print(f"Function index {fi} out of range (0-{len(parser.functions)-1})", file=sys.stderr)
+            continue
+        
+        func = parser.functions[fi]
+        if func.get("malformed") or func.get("nops", 0) <= 0:
+            if args.function:  # only warn when user picked a specific function
+                print(f"func[{fi}] is malformed or has no opcodes, skipping")
+            continue
+        
+        instrs = disasm.disassemble_function(fi)
+        if not instrs:
+            if args.function:
+                print(f"func[{fi}] could not be disassembled")
+            continue
+        
+        if args.json:
+            instr_data = []
+            for ii in instrs:
+                d = {
+                    "index": ii.index, "opcode": ii.opcode, "mnemonic": ii.mnemonic,
+                    "args": ii.args, "byte_offset": ii.byte_offset, "byte_size": ii.byte_size,
+                    "source_line": ii.source_line, "is_label": ii.is_label,
+                }
+                if ii.jump_target is not None:
+                    d["jump_target"] = ii.jump_target
+                if ii.jump_cases is not None:
+                    d["jump_cases"] = ii.jump_cases
+                    d["jump_default"] = ii.jump_default
+                instr_data.append(d)
+            _output_as_json({"function": {
+                "index": fi, "name": func.get("name") or "?", 
+                "findex": func["findex"], "nops": func["nops"],
+                "instructions": instr_data,
+            }})
+        elif args.csv:
+            rows = []
+            for ii in instrs:
+                rows.append({
+                    "func_idx": fi, "func_name": func.get("name") or "?",
+                    "ip": ii.index, "opcode": ii.opcode, "mnemonic": ii.mnemonic,
+                    "args": " ".join(str(a) for a in ii.args),
+                    "byte_offset": ii.byte_offset, "source_line": ii.source_line,
+                    "jump_target": ii.jump_target if ii.jump_target is not None else "",
+                })
+            _output_as_csv(rows)
+        else:
+            if not first:
+                print()
+            first = False
+            print(f"=== func[{fi}] name='{func.get('name') or '?'}' "
+                  f"findex={func['findex']} nops={func['nops']} nregs={func['nregs']} ===")
+            print(format_disassembly(instrs, parser))
+        
+        # CFG output
+        if args.cfg:
+            cfg = disasm.build_cfg(fi)
+            if cfg:
+                if args.json:
+                    # CFG was already included when json+cross-reference
+                    pass
+                else:
+                    print(f"\n  CFG ({len(cfg)} blocks):")
+                    for blk in cfg:
+                        ops = [i.mnemonic for i in blk.instructions]
+                        succ_str = ",".join(str(s) for s in blk.successors)
+                        pred_str = ",".join(str(s) for s in blk.predecessors)
+                        loop_mark = " [LOOP]" if blk.is_loop_header else ""
+                        struct = f" [{blk.structure}]" if blk.structure else ""
+                        print(f"    Block {blk.id}: @{blk.start_ip}..{blk.end_ip} "
+                              f"{', '.join(ops[:8])}{'...' if len(ops)>8 else ''}"
+                              f"{loop_mark}{struct}")
+                        if succ_str:
+                            print(f"      succ → [{succ_str}]")
+                        if pred_str:
+                            print(f"      pred ← [{pred_str}]")
+        
+        msgs = disasm.validate(fi)
+        if msgs:
+            for m in msgs:
+                print(f"  [WARN] {m}")
+    
+    # Validate all if not targeting specific functions
+    if not args.function:
+        msgs = disasm.validate()
+        if msgs:
+            for m in msgs:
+                print(f"  [WARN] {m}")
+
+
 # ── Logger Setup ──────────────────────────────────────────────────────────
 
 
@@ -603,6 +704,15 @@ Examples:
     sp_functions.add_argument("--limit", "-n", type=int, default=0,
                               help="Limit output to first N functions (0 = all)")
     sp_functions.set_defaults(func=cmd_functions)
+
+    # disasm
+    sp_disasm = sub.add_parser("disasm", parents=[parent_parser],
+                                help="Disassemble function bytecode")
+    sp_disasm.add_argument("--function", "-f", type=int, action="append",
+                           help="Function index to disassemble (repeatable; default: all)")
+    sp_disasm.add_argument("--cfg", action="store_true",
+                           help="Show control flow graph structure")
+    sp_disasm.set_defaults(func=cmd_disasm)
 
     args = ap.parse_args()
 

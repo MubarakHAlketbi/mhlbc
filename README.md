@@ -19,7 +19,7 @@ The original `hlbc` tool suite attempted this but carried design flaws that made
 
 ## Long-Term Vision
 
-The core decompiler (Phases 1–5) is the foundation. The full vision spans five tiers:
+The core decompiler (Gates 1–5) is the foundation. The full vision spans five tiers:
 
 | Tier | Scope | Goal |
 |------|-------|------|
@@ -147,7 +147,7 @@ mhlbc/
 
 ### Tier 1 — Core Decompiler
 
-- [x] **Phase 1: Header & Constant Pools**
+- [x] **Gate 1: Header & Constant Pools**
   - Dynamic version handling (v3/v4/v5)
   - VarInt decoder with all size classes + signed support
   - All five constant pools (ints, floats, strings, bytes, debug files)
@@ -155,14 +155,14 @@ mhlbc/
   - Virtualized list models for large datasets
   - Verbose byte-level logging infrastructure
 
-- [x] **Phase 2: Type System, Globals & Natives**
+- [x] **Gate 2: Type System, Globals & Natives**
   - 24 type kinds (Void through Packed)
   - Compound types: Obj (fields/protos/bindings), Struct, Enum, Virtual, Fun, Method
   - Global variable type references
   - Native function bindings (name, findex, lib, type)
   - Tabbed UI: Types / Globals / Natives views
 
-- [x] **Phase 3: Function Parsing & Bytecode Indexing**
+- [x] **Gate 3: Function Parsing & Bytecode Indexing**
   - Function headers: type, findex, nregs, nops, register types
   - `_OPCODE_NARGS` table (104 entries, auto-generated from HL formula)
   - Opcode body skipping (all fixed + vararg opcodes)
@@ -170,9 +170,9 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 173 tests covering all phases
+  - 173 tests covering all gates
 
-- [ ] **Phase 4: Disassembly Engine & Control Flow**
+- [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
   - Register tracking: type inference per register slot
   - Jump target resolution (relative → absolute instruction indices)
@@ -183,7 +183,7 @@ mhlbc/
   - Per-opcode verbose logging (byte offset, mnemonic, args, targets)
   - Validation: round-trip opcode count = nops for all functions
 
-- [ ] **Phase 5: AST Reconstruction & Decompilation**
+- [ ] **Gate 5: AST Reconstruction & Decompilation**
   - Stack-to-variable mapping (SSA-like intermediate representation)
   - Expression tree builder from stack machine ops
   - Control structure synthesis (if/else, switch, loops, try/catch)
@@ -192,6 +192,14 @@ mhlbc/
   - Haxe-like pseudocode output
   - Multi-file output: one `.hx` per class
   - Decompiler validation: re-parse output against original bytecode structure
+
+- [ ] **Gate 6: LLM-Enhanced Readability (Exploratory — shelved)**
+  - Post-decompilation annotation pass only — never reconstruction
+  - Every output line must trace back to deterministic bytecode
+  - Variable name suggestions for anonymous registers
+  - Doc-comment generation from usage patterns
+  - Idiomatic Haxe code formatting
+  - Disableable: core decompiler produces correct output without LLM
 
 ### Tier 2 — Bytecode Manipulation (Exploratory)
 
@@ -254,9 +262,9 @@ pytest -k "varint"         # Filter by keyword
 
 ### Versioning
 
-All artifacts carry a version string: `p{phase}.{build}.{commit}[-dirty]`
+All artifacts carry a version string: `g{gate}.{build}.{commit}[-dirty]`
 
-Example: `p3.5.a1fba93` = Phase 3, 5 commits since p3.0 tag, commit a1fba93.
+Example: `g3.5.a1fba93` = Gate 3, 5 commits since g3.0 tag, commit a1fba93.
 
 Found in: verbose logs, SQLite DB `meta` table, GUI title bar, GUI status bar.
 

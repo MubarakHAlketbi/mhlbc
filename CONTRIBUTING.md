@@ -284,7 +284,7 @@ Every parser, decoder, or analysis component **must** embed verbose logging and 
 
 4. **Log every header field.** All header counts (`nints`, `ntypes`, `nfunctions`, etc.), conditional fields (`nbytes`/`nconstants`), `flags`, and `entrypoint` must appear in the log with their decoded values.
 
-5. **Log opcode-level disassembly.** When the bytecode decoder is implemented (Phase 4), every decoded instruction must produce a log entry showing its byte offset, opcode mnemonic, arguments, and target jump addresses.
+5. **Log opcode-level disassembly.** When the bytecode decoder is implemented (Gate 4), every decoded instruction must produce a log entry showing its byte offset, opcode mnemonic, arguments, and target jump addresses.
 
 6. **Log errors with context.** When a parse error occurs, the error message must include the stream byte offset, the section being parsed, and the raw bytes that caused the failure. Never throw a bare message — always attach positional context.
 
@@ -337,18 +337,18 @@ Rationale: the indexed DB supports instant ad-hoc SQL queries, deduplicated coun
 
 If indexing is already running in background, do NOT touch the raw file. Wait for the exit code, then use the DB.
 
-### 10. Versioning & Phase Tags
+### 10. Versioning & Gate Tags
 
 All parser output (verbose logs, SQLite databases, GUI title bar) carries a version string in the format:
 
 ```
-p{phase}.{build}.{commit}[-dirty]
+g{gate}.{build}.{commit}[-dirty]
 ```
 
 | Component | Meaning | Example |
 |-----------|---------|---------|
-| `p{phase}` | Roadmap phase number (1-5 from README.md) | `p3` |
-| `{build}` | Commits since the latest phase tag | `5` |
+| `g{gate}` | Roadmap gate number (1-5 from README.md) | `g3` |
+| `{build}` | Commits since the latest gate tag | `5` |
 | `{commit}` | Short git hash for precise traceability | `a1fba93` |
 | `-dirty` | Uncommitted changes in working tree | `-dirty` |
 
@@ -356,44 +356,45 @@ Examples:
 
 | `git describe` output | Version string | Meaning |
 |----------------------|----------------|---------|
-| `p3.0` | `p3.0.0` | Phase 3 start, clean tag |
-| `p3.0-5-ga1fba93` | `p3.5.a1fba93` | 5 commits since Phase 3 tag |
-| `p3.0-5-ga1fba93-dirty` | `p3.5.a1fba93-dirty` | Same, with uncommitted changes |
-| (no tags, hash only) | `p0.0.a1fba93` | No phase tag exists yet |
+| `g3.0` | `g3.0.0` | Gate 3 start, clean tag |
+| `g3.0-5-ga1fba93` | `g3.5.a1fba93` | 5 commits since Gate 3 tag |
+| `g3.0-5-ga1fba93-dirty` | `g3.5.a1fba93-dirty` | Same, with uncommitted changes |
+| (no tags, hash only) | `g0.0.a1fba93` | No gate tag exists yet |
+| Legacy `p3.0` | `g3.0.0` | Legacy phase tag, parsed as gate 3 |
 
 #### Tagging Workflow
 
-Create a phase tag when crossing a README roadmap milestone:
+Create a gate tag when crossing a README roadmap milestone:
 
 ```bash
-# When Phase 3 work is complete and stable:
-git tag p3.0 -m "Phase 3 complete: function parsing, name resolution, opcode skipping"
+# When Gate 3 work is complete and stable:
+git tag g3.0 -m "Gate 3 complete: function parsing, name resolution, opcode skipping"
 
-# After a major sub-milestone within Phase 3:
-git tag p3.1 -m "Phase 3: opcode decoder, disassembly engine"
+# After a major sub-milestone within Gate 3:
+git tag g3.1 -m "Gate 3: opcode decoder, disassembly engine"
 
-# When moving to Phase 4:
-git tag p4.0 -m "Phase 4 starts: opcode decoding, CFG visualizer"
+# When moving to Gate 4:
+git tag g4.0 -m "Gate 4 starts: opcode decoding, CFG visualizer"
 ```
 
 Rules:
 
-1. **Tag at Phase 0 only when the repository has no tags yet.** Once any `p*` tag exists, the version scheme is active.
+1. **Tag at Gate 0 only when the repository has no tags yet.** Once any `p*` or `g*` tag exists, the version scheme is active.
 2. **Always push tags when pushing commits:**
    ```bash
    git push --tags origin main
    ```
-3. **The `{build}` counter resets at each new phase tag.** `p4.0` starts at build 0.
+3. **The `{build}` counter resets at each new gate tag.** `g4.0` starts at build 0.
 4. **`-dirty` alerts you that the working tree has uncommitted changes.** Only index dumps and DBs from clean working trees should be treated as reference baselines.
-5. **Do not delete or move phase tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`p3.1`) rather than moving `p3.0`.
+5. **Do not delete or move gate tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`g3.1`) rather than moving `g3.0`. Legacy `p*` tags remain valid and are matched for backward compatibility.
 
 #### Where versions appear
 
-- **Verbose log header:** `[APP] Parser version: p3.5.a1fba93-dirty`
-- **SQLite DB** (via `logalyzer info`): `"parser_version": "p3.5.a1fba93-dirty"`
+- **Verbose log header:** `[APP] Parser version: g3.5.a1fba93-dirty`
+- **SQLite DB** (via `logalyzer info`): `"parser_version": "g3.5.a1fba93-dirty"`
 - **SQLite DB** (via `logalyzer stats`): meta block includes `parser_version`
-- **GUI window title:** `HashLink Bytecode Inspector — p3.5.a1fba93-dirty`
-- **GUI status bar:** `Version: p3.5.a1fba93-dirty | File: ...`
+- **GUI window title:** `HashLink Bytecode Inspector — g3.5.a1fba93-dirty`
+- **GUI status bar:** `Version: g3.5.a1fba93-dirty | File: ...`
 
 This ensures every artifact can be traced back to a specific parser build, even when comparing across development sessions.
 
@@ -459,8 +460,8 @@ The application must function as both a GUI desktop tool and a CLI pipeline tool
   cli.py globals   <file>      → Globals tab equivalent
   cli.py natives   <file>      → Natives tab equivalent
   cli.py functions <file>      → Functions tab equivalent
-  cli.py disasm    <file>      → Disassembly tab (Phase 4)
-  cli.py decompile <file>      → Decompilation output (Phase 5)
+  cli.py disasm    <file>      → Disassembly tab (Gate 4)
+  cli.py decompile <file>      → Decompilation output (Gate 5)
   ```
 
 #### 11.6 Logging Parity

@@ -343,21 +343,20 @@ def stream_from_bytes(data: bytes) -> io.BytesIO:
 
 # === Function Building ===
 
-# Opcode nargs table mirroring hl_parser._OPCODE_NARGS for test helpers
+# Opcode nargs table — matches HL reference (hashlink/src/code.c hl_op_nargs)
 # Opcode index is a single byte (READ/hl_read_b). Args are signed VarInts.
-# Auto-generated from hashlink/src/opcodes.h (104 opcodes).
 _OPCODE_NARGS = [
-    0, 2, 2, 2, 2, 2, 2, 1, 3, 3,  #  0-  9
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  # 10- 19
-    3, 2, 2, 1, 1, 2, 3, 4, 5, 6,  # 20- 29
-    -1, -1, -1, -1, 2, 3, 3, 2, 2, 3,  # 30- 39
-    3, 2, 2, 3, 3, 2, 2, 2, 2, 3,  # 40- 49
-    3, 3, 3, 3, 3, 3, 3, 3, 3, 1,  # 50- 59
-    2, 2, 2, 2, 2, 2, 2, 0, 1, 1,  # 60- 69
-    1, -1, 1, 2, 1, 3, 3, 3, 3, 3,  # 70- 79
-    3, 3, 3, 1, 2, 2, 2, 2, 2, 2,  # 80- 89
-    2, -1, 2, 2, 4, 3, 0, 2, 3, 0,  # 90- 99
-    3, 3, 1, 0,  # 100-103
+     2,  2,  2,  2,  2,  2,  1,  3,  3,  3,
+     3,  3,  3,  3,  3,  3,  3,  3,  3,  3,
+     2,  2,  1,  1,  2,  3,  4,  5,  6, -1,
+    -1, -1, -1,  2,  3,  3,  2,  2,  3,  3,
+     2,  2,  3,  3,  2,  2,  2,  2,  3,  3,
+     3,  3,  3,  3,  3,  3,  3,  3,  1,  2,
+     2,  2,  2,  2,  2,  2,  0,  1,  1,  1,
+    -1,  1,  2,  1,  3,  3,  3,  3,  3,  3,
+     3,  3,  1,  2,  2,  2,  2,  2,  2,  2,
+    -1,  2,  2,  4,  3,  0,  2,  3,  0,  3,
+     3,  1,  0,
 ]
 
 def build_opcode_sequence(opcodes: list[int]) -> bytes:
