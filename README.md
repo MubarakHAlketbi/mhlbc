@@ -170,7 +170,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 224 tests covering all gates
+  - 278 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -183,15 +183,21 @@ mhlbc/
   - Per-opcode verbose logging (byte offset, mnemonic, args, targets)
   - Validation: round-trip opcode count = nops for all functions
 
-- [ ] **Gate 5: AST Reconstruction & Decompilation**
-  - Stack-to-variable mapping (SSA-like intermediate representation)
-  - Expression tree builder from stack machine ops
-  - Control structure synthesis (if/else, switch, loops, try/catch)
-  - Function signature reconstruction (arguments, return type)
-  - Class hierarchy reconstruction from type system data
-  - Haxe-like pseudocode output
-  - Multi-file output: one `.hx` per class
-  - Decompiler validation: re-parse output against original bytecode structure
+- [x] **Gate 5: AST Reconstruction & Decompilation**
+  - IR data structures (IRValue, IRExpr, IRStmt, IRFunction, DecompileResult)
+  - Register liveness analysis (def-use chains)
+  - Variable mapping: registers → named variables (via debug assign list + lifetime)
+  - Expression tree builder: 30+ opcode patterns → nested expressions
+  - Control flow structuring: if/else, while, for, switch, try/catch patterns
+  - Function signature reconstruction (arguments, return type, method vs static)
+  - Class hierarchy builder with inheritance flattening
+  - Type resolver: all 24 HL type kinds → Haxe type names
+  - Haxe-like pseudocode output with indentation, multi-file output
+  - Decompile subcommand with `--function`, `--output-dir`, `--json`, `--comments`
+  - Decompilation tab in GUI with dark theme
+  - Error recovery: malformed functions, unknown opcodes, unresolvable types
+  - 54 tests covering all pipeline stages
+  - CLI exit codes per CONTRIBUTING.md §11.4
 
 - [ ] **Gate 6: LLM-Enhanced Readability (Exploratory — shelved)**
   - Post-decompilation annotation pass only — never reconstruction

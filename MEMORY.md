@@ -155,3 +155,18 @@
 - **Docs updated:** docs/type_system.md (HGUID doc, non-standard kind notes), README.md (test count).
 - Model (end): deepseek/deepseek-v4-flash via OpenAI Codex.
 - Last commit (this session): 2166854 → pushed to origin/main.
+
+## Session 11 — May 22, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 224 tests passing, Gates 1-4 complete. README Gates 1-4 [x], Gate 5 [ ].
+- Last commit: 58dd725 (Session 10: Action list — 13 items complete).
+- Version: g4.0-2-g58dd725, clean working tree.
+- Gate 5 (AST Reconstruction & Decompilation) is the next milestone.
+- **Lesson:** Plans stay in chat, not files. Never write a plan to disk — deliver inline in response. The `writing-plans` skill's `.hermes/plans/` convention does not apply here.
+- **Gate 5 COMPLETE:**
+  - `hl_decompile.py` (2,142 lines) — 8 classes: IR data structures, RegisterLiveness, VariableMapper, ExprBuilder, ControlStructurer, FunctionSigBuilder, TypeResolver, ClassBuilder, HaxeWriter, Decompiler.
+  - CLI: `decompile` subcommand with `--function`, `--output-dir`, `--json`, `--comments`.
+  - GUI: Decompilation tab (#7) in app.py with dark-themed source display.
+  - 54 new tests in `test_decompile.py` — 278 total passing.
+  - README Gate 5 now [x].

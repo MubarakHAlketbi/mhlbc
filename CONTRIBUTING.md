@@ -23,15 +23,23 @@ hl_decompiler/
 │   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
 │
 ├── hl_parser.py               # Pure logic, sequential, headless bytecode parser
+├── hl_disasm.py               # Disassembly engine (Gate 4)
+├── hl_decompile.py            # Decompilation engine (Gate 5)
 ├── hl_worker.py               # PyQt QThread wrapper for background processing
 ├── hl_logger.py               # VerboseLogger for byte-level debug logging
+├── logalyzer.py               # SQLite-backed log analysis CLI
 ├── app.py                     # Qt Virtual View (UI rendering and model logic)
+├── cli.py                     # CLI entry point (no PyQt6)
+│
+├── docs/                      # Knowledge base
 │
 └── tests/
     ├── hl_helper.py           # Test helpers: build bytecode programmatically
     ├── test_varint.py         # VarInt encoding/decoding tests
-    ├── test_parser.py         # Header, pool, type, globals, natives, functions tests
-    └── test_logger.py         # VerboseLogger write/flush/close tests
+    ├── test_parser.py         # Full pipeline tests (278 tests)
+    ├── test_logger.py         # VerboseLogger write/flush/close tests
+    ├── test_disasm.py         # Opcode decode, CFG builder, CLI disasm tests
+    └── test_decompile.py      # Decompilation engine tests (Gate 5)
 ```
 
 ### Separation Rules

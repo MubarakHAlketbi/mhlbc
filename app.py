@@ -33,6 +33,7 @@ from hl_parser import (
 )
 from hl_logger import VerboseLogger
 from hl_disasm import Disassembler
+from hl_decompile import Decompiler, HaxeWriter
 
 
 # ============================================================================
@@ -581,6 +582,7 @@ class DecompilerApp(QMainWindow):
     TAB_NATIVES    = 4
     TAB_FUNCTIONS  = 5
     TAB_CFG        = 6
+    TAB_DECOMPILE  = 7
 
     def __init__(self, verbose: bool = False):
         super().__init__()
@@ -588,10 +590,11 @@ class DecompilerApp(QMainWindow):
         self.setWindowTitle(f"HashLink Inspector  --  {self._version}")
         self.resize(1200, 760)
 
-        self.parser  = None
+        self.parser = None
         self.worker  = None
         self._verbose = verbose
         self._parse_start_time = 0.0
+        self._decompile_result = None
 
         # Shared source models (one instance per pool type)
         self.strings_model   = StringsListModel()
@@ -641,6 +644,9 @@ class DecompilerApp(QMainWindow):
 
         # Tab 6: CFG
         self.tabs.addTab(self._make_cfg_tab(), "CFG")
+
+        # Tab 7: Decompilation
+        self.tabs.addTab(self._make_decompile_tab(), "Decompile")
 
         # Status bar
         self.status_bar = QStatusBar()
@@ -919,6 +925,37 @@ class DecompilerApp(QMainWindow):
 
         return widget
 
+    def _make_decompile_tab(self) -> QWidget:
+        """Decompilation tab: shows Haxe-like decompiled source."""
+        widget = QWidget()
+        vlay = QVBoxLayout(widget)
+        vlay.setContentsMargins(0, 0, 0, 0)
+        vlay.setSpacing(0)
+
+        # Header
+        hdr = QLabel("DECOMPILATION OUTPUT")
+        hdr.setStyleSheet(
+            f"color: {C_DIM}; font-size: 10px; font-weight: bold;"
+            f"background: transparent; padding: 6px 8px 4px 8px;"
+        )
+
+        self._decompile_text = QTextEdit()
+        self._decompile_text.setReadOnly(True)
+        self._decompile_text.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
+        self._decompile_text.setStyleSheet(
+            f"QTextEdit {{ background: {C_BG}; color: {C_TEXT};"
+            f"font-family: 'JetBrains Mono', 'Consolas', monospace;"
+            f"font-size: 12px; border: none; padding: 8px; }}"
+        )
+        self._decompile_text.setPlainText(
+            "Open a HashLink bytecode file and click the Decompile tab to see output."
+        )
+
+        vlay.addWidget(hdr)
+        vlay.addWidget(self._decompile_text)
+
+        return widget
+
     # ------------------------------------------------------------------
     # Overview HTML
     # ------------------------------------------------------------------
@@ -1090,6 +1127,9 @@ class DecompilerApp(QMainWindow):
         # Jump to overview on load
         self.tabs.setCurrentIndex(self.TAB_OVERVIEW)
 
+        # Trigger decompilation in background
+        self._do_decompile()
+
     def on_parse_failure(self, error_message: str):
         self.btn_open.setEnabled(True)
         self._progress_bar.setVisible(False)
@@ -1104,6 +1144,38 @@ class DecompilerApp(QMainWindow):
     # ------------------------------------------------------------------
     # CFG rendering
     # ------------------------------------------------------------------
+
+    def _do_decompile(self):
+        """Run decompilation and update the decompile tab."""
+        if not self.parser:
+            return
+        try:
+            disasm = Disassembler(self.parser)
+            decompiler = Decompiler(self.parser, disasm)
+            result = decompiler.decompile_all()
+            self._decompile_result = result
+            writer = HaxeWriter(decompiler.type_resolver, self.parser,
+                                 include_comments=True)
+            files = writer.write_output(result)
+            lines = []
+            for fname, fsrc in files.items():
+                lines.append(f"// --- {fname} ---")
+                lines.append(fsrc)
+            text = "\n\n".join(lines)
+            self._decompile_text.setPlainText(text)
+            n_funcs = len(result.functions)
+            n_errors = result.count_errors()
+            status = f"Decompiled: {n_funcs} functions"
+            if n_errors:
+                status += f", {n_errors} errors"
+            self.tabs.setTabText(
+                self.TAB_DECOMPILE,
+                f"Decompile ({n_funcs})"
+            )
+        except Exception as e:
+            self._decompile_text.setPlainText(
+                f"Decompilation failed:\\n\\n{e}"
+            )
 
     def _on_cfg_selection(self, selected, deselected):
         if not self.parser:

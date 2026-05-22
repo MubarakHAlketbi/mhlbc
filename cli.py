@@ -13,6 +13,7 @@ import csv as _csv
 from hl_parser import HLParser, HLParserError, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
 from hl_logger import VerboseLogger
 from hl_disasm import Disassembler, format_disassembly
+from hl_decompile import Decompiler, HaxeWriter
 
 # ── Exit codes per CONTRIBUTING.md §11.4 ────────────────────────────────────
 EX_OK = 0
@@ -595,6 +596,75 @@ def cmd_disasm(args):
                 print(f"  [WARN] {m}")
 
 
+def cmd_decompile(args):
+    """Decompile bytecode to Haxe-like pseudocode."""
+    parser = _parse_and_load(args.file, _make_logger(args))
+    disasm = Disassembler(parser)
+    decompiler = Decompiler(parser, disasm)
+
+    # Decompile
+    if args.function is not None:
+        ir_fn = decompiler.decompile_function(args.function)
+        if ir_fn is None:
+            print(f"func[{args.function}]: could not decompile (malformed or empty)", file=sys.stderr)
+            sys.exit(EX_PARSE_ERR)
+        writer = HaxeWriter(decompiler.type_resolver, parser, include_comments=args.comments)
+        output = writer.write_function(ir_fn)
+        if args.json:
+            _output_as_json({
+                "function": {
+                    "index": args.function,
+                    "name": ir_fn.name,
+                    "findex": ir_fn.findex,
+                    "sig": {
+                        "name": ir_fn.sig.name,
+                        "params": [{"name": p[0], "type": p[1]} for p in ir_fn.sig.params],
+                        "ret_type": ir_fn.sig.ret_type,
+                        "is_method": ir_fn.sig.is_method,
+                        "parent_class": ir_fn.sig.parent_class,
+                    },
+                    "source": output,
+                },
+            })
+        else:
+            print(output)
+    else:
+        result = decompiler.decompile_all()
+        writer = HaxeWriter(decompiler.type_resolver, parser, include_comments=args.comments)
+        files = writer.write_output(result, output_dir=args.output_dir)
+
+        if args.json:
+            _output_as_json({
+                "decompiler_version": result.decompiler_version,
+                "classes": list(result.classes.keys()),
+                "enums": list(result.enums.keys()),
+                "functions_ok": len(result.functions),
+                "functions_failed": len(result.errors),
+                "orphans": len(result.orphan_functions),
+                "files": list(files.keys()),
+            })
+        elif args.output_dir:
+            os.makedirs(args.output_dir, exist_ok=True)
+            for fname, fsrc in files.items():
+                fpath = os.path.join(args.output_dir, fname)
+                with open(fpath, "w", encoding="utf-8") as f:
+                    f.write(fsrc)
+                print(f"Wrote {fpath}  ({len(fsrc)} bytes)")
+        else:
+            for fname, fsrc in files.items():
+                print(f"=== {fname} ===")
+                print(fsrc)
+                print()
+
+        if result.errors:
+            for err in result.errors:
+                print(f"  [WARN] {err}", file=sys.stderr)
+
+    # Check for parse warnings
+    if parser.parse_warnings and args.warnings_as_errors:
+        sys.exit(EX_PARSE_ERR)
+
+
 # ── Logger Setup ──────────────────────────────────────────────────────────
 
 
@@ -713,6 +783,17 @@ Examples:
     sp_disasm.add_argument("--cfg", action="store_true",
                            help="Show control flow graph structure")
     sp_disasm.set_defaults(func=cmd_disasm)
+
+    # decompile
+    sp_decompile = sub.add_parser("decompile", parents=[parent_parser],
+                                   help="Decompile bytecode to Haxe-like pseudocode")
+    sp_decompile.add_argument("--function", "-f", type=int, default=None,
+                              help="Function index to decompile (default: all)")
+    sp_decompile.add_argument("--output-dir", type=str, default=None,
+                              help="Output directory for per-class .hx files")
+    sp_decompile.add_argument("--comments", action="store_true", default=True,
+                              help="Include debug comments in output")
+    sp_decompile.set_defaults(func=cmd_decompile)
 
     args = ap.parse_args()
 
