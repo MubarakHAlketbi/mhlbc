@@ -170,7 +170,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 173 tests covering all gates
+  - 199 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -254,7 +254,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 173 tests, compact output
+pytest                     # All 199 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword

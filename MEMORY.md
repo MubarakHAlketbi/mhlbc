@@ -118,3 +118,22 @@
   - **199 tests total passing** (173 + 26).
   - README Gate 4 now [x].
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
+
+## Session 9 — May 22, 2026
+- Start: New session initialized.
+- Project state: 199 tests passing, Gates 1-4 complete. README Gates 1-4 [x], Gate 5 [ ].
+- Last commit: bbcae9c (Gate 4: Disassembly Engine & Control Flow).
+- Gate 5 (AST Reconstruction & Decompilation) is the next milestone.
+- Model: claude-sonnet-4-6 via Anthropic.
+- **Session 9 work: Dark GUI redesign (app.py fully rewritten)**
+  - Full dark stylesheet (One Dark palette, no system theme)
+  - Overview tab: HTML stats page (header, pools, diagnostics, parse time)
+  - All list tabs: QSortFilterProxyModel + 200ms debounced search + item counts
+  - setUniformItemSizes(True) on all QListViews: O(1) virtual scroll
+  - ForegroundRole color coding: types by kind, natives by lib, malformed=red
+  - Functions tab: FunctionFilterProxy with hide-malformed checkbox
+  - CFG tab: QSplitter with searchable function browser (left) + disassembly (right)
+  - AsmHighlighter: QSyntaxHighlighter for CFG output with full mnemonic coloring
+  - NativesListModel now resolves lib/name strings from string pool
+  - Toolbar: compact 44px bar with open button, verbose toggle, progress bar, status
+  - 199 tests still passing (no parser changes)
