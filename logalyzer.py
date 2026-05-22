@@ -85,7 +85,7 @@ _HEADER_KV_RE = re.compile(r"(?P<key>\w+)=(?P<value>\S+)")
 
 # Header/footer lines to skip
 _HEADER_FOOTER_RE = re.compile(
-    r"^(={2,}|Chunk:|  )"
+    r"^(={2,}|Chunk[ :])"
 )
 
 
@@ -912,9 +912,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "index":
-        db_path = args.db or (Path(args.log).stem + ".db")
-        print(f"Indexing {args.log} -> {db_path} ...", file=sys.stderr)
-        total, elapsed = index_log(args.log, db_path, light=args.light)
+        if os.path.isdir(args.log):
+            # Chunked session dir — delegate to index-dir logic
+            db_path = args.db or (Path(args.log).name + ".db")
+            print(f"Indexing directory {args.log} -> {db_path} ...", file=sys.stderr)
+            total, elapsed = index_dir(args.log, db_path, light=args.light)
+        else:
+            db_path = args.db or (Path(args.log).stem + ".db")
+            print(f"Indexing {args.log} -> {db_path} ...", file=sys.stderr)
+            total, elapsed = index_log(args.log, db_path, light=args.light)
         db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
         print(
             f"Done. {total} lines indexed in {elapsed:.1f}s. "

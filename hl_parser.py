@@ -207,7 +207,7 @@ class HLParser:
         self.strings: List[str] = []
         self.bytes_data: bytes = b""
         self.bytes_offsets: List[int] = []
-        self.debug_files: List[int] = []
+        self.debug_files: List[str] = []
         
         # Header sizes
         self.nints = 0
@@ -242,6 +242,20 @@ class HLParser:
         if self._logger:
             hex_repr = " ".join(f"{b:02x}" for b in raw_bytes)
             self._logger.log("VARINT", f"{context}: raw=[{hex_repr}] decoded={value}", level=TRACE)
+
+    def read_uvarint(self, stream: BinaryIO, context: str = "") -> int:
+        """Reads an unsigned variable-length integer (UINDEX).
+
+        Matches hashlink/src/code.c hl_read_uindex() — wraps read_varint
+        and rejects negative values with an error.
+        """
+        v = self.read_varint(stream, context=context)
+        if v < 0:
+            raise HLParserError(
+                f"Unexpected negative unsigned VarInt ({v})"
+                + (f" at {context}" if context else "")
+            )
+        return v
 
     def read_varint(self, stream: BinaryIO, context: str = "") -> int:
         """Reads a signed variable-length integer according to HashLink specifications.
@@ -414,13 +428,49 @@ class HLParser:
         # 5. Debug Files List
         if self.has_debug:
             if progress_callback: progress_callback("Loading Debug Info...", 90)
+            ndebugfiles_pos = stream.tell()
             ndebugfiles = self.read_varint(stream, context="ndebugfiles")
             self._log("POOL", f"ndebugfiles={ndebugfiles}", level=INFO)
-            
-            self.debug_files = []
-            for i in range(ndebugfiles):
-                self.debug_files.append(self.read_varint(stream, context=f"debug_file[{i}]"))
-            self._log("POOL", f"Read {len(self.debug_files)} debug file string indices", level=INFO)
+
+            # Debug file strings use hl_read_strings format (hashlink/src/code.c):
+            #   4-byte LE total size + raw bytes with VarInt-length-prefixed strings
+            size_bytes = stream.read(4)
+            if len(size_bytes) < 4:
+                raise HLParserError("Truncated debug string table size")
+            table_size = struct.unpack("<i", size_bytes)[0]
+            remaining = self._remaining_bytes(stream)
+
+            if table_size < 0 or table_size > remaining:
+                self._warn("POOL",
+                    f"Debug string table size {table_size} exceeds remaining "
+                    f"{remaining}, treating as no debug info"
+                )
+                # Backtrack to before ndebugfiles — types section starts here
+                stream.seek(ndebugfiles_pos)
+                self.has_debug = False
+                self._log("POOL", f"Disabled debug info, types start at offset {stream.tell()}", level=INFO)
+            else:
+                # Read raw string table data
+                raw_data = stream.read(table_size)
+                if len(raw_data) != table_size:
+                    raise HLParserError("Truncated debug string table data")
+
+                # Parse VarInt-length-prefixed strings within raw data
+                self.debug_files = []
+                buf = io.BytesIO(raw_data)
+                for i in range(ndebugfiles):
+                    try:
+                        sz = self.read_varint(buf, context=f"debug_file[{i}].len")
+                        if sz < 0:
+                            self._warn("POOL", f"Negative string length {sz} for debug file {i}, stopping")
+                            break
+                        s = buf.read(sz).decode("utf-8", errors="replace")
+                        buf.read(1)  # skip null terminator
+                        self.debug_files.append(s)
+                    except HLParserError:
+                        self._warn("POOL", f"EOF reading debug file string {i}, stopping")
+                        break
+                self._log("POOL", f"Read {len(self.debug_files)} debug file strings from {table_size} bytes", level=INFO)
         
         offset_after = stream.tell()
         self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes", level=INFO)

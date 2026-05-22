@@ -168,9 +168,11 @@ def build_minimal_bytecode(
     if version >= 5 and bytes_data:
         pools += build_bytes_pool(bytes_data[0], bytes_data[1])
     
-    # Debug files section (if has_debug)
+    # Debug files section (if has_debug) — hl_read_strings format
+    # ndebugfiles VarInt + 4-byte LE string table size + raw string data
     if has_debug:
         pools += encode_varint(0)  # ndebugfiles = 0
+        pools += struct.pack("<i", 0)  # empty string table size
     
     # Types section
     if types:

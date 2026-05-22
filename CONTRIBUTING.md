@@ -341,12 +341,12 @@ Default mode (`INFO`) produces ~20 lines — enough to know what happened. Truly
 logs/
   2026-05-22/                          # Date
     15-30-53/                          # Start time
-      chunk-000001-010000.log          # Lines 1-10000
-      chunk-010001-020000.log          # Lines 10001-20000
+      chunk-000001.log          # Lines 1-10000
+      chunk-000002.log          # Lines 10001-20000
       ...
 ```
 
-Each chunk is capped at 10,000 lines (configurable). The session directory path is stored in `VerboseLogger.log_path`.
+Each chunk is capped at 10,000 lines (configurable). Chunk files are numbered sequentially: `chunk-000001.log`, `chunk-000002.log`, etc. The session directory path is stored in `VerboseLogger.log_path`.
 
 **Line format:**
 ```

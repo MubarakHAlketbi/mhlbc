@@ -65,7 +65,7 @@ class TestLoggerInit:
         logger = VerboseLogger(log_dir)
         chunks = [f for f in os.listdir(logger.log_path) if f.endswith(".log")]
         assert len(chunks) == 1
-        assert chunks[0].startswith("chunk-")
+        assert chunks[0].startswith("chunk-000001")
         assert chunks[0].endswith(".log")
         logger.close()
 
@@ -85,7 +85,7 @@ class TestLoggerInit:
         logger.close()
         content = _read_log(logger)
         assert "HashLink Bytecode Decompiler" in content
-        assert "Chunk:" in content
+        assert "Chunk 1" in content
         assert "Level:" in content
 
     def test_level_default_info(self, log_dir):
@@ -192,8 +192,8 @@ class TestLoggerChunking:
             f for f in os.listdir(logger.log_path) if f.endswith(".log")
         )
         assert len(chunks) >= 2, f"Expected >=2 chunks, got {chunks}"
-        assert chunks[0].startswith("chunk-")
-        assert chunks[1].startswith("chunk-")
+        assert chunks[0].startswith("chunk-000001")
+        assert chunks[1].startswith("chunk-000002")
 
     def test_chunk_headers_present(self, log_dir):
         """Each chunk has a header block."""

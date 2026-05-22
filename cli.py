@@ -197,7 +197,7 @@ def cmd_pools(args):
         } if parser.version >= 5 else None,
         "debug_files": {
             "count": len(parser.debug_files),
-            "resolved": [_resolve_string(parser, df) for df in parser.debug_files[:20]] if (args.preview and parser.has_debug) else None,
+            "resolved": [df for df in parser.debug_files[:20]] if (args.preview and parser.debug_files) else None,
         } if parser.has_debug else None,
     }
 
@@ -244,11 +244,11 @@ def cmd_pools(args):
                 for i, off in enumerate(parser.bytes_offsets[:20]):
                     print(f"    [{i:5d}] {off}")
 
-        if parser.has_debug:
+        if parser.debug_files:
             print(f"\n--- Debug Files ({len(parser.debug_files)} entries) ---")
             if args.preview:
                 for i, df in enumerate(parser.debug_files[:20]):
-                    print(f"  [{i:5d}] {df} -> {_resolve_string(parser, df)}")
+                    print(f"  [{i:5d}] {df}")
                 if len(parser.debug_files) > 20:
                     print(f"  ... ({len(parser.debug_files) - 20} more)")
 
@@ -598,9 +598,10 @@ def cmd_disasm(args):
 
 def cmd_decompile(args):
     """Decompile bytecode to Haxe-like pseudocode."""
-    parser = _parse_and_load(args.file, _make_logger(args))
+    logger = _make_logger(args)
+    parser = _parse_and_load(args.file, logger)
     disasm = Disassembler(parser)
-    decompiler = Decompiler(parser, disasm)
+    decompiler = Decompiler(parser, disasm, logger=logger)
 
     # Decompile
     if args.function is not None:

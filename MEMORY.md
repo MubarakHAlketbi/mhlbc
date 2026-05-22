@@ -203,11 +203,25 @@
 - AGENTS.md pitfalls section (§3) added.
 - **Phase 2 COMPLETE — Logging full refactor (C1-C7):**
   - VerboseLogger rewritten with 5-level system (ERROR/WARN/INFO/DEBUG/TRACE), default INFO
-  - Output: `logs/{date}/{time}/chunk-NNNNN-NNNNN.log` with auto-rotation at 10K lines
+  - Output: `logs/{date}/{time}/chunk-NNNNN.log` with auto-rotation at 10K lines
   - All 57 hl_parser.py call sites gated with appropriate levels (VARINT→TRACE, TYPE/FUNC→DEBUG, HEADER/POOL→INFO)
   - All hl_disasm.py (10 sites), hl_decompile.py (8 sites), hl_worker.py (2 sites) gated
   - CLI: `--verbose`→count `-v/-vv`, `--quiet`, `--log-level {error,warn,info,debug,trace}`
-  - logalyzer: `--level` filter on errors/query, `index-dir` for chunked dirs, new format parser
+  - logalyzer: `--level` filter on errors/query, `index-dir` for chunked dirs, `index` auto-detects dirs
   - GUI: level dropdown replaces binary "Verbose" checkbox
   - CONTRIBUTING.md: §8 Integration Pattern, §9 Log Format/Levels/Tooling/Workflow rewritten, §11.6 CLI logging flag docs updated
+  - **Bug fix:** Chunk rotation reset `_line_count` to prevent infinite rotation loop (was rotating every line after first chunk)
   - 286 tests passing
+- **Phase 4 COMPLETE — Dogfooding (D1-D4):**
+  - D1: Farever parse at INFO level → **31 lines** (was 8.2M), correct level gating verified
+  - D2: Farever decompile at DEBUG level → **1,106 DECOMPILE entries** now appear (P16 fixed) — logger chain confirmed working
+  - D3: INFO-only DB → **40 KB** (was 1.7 GB at TRACE) — 43,000x reduction
+  - D4: Clean HLB at TRACE → full pipeline works end-to-end, 57 lines, 0 errors
+- **Phase 3 COMPLETE — Farever Function Pool Investigation (A1-A4):**
+  - **A1:** Read HL runtime `code.c` — `hl_read_function` uses `UINDEX()` (unsigned VarInt) for nregs/nops, NOT INDEX. Debug files use `hl_read_strings` (4-byte LE size + VarInt-length-prefixed strings), not VarInt indices.
+  - **A2 (CRITICAL BUGFIX — 7-byte offset):** Our parser consumed only 6 VarInts (7 bytes) for debug files, but the HL runtime format uses `hl_read_strings` (4-byte LE size + raw bytes). For Farever: the 4-byte size decodes to 185,271,813 (absurd for a 13MB file). Our parser now detects this and backtracks, treating has_debug as False. **This 7-byte offset was the root cause of all function pool corruption** — it cascaded through 43,844 types, 28,399 globals, and 723 natives, producing garbage function headers.
+  - **A3:** Fixed `parse_pools()` debug files section: reads ndebugfiles + 4-byte LE size + sanity check. If size exceeds remaining data, backtracks and disables debug. Added `read_uvarint()` helper.
+  - **A4:** Farever now parses **194 functions** (up from 14 — 13x improvement). 190 valid, 4 malformed. Remaining 45,171 functions unparsed due to EOF — the 190 valid functions with large nops values consume all available buffer. `has_debug=False` after backtrack. `parse_warnings` includes debug detection + resync events.
+  - **Key insight:** Farever's bytecode is NOT standard HL format — the HL runtime would also fail on it (debug table overflow + negative nregs/nops). The game runs via a custom/modified HL runtime.
+  - **Files changed:** hl_parser.py (read_uvarint + debug fix + type annotation), cli.py (string display), tests/hl_helper.py (debug emission), tests/test_parser.py (updated tests).
+  - **286 tests passing.**

@@ -137,9 +137,7 @@ class VerboseLogger:
 
     def _open_chunk(self):
         self._chunk_number += 1
-        start_line = self._line_count + 1
-        end_line = start_line + self._lines_per_chunk - 1
-        fname = f"chunk-{start_line:06d}-{end_line:06d}.log"
+        fname = f"chunk-{self._chunk_number:06d}.log"
         path = os.path.join(self._log_dir, fname)
 
         # Close previous
@@ -151,7 +149,8 @@ class VerboseLogger:
         self._write_header(fname)
 
     def _rotate_chunk(self):
-        """Close current chunk and open the next one."""
+        """Close current chunk and open the next. Resets line counter."""
+        self._line_count = 0
         self._open_chunk()
 
     def chunk_count(self) -> int:
@@ -165,7 +164,7 @@ class VerboseLogger:
         lines = [
             "=" * 60,
             f"  HashLink Bytecode Decompiler — Verbose Log",
-            f"  Chunk: {fname}",
+            f"  Chunk {self._chunk_number} — {self._line_count} lines",
             f"  Started: {now.isoformat()}",
             f"  Level: {name_from_level(self._level)} ({self._level})",
             "=" * 60,
