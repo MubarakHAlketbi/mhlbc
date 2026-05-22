@@ -11,3 +11,4 @@ _investigate.py
 workspace/*/decompiled/
 workspace/*/*.log/
 plan.md
+tools/

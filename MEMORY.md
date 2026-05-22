@@ -225,3 +225,21 @@
   - **Key insight:** Farever's bytecode is NOT standard HL format — the HL runtime would also fail on it (debug table overflow + negative nregs/nops). The game runs via a custom/modified HL runtime.
   - **Files changed:** hl_parser.py (read_uvarint + debug fix + type annotation), cli.py (string display), tests/hl_helper.py (debug emission), tests/test_parser.py (updated tests).
   - **286 tests passing.**
+
+## Session 14 — May 22, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 286 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: 3d61d48 (Session 13 closure).
+- Version: g5.2-1-g3d61d48, clean working tree.
+- Session 13 findings: Farever debug fix (194 functions parsed), logging refactor, dogfooding complete.
+- Remaining gap: Farever function pool — 194/45,365 functions parse; HL runtime differs from open-source.
+- **Plan reviewed:** `plan.md` — full Farever investigation campaign with 8 approaches in 4 phases.
+- **Tools acquired:** hlbc CLI (v0.5.0, Gui-Yom/hlbc), Haxe 4.3.6, z3-solver.
+- **Key — shiroTools identified:** libhl.dll is a custom Shiro Games HL fork (`E:\Projects\shiroTools\hashlink\src\`), built April 9, 2026. This explains Farever's non-standard format.
+- **Key — hlbc also fails on Farever:** Confirms Farever has non-standard type kinds beyond the official spec.
+- **Key — Haxe 4.3.6 always sets flags=1:** Debug bit is always set regardless of `-debug` flag. Debug section may not be present despite flag.
+- **Key — Proto format confirmed:** Obj protos are 3 VarInts (name, findex, pindex), NOT (name, type, findex). Proto type fix attempted and reverted.
+- **Unresolved:** Function pool still misaligned on standard HLB (reads ASCII text as opcodes). Type pool under-consumption suspected. Debug section format mismatch between hl_read_strings format and actual bytes.
+- **Pitfalls added to AGENTS.md:** P28 (proto format), P29 (hlbc fares vs Farever), P30 (flags=1 is not debug guarantee), P31 (shiroTools custom runtime).
+- **286 tests passing.

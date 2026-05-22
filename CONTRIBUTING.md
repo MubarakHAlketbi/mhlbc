@@ -221,7 +221,7 @@ from the Steam game Farever (Haxe/Heaps engine). Two copies exist:
 
 | Source | MD5 | Size | Notes |
 |--------|-----|------|-------|
-| Windows (Steam) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Original game file |
+| Windows (Steam) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Original game file — uses custom shiroTools HL runtime |
 | Workspace (initial) | `70250a679ed6cf7b658b0b3753213262` | 13,218,460 | **Truncated copy** (-92KB) |
 
 The initial workspace copy was transferred incorrectly (likely via text-mode copy),
@@ -234,6 +234,8 @@ Always verify with the Steam copy.
 - After the debug fix: **194 / 45365 functions parse** (190 valid, 4 malformed) — up from ~30 (Session 12) and ~14 (Session 8). The remaining 45,171 functions are unreachable because the 190 valid functions (many with nops > 10,000) consume all available buffer space.
 - The HL runtime (`hashlink/src/code.c`) would also fail to parse this binary (UINDEX rejects the negative nregs/nops values). The game runs via a custom/modified HL runtime.
 - The Farever target remains a robustness regression target, not a completeness benchmark. It validates that the parser handles corrupt debug info, negative VarInts, oversize nregs/nops, and EOF gracefully without crashing.
+
+**shiroTools runtime discovery (Session 14):** The Farever game's `libhl.dll` (471 KB, 431 exports) was built from `E:\Projects\shiroTools\hashlink\src\`, compiled April 9, 2026 with MSVC 14.29. This is a custom HashLink fork maintained by **Shiro Games** (the game's developer). The fork may use different VarInt encoding, extended type kinds, or a different pool layout than open-source HL. This explains why both our parser and the third-party `hlbc` tool (Gui-Yom/hlbc v0.5.0) fail to fully parse Farever's `hlboot.dat`.
 
 ---
 

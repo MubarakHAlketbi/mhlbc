@@ -191,9 +191,25 @@ Binary mode transfer preserves the full file. Always verify with `md5sum` agains
 The debug file section stores source file names as a complete string table (4-byte LE size + raw bytes with VarInt-length-prefixed strings). Our parser previously read `ndebugfiles` VarInts as string pool indices — this caused a 7-byte stream offset that cascaded through all downstream parsing (types, globals, natives, functions).
 *Fix: Read `ndebugfiles` VarInt, then 4-byte LE size, then `size` raw bytes with VarInt-prefixed strings.*
 
-**P27 — Debug string table size must be sanity-checked against remaining stream data.**
-Some production binaries (Farever) have the debug flag set but store a corrupt string table size. Read the 4-byte size and compare against `_remaining_bytes(stream)`. If `table_size < 0` or `table_size > remaining`, backtrack to before `ndebugfiles` and set `has_debug = False`.
-*This fixes the "7-byte offset" bug — the most impactful single fix ever made to this parser (194 vs 14 functions parsed).*
+|**P27 — Debug string table size must be sanity-checked against remaining stream data.**
+|Some production binaries (Farever) have the debug flag set but store a corrupt string table size. Read the 4-byte size and compare against `_remaining_bytes(stream)`. If `table_size < 0` or `table_size > remaining`, backtrack to before `ndebugfiles` and set `has_debug = False`.
+|*This fixes the "7-byte offset" bug — the most impactful single fix ever made to this parser (194 vs 14 functions parsed).*
+|
+|**P28 — Obj proto format is 3 VarInts: name, findex, pindex — NOT name, type, findex.**
+|Confirmed against both the HL source (`hl_read_type` in `hashlink/src/code.c`) and the hlbc Rust implementation (`ObjProto { name, findex, pindex }`). The "type" field of a method is obtained via `findex → Function.t`, not stored inline in the proto. Parsing protos as (name, type, findex) where type is a full recursive type consumes too many bytes, misaligning all subsequent Obj types.
+|*Avoid: Read `name + findex + pindex` (3 VarInts), NOT `name + type + findex`.*
+|
+|**P29 — hlbc (Gui-Yom/hlbc) also fails on Farever bytecode.**
+|The Rust-based hlbc CLI (v0.5.0, 2022) errors with `"Malformed bytecode (Invalid type kind '22')"` when loading Farever's hlboot.dat — the same error our parser would hit if it reached that type kind. This confirms Farever uses non-standard type kinds beyond the official HL spec, even for other third-party tools.
+|*Avoid: hlbc is useful as ground truth for standard HLB comparison, but cannot break the Farever deadlock.*
+|
+|**P30 — Haxe 4.3.6 always sets flags=1 (has_debug bit) even without `-debug`.**
+|Compiling with and without `-debug` produces identical HL bytecode (same MD5), both with flags=1. The debug file section in the pools area may not actually be present despite the flag. The HL runtime detects this via a sanity check on the table_size field and skips the section.
+|*Avoid: Always sanity-check the debug section. `flags & 1` is not a guarantee that valid debug data follows.*
+|
+|**P31 — Shiro Games (Farever developer) maintains a custom HL runtime fork.**
+|The Farever game's `libhl.dll` is built from `E:\Projects\shiroTools\hashlink\src\`. Built April 9, 2026 with MSVC 14.29. String evidence shows `shiroTools` is Shiro Games' internal HL fork. The runtime's behavior (VarInt encoding, type kinds, debug handling) may differ from open-source HL.
+|*Avoid: When analysis suggests the binary format differs from open-source HL, the shiroTools fork may be the source of the difference — not parser bugs.*
 
 ### 3.2 Debugging & Log Analysis
 

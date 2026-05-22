@@ -433,44 +433,64 @@ class HLParser:
             self._log("POOL", f"ndebugfiles={ndebugfiles}", level=INFO)
 
             # Debug file strings use hl_read_strings format (hashlink/src/code.c):
-            #   4-byte LE total size + raw bytes with VarInt-length-prefixed strings
-            size_bytes = stream.read(4)
-            if len(size_bytes) < 4:
-                raise HLParserError("Truncated debug string table size")
-            table_size = struct.unpack("<i", size_bytes)[0]
+            #   ndebugfiles (UINDEX) + table_size (4-byte LE) + raw string data
+            #   where raw data = VarInt-length-prefixed strings with null terminators
+            #
+            # Some binaries (e.g. standard Haxe 4.3.6 HL) set flags=1 but do not
+            # actually contain a valid debug section. Sanity-check table_size
+            # against remaining stream data and disable debug if it's unrealistic.
             remaining = self._remaining_bytes(stream)
 
-            if table_size < 0 or table_size > remaining:
+            # Sanity: ndebugfiles must be non-negative and not exceed remaining
+            if ndebugfiles < 0 or ndebugfiles > remaining:
                 self._warn("POOL",
-                    f"Debug string table size {table_size} exceeds remaining "
-                    f"{remaining}, treating as no debug info"
+                    f"ndebugfiles={ndebugfiles} out of range [0, {remaining}], "
+                    f"disabling debug"
                 )
-                # Backtrack to before ndebugfiles — types section starts here
                 stream.seek(ndebugfiles_pos)
                 self.has_debug = False
-                self._log("POOL", f"Disabled debug info, types start at offset {stream.tell()}", level=INFO)
-            else:
-                # Read raw string table data
-                raw_data = stream.read(table_size)
-                if len(raw_data) != table_size:
-                    raise HLParserError("Truncated debug string table data")
-
-                # Parse VarInt-length-prefixed strings within raw data
+            elif ndebugfiles == 0:
                 self.debug_files = []
-                buf = io.BytesIO(raw_data)
-                for i in range(ndebugfiles):
-                    try:
-                        sz = self.read_varint(buf, context=f"debug_file[{i}].len")
-                        if sz < 0:
-                            self._warn("POOL", f"Negative string length {sz} for debug file {i}, stopping")
-                            break
-                        s = buf.read(sz).decode("utf-8", errors="replace")
-                        buf.read(1)  # skip null terminator
-                        self.debug_files.append(s)
-                    except HLParserError:
-                        self._warn("POOL", f"EOF reading debug file string {i}, stopping")
-                        break
-                self._log("POOL", f"Read {len(self.debug_files)} debug file strings from {table_size} bytes", level=INFO)
+                self._log("POOL", "ndebugfiles=0, no debug files", level=INFO)
+            else:
+                size_bytes = stream.read(4)
+                if len(size_bytes) < 4:
+                    self._warn("POOL", "Truncated debug string table size, disabling debug")
+                    stream.seek(ndebugfiles_pos)
+                    self.has_debug = False
+                else:
+                    table_size = struct.unpack("<i", size_bytes)[0]
+                    if table_size < 0 or table_size > remaining:
+                        self._warn("POOL",
+                            f"Debug string table size {table_size} exceeds remaining "
+                            f"{remaining}, disabling debug"
+                        )
+                        stream.seek(ndebugfiles_pos)
+                        self.has_debug = False
+                    else:
+                        # Read raw string table data
+                        raw_data = stream.read(table_size)
+                        if len(raw_data) != table_size:
+                            self._warn("POOL", "Truncated debug string table data, disabling debug")
+                            stream.seek(ndebugfiles_pos)
+                            self.has_debug = False
+                        else:
+                            # Parse VarInt-length-prefixed strings within raw data
+                            self.debug_files = []
+                            buf = io.BytesIO(raw_data)
+                            for i in range(ndebugfiles):
+                                try:
+                                    sz = self.read_varint(buf, context=f"debug_file[{i}].len")
+                                    if sz < 0:
+                                        self._warn("POOL", f"Negative string length {sz} for debug file {i}, stopping")
+                                        break
+                                    s = buf.read(sz).decode("utf-8", errors="replace")
+                                    buf.read(1)  # skip null terminator
+                                    self.debug_files.append(s)
+                                except HLParserError:
+                                    self._warn("POOL", f"EOF reading debug file string {i}, stopping")
+                                    break
+                            self._log("POOL", f"Read {len(self.debug_files)} debug file strings from {table_size} bytes", level=INFO)
         
         offset_after = stream.tell()
         self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes", level=INFO)
