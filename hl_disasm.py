@@ -8,7 +8,7 @@ Headless: no PyQt6 dependency. Used by both cli.py and app.py.
 """
 
 from dataclasses import dataclass, field
-from typing import BinaryIO, List, Optional, Dict, Tuple
+from typing import List, Optional, Dict, Tuple
 import struct
 
 from hl_logger import VerboseLogger
@@ -147,7 +147,7 @@ _JUMP_OPCODES = frozenset(range(44, 59))  # OJTrue..OJAlways
 _JUMP_OPCODES_SET = _JUMP_OPCODES | {72, 101}  # + OTrap, OCatch
 
 # Opcodes with variable arguments
-_VARARG_OPCODES = frozenset({29, 30, 31, 32, 71, 91})  # OCallN/Method/This/Closure, OSwitch, OMakeEnum
+_VARARG_OPCODES = frozenset({29, 30, 31, 32, 70, 91})  # OCallN/Method/This/Closure, OSwitch, OMakeEnum
 
 
 # ============================================================================
@@ -350,7 +350,7 @@ class OpcodeDecoder:
                 extra_cases: List[int] = []
                 extra_default: Optional[int] = None
 
-                if opcode == 71:  # OSwitch
+                if opcode == 70:  # OSwitch
                     # p2 = case count (unsigned)
                     ncases = max(0, p2)
                     cases = []
@@ -412,7 +412,7 @@ class OpcodeDecoder:
 
             instructions.append(instr)
 
-            if opcode == 71:
+            if opcode == 70:  # OSwitch
                 instr.jump_cases = extra_cases if extra_cases else None
                 instr.jump_default = extra_default
 

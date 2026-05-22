@@ -6,3 +6,4 @@ dump.md
 dump.db
 _investigate.py
 .brv
+.coverage

@@ -1,22 +1,20 @@
 import struct
 import io
-import time
 import os
 import subprocess
-from typing import BinaryIO, Dict, Any, List, Optional, Callable
+from typing import BinaryIO, List, Optional
 
 from hl_logger import VerboseLogger
 
 # === Version Identifier ===
-# Format: p{phase}.{build}.{commit}[-dirty]
-#   phase  = roadmap phase (1-5, from README), incremented when crossing milestones
-#   build  = number of commits since the latest {phase} tag (0 if exactly on tag)
+# Format: g{gate}.{build}.{commit}[-dirty]
+#   gate   = roadmap gate (1-6, from README), incremented when crossing milestones
+#   build  = number of commits since the latest {gate} tag (0 if exactly on tag)
 #   commit = short git hash for precise traceability
 #
 # Tag workflow:
-#   git tag p3.0        # Phase 3 starts
-#   git tag p3.1        # Major sub-milestone within Phase 3
-#   git tag p4.0        # Phase 4 starts (resets build counter)
+#   git tag g3.0        # Gate 3 starts
+#   git tag g4.0        # Gate 4 starts (resets build counter)
 # Tag format matters — parsed by get_parser_version().
 _PARSER_VERSION = None  # lazy-loaded
 
@@ -41,34 +39,37 @@ def get_parser_version() -> str:
     try:
         root = _project_root()
         desc = subprocess.check_output(
-            ["git", "describe", "--tags", "--match", "p*", "--dirty", "--always"],
+            ["git", "describe", "--tags", "--match", "p*", "--match", "g*", "--dirty", "--always"],
             cwd=root,
             stderr=subprocess.DEVNULL,
             timeout=2,
         ).decode("utf-8").strip()
     except Exception:
-        _PARSER_VERSION = "p0.0.unknown"
+        _PARSER_VERSION = "g0.0.unknown"
         return _PARSER_VERSION
 
     # Parse git describe output:
-    #   "p4.0"                    → p4.0.0
-    #   "p4.0-3-gabc1234"        → p4.3.gabc1234
-    #   "p4.0-3-gabc1234-dirty"  → p4.3.gabc1234-dirty
-    #   "abc1234"                 → p0.0.abc1234  (no phase tag yet)
-    #   "abc1234-dirty"           → p0.0.abc1234-dirty
+    #   "g4.0"                    → g4.0.0
+    #   "g4.0-3-gabc1234"        → g4.3.gabc1234
+    #   "g4.0-3-gabc1234-dirty"  → g4.3.gabc1234-dirty
+    #   "abc1234"                 → g0.0.abc1234  (no gate tag yet)
+    #   "abc1234-dirty"           → g0.0.abc1234-dirty
+    # Backward compat: legacy p* tags (p3.0) are also matched.
 
-    phase = "0"
+    gate = "0"
     build = "0"
     commit = "0"
     dirty_suffix = ""
 
     parts = desc.split("-")
     if len(parts) >= 2 and parts[1].isdigit():
-        # Has a commit count: e.g. ["p4.0", "3", "gabc1234[-dirty]"]
+        # Has a commit count: e.g. ["g4.0", "3", "gabc1234[-dirty]"]
         tag = parts[0]
         build = parts[1]
         rest = "-".join(parts[2:])  # e.g. "gabc1234" or "gabc1234-dirty"
-        phase = tag[1] if tag.startswith("p") and tag[1].isdigit() else "0"
+        # Extract gate number from tag prefix (p3 → 3, g4 → 4)
+        if len(tag) >= 2 and tag[0] in ("p", "g") and tag[1].isdigit():
+            gate = tag[1]
         # Clean the commit suffix
         if rest.endswith("-dirty"):
             dirty_suffix = "-dirty"
@@ -76,16 +77,16 @@ def get_parser_version() -> str:
         else:
             commit = rest
     else:
-        # No commit count: exactly on tag, or no phase tag at all
+        # No commit count: exactly on tag, or no gate tag at all
         first = parts[0]
-        if first.startswith("p") and "." in first:
-            phase = first[1] if first.startswith("p") and first[1].isdigit() else "0"
+        if len(first) >= 2 and first[0] in ("p", "g") and "." in first:
+            gate = first[1] if first[1].isdigit() else "0"
             # Check for dirty via the full desc string, since split already consumed it
             if desc.endswith("-dirty"):
                 dirty_suffix = "-dirty"
             # build and commit stay "0" (exactly on tag)
         else:
-            # Raw commit hash, no phase tag
+            # Raw commit hash, no gate tag
             commit = first.rstrip("-dirty")
             if commit.startswith("g"):
                 commit = commit[1:]
@@ -95,7 +96,7 @@ def get_parser_version() -> str:
     if commit.startswith("g"):
         commit = commit[1:]  # strip leading 'g' from git describe
 
-    _PARSER_VERSION = f"p{phase}.{build}.{commit}{dirty_suffix}"
+    _PARSER_VERSION = f"g{gate}.{build}.{commit}{dirty_suffix}"
     return _PARSER_VERSION
 
 # === HashLink Type Kind Constants ===
@@ -225,6 +226,7 @@ class HLParser:
         self.globals: List[int] = []
         self.natives: List[dict] = []
         self.functions: List[dict] = []
+        self.constants: List[dict] = []
         
         # Parse warnings collected during execution
         self.parse_warnings: List[dict] = []
@@ -308,7 +310,7 @@ class HLParser:
         self.version = int(struct.unpack("<B", stream.read(1))[0])
         self._log("HEADER", f"version={self.version}")
         if self.version < 3 or self.version > 5:
-            pass
+            self._warn("HEADER", f"Unsupported bytecode version {self.version} — parsing may produce incorrect results")
             
         self.flags = self.read_varint(stream, context="flags")
         self.has_debug = (self.flags & 1) != 0
@@ -1154,6 +1156,47 @@ class HLParser:
             self.functions[fn_idx]["name"] = "init"
             self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init")
 
+    # === Constants Parsing ===
+
+    def parse_constants(self, stream: BinaryIO, progress_callback=None):
+        """Parse nconstants constant definitions (v4+ only).
+
+        Each constant is an initialization-time assignment:
+          global_index (UINDEX) + nfields (UINDEX) + nfields × field_index (UINDEX)
+
+        Verified against hashlink/src/code.c hl_code_read() constants loop.
+        """
+        self.constants = []
+        if self.nconstants == 0:
+            self._log("CONST", "No constants to parse")
+            return
+
+        if progress_callback:
+            progress_callback("Parsing Constants...", 85)
+
+        offset_before = stream.tell()
+        self._log("CONST", f"Starting constants read at byte offset {offset_before}")
+
+        for i in range(self.nconstants):
+            global_idx = self.read_varint(stream, context=f"const[{i}].global")
+            nfields = self.read_varint(stream, context=f"const[{i}].nfields")
+
+            fields = []
+            for j in range(nfields):
+                field_idx = self.read_varint(stream, context=f"const[{i}].field[{j}]")
+                fields.append(field_idx)
+
+            entry = {
+                "global": global_idx,
+                "nfields": nfields,
+                "fields": fields,
+            }
+            self.constants.append(entry)
+
+        offset_after = stream.tell()
+        bytes_read = offset_after - offset_before
+        self._log("CONST", f"Parsed {self.nconstants} constants ({bytes_read} bytes)")
+
     # === Main Entry Point ===
 
     def execute(self, stream=None, progress_callback=None):
@@ -1179,6 +1222,11 @@ class HLParser:
             self.parse_globals(stream, progress_callback)
             self.parse_natives(stream, progress_callback)
             self.parse_functions(stream, progress_callback)
+            if self.nconstants > 0:
+                try:
+                    self.parse_constants(stream, progress_callback)
+                except HLParserError as e:
+                    self._warn("CONST", f"Constants parsing failed (function pool may be incomplete): {e}")
             if progress_callback:
                 progress_callback("Parsing completed.", 100)
             return
@@ -1193,5 +1241,10 @@ class HLParser:
             self.parse_globals(buf, progress_callback)
             self.parse_natives(buf, progress_callback)
             self.parse_functions(buf, progress_callback)
+            if self.nconstants > 0:
+                try:
+                    self.parse_constants(buf, progress_callback)
+                except HLParserError as e:
+                    self._warn("CONST", f"Constants parsing failed (function pool may be incomplete): {e}")
             if progress_callback:
                 progress_callback("Parsing completed.", 100)

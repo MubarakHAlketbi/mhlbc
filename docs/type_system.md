@@ -65,23 +65,11 @@ typedef enum {
 | 9 | Dyn | `vdynamic*` | ptr | Dynamic/boxed value |
 | 12 | Array | `varray*` | ptr | Typed array |
 | 13 | Type | `void*` | ptr | Runtime type reference |
+| 16 | DynObj | `vdynamic*` | ptr | Dynamic object |
 
-These primitives have **no additional serialized data** beyond their kind byte (1 byte). They are always at fixed type indices:
+These primitives have **no additional serialized data** beyond their kind byte (1 byte). Note: **HGUID (23)** is also a no-payload primitive despite being added after the core enum — it falls through the default case in `code.c:hl_read_type()` like the others. **HLAST (24)** is a sentinel but appears in some real-world bytecode; treated identically.
 
-| Type Index | Type |
-|-----------|------|
-| 0 | Void |
-| 1 | UI8 |
-| 2 | UI16 |
-| 3 | I32 |
-| 4 | I64 |
-| 5 | F32 |
-| 6 | F64 |
-| 7 | Bool |
-| 8 | Type |
-| 9 | Dyn |
-| 11 | Array |
-| 14 | Bytes |
+**Kinds 25+ (non-standard):** Real-world binaries (e.g. the Farever game) contain types with kind bytes up to 192. These are not part of the official HashLink spec — `hashlink/src/code.c` would error with `"Invalid type"` for any `kind >= HLAST`. They likely come from forked or extended Haxe compilers. Our parser logs a warning and treats them as no-payload primitives to maximise parseability.
 
 ### HREF (14) — Reference
 

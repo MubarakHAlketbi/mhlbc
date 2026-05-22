@@ -402,3 +402,119 @@ class TestCLIDisasm:
         """Nonexistent file should produce error exit."""
         result = self._run_cli('-f', '0')
         assert result.returncode != 0
+
+
+class TestJSONOutputVerification(TestCLIDisasm):
+    """Verify --json output round-trips cleanly."""
+
+    def test_json_round_trip(self):
+        """--json output should parse without error."""
+        opcodes = encode_op(0, 0, 1) + encode_op(44, 0, 2) + encode_op(67, 0)
+        hlb = build_test_hlb(opcodes, nops=3)
+        result = self._run_cli('-f', '0', '--json', input_hlb=hlb)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "function" in data
+        assert len(data["function"]["instructions"]) == 3
+
+    def test_json_all_functions(self):
+        """--json without --function should include all functions."""
+        hlb = build_test_hlb(encode_op(67, 0), nops=1)
+        result = self._run_cli('--json', input_hlb=hlb)
+        assert result.returncode == 0
+        data = json.loads(result.stdout)
+        assert "function" in data
+        assert len(data["function"]["instructions"]) == 1
+
+
+class TestVariableArgDecode:
+    """Variable-arg opcodes: OCallN, OSwitch, OMakeEnum decoding."""
+
+    def test_ocalln_decode(self):
+        """OCallN with 3 arguments should decode correctly."""
+        opcodes = encode_op(29, 0, 1) + bytes([3]) + encode_op(2) + encode_op(3) + encode_op(4)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OCallN"
+        # Args: [r, findex, count, arg1, arg2, arg3]
+        assert instrs[0].args == [0, 1, 3, 2, 3, 4]
+
+    def test_oswitch_decode(self):
+        """OSwitch with 3 cases should decode correctly."""
+        opcodes = encode_op(70, 0, 3) + encode_op(2) + encode_op(4) + encode_op(6) + encode_op(8)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OSwitch"
+        # Args: r + ncases + default_offset; cases stored in jump_cases
+        assert instrs[0].args[:2] == [0, 3]
+        assert instrs[0].jump_cases == [2, 4, 6]
+        assert instrs[0].jump_default == 8
+
+    def test_omakeenum_decode(self):
+        """OMakeEnum with 2 params should decode correctly."""
+        opcodes = encode_op(90, 0, 1) + bytes([2]) + encode_op(5) + encode_op(6)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OMakeEnum"
+        # Args: [r, findex, nparams, param1, param2]
+        assert instrs[0].args == [0, 1, 2, 5, 6]
+
+    def test_ocallmethod_decode(self):
+        """OCallMethod with 2 args should decode correctly."""
+        opcodes = encode_op(30, 0, 1) + bytes([2]) + encode_op(2) + encode_op(3)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OCallMethod"
+
+    def test_ocallthis_decode(self):
+        """OCallThis with 1 arg should decode correctly."""
+        opcodes = encode_op(31, 0, 1) + bytes([1]) + encode_op(2)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OCallThis"
+
+    def test_ocallclosure_decode(self):
+        """OCallClosure with 0 args should decode correctly."""
+        opcodes = encode_op(32, 0, 1) + bytes([0])
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OCallClosure"
+        # Args: [r, closure_reg, count] + count × args
+        assert instrs[0].args == [0, 1, 0]
+
+
+class TestFuzzedOpcodes:
+    """Fuzzed/truncated opcode edge cases."""
+
+    def test_truncated_mid_opcode(self):
+        """Data truncated after opcode byte should return incomplete instructions."""
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(bytes([0]), 1)  # OMov expects 2 args
+        assert len(instrs) <= 1  # Should not crash
+
+    def test_truncated_mid_second_opcode(self):
+        """Truncated in middle of second opcode's args."""
+        opcodes = encode_op(0, 0, 1) + bytes([7])  # OMov(0,1) + OAdd partial
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 2)
+        assert len(instrs) >= 1  # At least OMov should decode
+
+    def test_invalid_opcode_index(self):
+        """Invalid opcode index (200) should still produce an instruction."""
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(bytes([200]), 1)
+        assert len(instrs) == 1
+        assert instrs[0].mnemonic == "OP_200"
+
+    def test_truncated_ocalln_count(self):
+        """OCallN with truncated arg list after count byte."""
+        opcodes = encode_op(29, 0, 1) + bytes([100]) + encode_op(2)  # claims 100 args, has 1
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1  # Should still produce OCallN with partial args

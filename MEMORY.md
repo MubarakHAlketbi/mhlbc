@@ -137,3 +137,21 @@
   - NativesListModel now resolves lib/name strings from string pool
   - Toolbar: compact 44px bar with open button, verbose toggle, progress bar, status
   - 199 tests still passing (no parser changes)
+
+## Session 10 — May 22, 2026
+- Start: New session initialized.
+- Model: gpt-5.5 via OpenAI Codex (switched mid-session from deepseek/deepseek-v4-flash).
+- Project state: 199 → 224 tests passing (+25), Gates 1-4 complete. README Gates 1-4 [x], Gate 5 [ ].
+- **Action list: 13/13 items completed (debt audit + pre-Gate-5 cleanup):**
+  - **A1:** Removed stale `asyncio_mode` from pytest.ini.
+  - **A2:** Cleaned 5 unused imports from hl_parser.py + hl_disasm.py.
+  - **A3:** Added version warning for unsupported bytecode versions (<3 or >5).
+  - **A4:** Fixed git describe tag matching to support dual p*/g* patterns.
+  - **A5:** Fixed `globals_` param alias error message in tests/hl_helper.py.
+  - **B1:** Investigated type kinds 23–192 — K_HGUID (23) already implemented; kinds 25-192 confirmed non-standard and documented in type_system.md.
+  - **C1:** Implemented `parse_constants()` in hl_parser.py (45 lines, handles incomplete func pool gracefully).
+  - **D1-D6:** 25 new tests: JSON output verification, variable-arg decode, fuzzed/truncated opcodes, v3 pipeline, Farever header+pools, constants parsing.
+  - **CRITICAL BUGFIX:** `_VARARG_OPCODES` and OSwitch checks used index 71 (ONullCheck) instead of 70 (OSwitch) — corrupted OSwitch decode.
+- **Docs updated:** docs/type_system.md (HGUID doc, non-standard kind notes), README.md (test count).
+- Model (end): deepseek/deepseek-v4-flash via OpenAI Codex.
+- Last commit (this session): 2166854 → pushed to origin/main.

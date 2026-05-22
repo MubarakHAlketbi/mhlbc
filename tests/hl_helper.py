@@ -115,6 +115,7 @@ def build_minimal_bytecode(
     globals_: Optional[list[int]] = None,
     natives: Optional[list[tuple[int, int, int, int]]] = None,
     functions: Optional[list[tuple[int, int, list[int], list[int]]]] = None,
+    constants: Optional[list[tuple[int, list[int]]]] = None,
     entrypoint: int = 0,
 ) -> bytes:
     """Build a complete minimal .hl bytecode blob for testing.
@@ -127,6 +128,7 @@ def build_minimal_bytecode(
         globals_: List of global type indices
         natives: List of (lib_si, name_si, type_idx, findex) tuples
         functions: List of (type_idx, findex, reg_types, opcodes) tuples
+        constants: List of (global_idx, [field_idx, ...]) tuples (v4+ only)
         entrypoint: Function index for the init function
     """
     ints = ints or []
@@ -142,7 +144,8 @@ def build_minimal_bytecode(
     nglobals = len(globals_) if globals_ else 0
     nnatives = len(natives) if natives else 0
     nfunctions = len(functions) if functions else 0
-    
+    nconstants = len(constants) if constants else 0
+
     header = build_header(
         version=version,
         flags=flags,
@@ -154,6 +157,7 @@ def build_minimal_bytecode(
         nglobals=nglobals,
         nnatives=nnatives,
         nfunctions=nfunctions,
+        nconstants=nconstants,
         entrypoint=entrypoint,
     )
     
@@ -183,6 +187,10 @@ def build_minimal_bytecode(
     # Functions section
     if functions:
         pools += build_functions_pool(functions)
+    
+    # Constants section (v4+)
+    if constants:
+        pools += build_constants_pool(constants)
     
     return header + pools
 
@@ -333,6 +341,17 @@ def build_natives_pool(natives: list[tuple[int, int, int, int]]) -> bytes:
         data += encode_varint(name)
         data += encode_varint(type_idx)
         data += encode_varint(findex)
+    return data
+
+
+def build_constants_pool(constants: list[tuple[int, list[int]]]) -> bytes:
+    """Build a constants pool: each entry = global_idx + nfields + fields."""
+    data = b""
+    for global_idx, fields in constants:
+        data += encode_varint(global_idx)
+        data += encode_varint(len(fields))
+        for f in fields:
+            data += encode_varint(f)
     return data
 
 

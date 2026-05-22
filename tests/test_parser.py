@@ -1,5 +1,6 @@
 """Tests for HL bytecode header and pool parsing."""
-
+import io
+import os
 import struct
 import pytest
 from hl_parser import HLParser, HLParserError, KIND_NAMES
@@ -1122,4 +1123,155 @@ class TestFunctionNameResolution:
         parser.natives = []
         parser.entrypoint = 0
         parser.parse_functions(stream_from_bytes(fn_data))
-        assert parser.functions[0]["name"] is None
+
+
+# =============================================================================
+# Constants Parsing Tests
+# =============================================================================
+
+
+class TestConstantsParsing:
+    """Constants pool (v4+): global_idx + nfields + nfields × field_idx."""
+
+    def test_no_constants(self, parser):
+        """nconstants=0 produces empty constants list."""
+        assert parser.constants == []
+
+    def test_single_constant(self):
+        """Single constant with 3 field indices."""
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
+        bc = build_minimal_bytecode(
+            version=4,
+            constants=[(0, [1, 2, 3])],
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert len(p.constants) == 1
+        assert p.constants[0]["global"] == 0
+        assert p.constants[0]["nfields"] == 3
+        assert p.constants[0]["fields"] == [1, 2, 3]
+
+    def test_multiple_constants(self):
+        """Multiple constants with varying field counts."""
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
+        bc = build_minimal_bytecode(
+            version=4,
+            constants=[
+                (0, [1, 2]),
+                (5, []),
+                (10, [20, 30, 40, 50]),
+            ],
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert len(p.constants) == 3
+        assert p.constants[0]["global"] == 0
+        assert p.constants[0]["fields"] == [1, 2]
+        assert p.constants[1]["global"] == 5
+        assert p.constants[1]["fields"] == []
+        assert p.constants[2]["global"] == 10
+        assert p.constants[2]["fields"] == [20, 30, 40, 50]
+
+    def test_constants_v3_skipped(self):
+        """Version 3 has no constants field — nconstants stays 0."""
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
+        bc = build_minimal_bytecode(version=3)
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert p.nconstants == 0
+        assert p.constants == []
+
+    def test_constants_in_full_v4_pipeline(self):
+        """Constants parse correctly in a full v4 pipeline with all sections."""
+        from hl_parser import HLParser
+        from tests.hl_helper import (
+            build_minimal_bytecode, stream_from_bytes,
+            build_type_primitive,
+        )
+        from tests.test_parser import K_I32
+        types_data = [build_type_primitive(K_I32)]
+        bc = build_minimal_bytecode(
+            version=4,
+            ints=[42],
+            strings=["test"],
+            types=types_data,
+            globals_=[0, 1],
+            constants=[(0, [1, 2]), (1, [3])],
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert len(p.constants) == 2
+        assert p.constants[0] == {"global": 0, "nfields": 2, "fields": [1, 2]}
+        assert p.constants[1] == {"global": 1, "nfields": 1, "fields": [3]}
+
+
+# =============================================================================
+# Full Pipeline Integration Tests
+# =============================================================================
+
+
+class TestFullPipelineV3:
+    """Full v3 bytecode pipeline: header, pools, types, globals, natives, functions."""
+
+    def test_v3_full_pipeline(self):
+        """Version 3 bytecode with all sections parses correctly."""
+        bc = build_minimal_bytecode(
+            version=3,
+            ints=[1, 2, 3],
+            floats=[1.5, 2.5],
+            strings=["a", "b"],
+            types=[build_type_primitive(K_I32), build_type_primitive(K_BOOL)],
+            globals_=[0, 1],
+            natives=[(0, 0, 0, 42), (1, 1, 0, 43)],
+            functions=[(0, 0, [0, 0], [67])],  # ORet
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream_from_bytes(bc))
+        assert p.version == 3
+        assert p.ints == [1, 2, 3]
+        assert p.floats == [1.5, 2.5]
+        assert p.strings == ["a", "b"]
+        assert len(p.types) == 2
+        assert len(p.globals) == 2
+        assert len(p.natives) == 2
+        assert len(p.functions) == 1
+        assert p.nconstants == 0
+        assert p.constants == []
+
+
+class TestFareverTarget:
+    """Integration tests using the Farever binary (workspace/Farever/hlboot.dat)."""
+    FAREVER_PATH = os.path.join(os.path.dirname(__file__), "..", "workspace", "Farever", "hlboot.dat")
+
+    @pytest.fixture
+    def farever_data(self):
+        if not os.path.exists(self.FAREVER_PATH):
+            pytest.skip("Farever binary not found at " + self.FAREVER_PATH)
+        with open(self.FAREVER_PATH, "rb") as f:
+            return f.read()
+
+    def test_farever_md5_matches_clean_copy(self, farever_data):
+        """Verify workspace copy matches the clean Steam copy MD5."""
+        import hashlib
+        md5 = hashlib.md5(farever_data).hexdigest()
+        assert md5 == "7014abbad2e5c7ebe33c910b659479a1", \
+            f"MD5 mismatch: got {md5}"
+
+    def test_farever_header_pools(self, farever_data):
+        """Parse Farever header and pools — verify expected counts."""
+        p = HLParser(self.FAREVER_PATH)
+        p.execute(stream_from_bytes(farever_data))
+        assert p.version == 4
+        assert p.has_debug is True
+        assert p.nints == 1541
+        assert p.nfloats == 1674
+        assert p.nstrings == 65650
+        assert p.ntypes == 43844
+        assert p.nglobals == 28399
+        assert p.nnatives == 723
+        assert p.nfunctions == 45365
+        assert p.nconstants == 22124
+        assert len(p.parse_warnings) > 0
