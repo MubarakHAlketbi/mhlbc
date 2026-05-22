@@ -11,7 +11,7 @@ import sys
 import csv as _csv
 
 from hl_parser import HLParser, HLParserError, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, level_from_name, INFO, DEBUG, TRACE, ERROR
 from hl_disasm import Disassembler, format_disassembly
 from hl_decompile import Decompiler, HaxeWriter
 
@@ -676,7 +676,7 @@ class _StdoutLogger:
         print("  HashLink Bytecode Decompiler — Verbose Log (stdout)")
         print("=" * 60)
 
-    def log(self, tag: str, message: str):
+    def log(self, tag: str, message: str, level: int = INFO):
         import datetime
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{ts}] [{tag}] {message}")
@@ -687,19 +687,33 @@ class _StdoutLogger:
 
 def _make_logger(args):
     """Create a VerboseLogger based on CLI flags."""
-    verbose = getattr(args, "verbose", False)
+    verbose = getattr(args, "verbose", 0)
     verbose_stdout = getattr(args, "verbose_stdout", False)
     log_path = getattr(args, "log_path", None)
+    quiet = getattr(args, "quiet", False)
+    log_level_name = getattr(args, "log_level", None)
 
-    if not verbose and not verbose_stdout:
+    if not verbose and not verbose_stdout and not quiet and log_level_name is None:
         return None
+
+    # Determine log level
+    if quiet:
+        level = ERROR
+    elif log_level_name is not None:
+        level = level_from_name(log_level_name)
+    elif verbose >= 2:
+        level = TRACE
+    elif verbose >= 1:
+        level = DEBUG
+    else:
+        level = INFO
 
     if verbose_stdout:
         return _StdoutLogger()
 
     if log_path:
-        return VerboseLogger(logs_dir=log_path)
-    return VerboseLogger()
+        return VerboseLogger(logs_dir=log_path, level=level)
+    return VerboseLogger(level=level)
 
 
 # ── Main ──────────────────────────────────────────────────────────────────
@@ -727,8 +741,14 @@ Examples:
     # Shared flags
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument("file", help="Path to HashLink bytecode file (.hl or hlboot.dat)")
-    parent_parser.add_argument("--verbose", "-v", action="store_true",
-                               help="Enable verbose logging to logs/ directory")
+    parent_parser.add_argument("--verbose", "-v", action="count", default=0,
+                               help="Increase verbosity (-v=DEBUG, -vv=TRACE)")
+    parent_parser.add_argument("--quiet", action="store_true",
+                               help="Only log errors (sets level=ERROR)")
+    parent_parser.add_argument("--log-level",
+                               choices=["error", "warn", "info", "debug", "trace"],
+                               default=None,
+                               help="Set minimum log level (default: info)")
     parent_parser.add_argument("--verbose-stdout", action="store_true",
                                help="Print verbose log to stdout")
     parent_parser.add_argument("--log-path", help="Override verbose log path")

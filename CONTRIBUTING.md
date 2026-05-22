@@ -309,39 +309,105 @@ HashLink bytecode has no official public spec. All structure is reverse-engineer
 class TypeParser:
     def __init__(self, stream, logger: VerboseLogger | None = None):
         self._logger = logger
-        self._log = lambda tag, msg: logger.log(tag, msg) if logger else None
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)
+                     ) if logger else (lambda tag, msg, level=INFO: None)
 ```
 
 ```python
 # Toggle in the UI — add a QCheckBox for each major subsystem:
 self.cb_verbose_types = QCheckBox("Verbose Type Parsing")
 ```
-Existing toggle infrastructure: `VerboseLogger` (hl_logger.py), CLI `--verbose`/`-v` flag (app.py), UI checkbox (app.py). Reuse these instead of inventing a new mechanism.
+Existing toggle infrastructure: `VerboseLogger` (hl_logger.py), CLI `--verbose`/`-v`/`--log-level` flags, GUI level dropdown. Reuse these instead of inventing a new mechanism.
 
-### 9. Log Analysis Tooling
+### 9. Log Format & Levels
 
-The `logalyzer.py` CLI provides SQLite-backed analysis of the verbose logs produced by `hl_logger.py`. Use it to investigate parse errors, detect anomalies, and run ad-hoc SQL queries against large log files without consuming LLM tokens:
+Every log line carries a level, making it possible to filter to just what you need.
 
-```bash
-python logalyzer.py index logs/parse_dump.md        # Import log into SQLite
-python logalyzer.py stats logs/parse_dump.db         # Section counts + anomaly detection
-python logalyzer.py errors logs/parse_dump.db        # Extract errors with context
-python logalyzer.py query logs/parse_dump.db "..."    # Ad-hoc SQL
+### 9.1 Log Levels
+
+| Level | Value | CLI shortcut | Content | Typical lines (Farever parse) |
+|-------|-------|-------------|---------|------------------------------|
+| `ERROR` | 40 | `--quiet` | Binary broken, can't continue | 0 |
+| `WARN` | 30 | | Parser recovered with data loss | ~5 |
+| `INFO` | 20 | *(default)* | Milestones, what happened | ~20 |
+| `DEBUG` | 10 | `-v` | Internal details, type/function entries | ~84K |
+| `TRACE` | 5 | `-vv` | Byte-by-byte: VarInts, opcodes | ~8M |
+
+Default mode (`INFO`) produces ~20 lines — enough to know what happened. Truly deep debugging uses `-v` (DEBUG) or `-vv` (TRACE).
+
+### 9.2 Log File Layout
+
+```
+logs/
+  2026-05-22/                          # Date
+    15-30-53/                          # Start time
+      chunk-000001-010000.log          # Lines 1-10000
+      chunk-010001-020000.log          # Lines 10001-20000
+      ...
 ```
 
-Every log produced during development should be indexed with `logalyzer` before investigation begins.
+Each chunk is capped at 10,000 lines (configurable). The session directory path is stored in `VerboseLogger.log_path`.
 
-### 9.1 Log Analysis Workflow (AI Agents)
+**Line format:**
+```
+[15:57:44.153] [INFO ] [HEADER] version=4 flags=1
+[15:57:44.153] [TRACE] [VARINT] offset=4 raw=[04] decoded=4
+[15:57:44.153] [WARN ] [FUNC ] func[2]: nops=-1, skipping
+```
 
-**Never analyze a raw dump.md with grep/Python reads while logalyzer is indexing.** This is a known antipattern from previous sessions — firing a background index then immediately querying the raw file directly wastes tokens, duplicates work, and fragments the analysis.
+The level field is 5 characters, space-padded for alignment.
+
+### 9.3 Controlling Log Level
+
+**CLI:**
+```bash
+# Default: INFO only (~20 lines)
+cli.py header file.hlb
+
+# Warnings + Errors (~5 lines)
+cli.py header file.hlb --quiet
+
+# Debug: includes type/function details (~84K lines)
+cli.py header file.hlb -v
+
+# Trace: everything (~8M lines)
+cli.py header file.hlb -vv
+
+# Explicit level
+cli.py types file.hlb --log-level warn
+```
+
+**GUI:** A level dropdown replaces the old binary "Verbose" checkbox. Options: Off, Errors, Warnings, Info, Debug, Trace.
+
+### 9.4 Log Analysis Tooling
+
+The `logalyzer.py` CLI provides SQLite-backed analysis of verbose logs:
+
+```bash
+python3 logalyzer.py index logs/2026-05-22/15-30-53/              # Index a chunked session dir
+python3 logalyzer.py index single_file.log                         # Index a single log file (old format)
+python3 logalyzer.py index-dir logs/                               # Index all sessions in a directory
+python3 logalyzer.py stats file.db                                  # Section counts + anomaly detection
+python3 logalyzer.py errors file.db                                 # Extract errors with context
+python3 logalyzer.py errors file.db --level warn                    # Errors + warnings with context
+python3 logalyzer.py query file.db "SELECT tag, COUNT(*) FROM entries GROUP BY tag ORDER BY 2 DESC"
+python3 logalyzer.py query file.db "..." --level debug              # Query filtered by level
+```
+
+The `index` command now auto-detects the log format. Chunked directories, single files, and legacy (pre-level) files all work.
+
+### 9.5 Log Analysis Workflow (AI Agents)
+
+**Never grep/pip install raw log files while logalyzer is indexing.** Indexing a 600MB log takes ~30s. Grep/Python on raw logs duplicates work and produces incomplete results.
 
 **Correct workflow:**
 
-1. **Index first** — `logalyzer.py index dump.md` (takes ~30s for 600MB)
+1. **Index first** — `logalyzer.py index <log-path>`
 2. **Wait for it** — if using background mode, poll or block on completion before starting analysis
 3. **Query the DB** — use `logalyzer stats`, `errors`, `query`, `sample` to answer questions from the structured SQLite store
+4. **Use `--level`** to filter: `--level warn` for only actionable messages, or `--level error` for critical failures
 
-Rationale: the indexed DB supports instant ad-hoc SQL queries, deduplicated counts, tag/section filtering, and anomaly detection. grep/Python on the raw file re-implements what the DB already provides, and produces incomplete results (no cross-section joins, no byte-offset arithmetic, no deduplication).
+Rationale: the indexed DB supports instant ad-hoc SQL queries, deduplicated counts, tag/section filtering, level filtering, and anomaly detection. grep/Python on the raw file re-implements what the DB already provides, and produces incomplete results (no cross-section joins, no byte-offset arithmetic, no deduplication).
 
 If indexing is already running in background, do NOT touch the raw file. Wait for the exit code, then use the DB.
 
@@ -474,9 +540,11 @@ The application must function as both a GUI desktop tool and a CLI pipeline tool
 
 #### 11.6 Logging Parity
 
-* `--verbose` / `-v` enables VerboseLogger output to a file (same format as GUI verbose mode).
+* `--verbose` / `-v` (count) sets verbosity: `-v` = DEBUG, `-vv` = TRACE.
+* `--quiet` sets level to ERROR (only critical failures printed).
+* `--log-level {error,warn,info,debug,trace}` explicitly sets the minimum log level.
 * `--verbose-stdout` redirects verbose log to stdout (for piping, debugging).
-* `--log-path <path>` overrides the default log file location.
+* `--log-path <dir>` overrides the default log directory. The logger creates a `{date}/{time}/` subdirectory inside it.
 * CLI-produced logs must be indexable by `logalyzer.py` with identical schema.
 
 #### 11.7 Testing CLI
@@ -499,3 +567,158 @@ New features must expose their core logic through the headless parser first, the
 * The feature is testable without a display.
 * The feature is scriptable from day one.
 * The GUI is never the bottleneck for feature availability.
+* The CLI is the automation backbone; the GUI is a convenience layer.
+
+---
+
+## 12. Investigating Parsing Failures — Evidence-First Protocol
+
+When a known-good binary (the game runs) fails to parse, the problem is **always the parser's model**, not the binary. This protocol replaces guessing with evidence.
+
+### 12.1 Core Principle
+
+A shipping game binary is valid by definition. The parser's assumptions about bytecode layout — sequential function bodies, signed/unsigned fields, alignment, padding, index tables — are hypotheses, not facts. Each hypothesis must be testable against evidence.
+
+### 12.2 The Five Evidence Tools
+
+| # | Tool | What It Answers | Cost |
+|---|------|-----------------|------|
+| 1 | HL Reference Source (`hashlink/src/code.c`) | How does the *actual* runtime navigate this data structure? | 1h (read) |
+| 2 | Hex dump at problem boundaries | What bytes exist at the desync point? Is the gap between headers what nops says it should be? | 5 min |
+| 3 | Heuristic header scan | Where are valid 4-VarInt headers actually located in the suspect region? | 10 min (script) |
+| 4 | Compiled test HLB | Does our parser correctly parse a binary we *know* the structure of? | 2h (compile + verify) |
+| 5 | Assumption isolation | Which specific assumption (sequential, signed, aligned, padded) fails? Test each independently. | Varies |
+
+### 12.3 Investigation Workflow
+
+```
+  Parse fails on a shipping game binary
+            │
+            ▼
+     Is the binary verified clean?
+     (md5sum against origin, binary cp)
+            │
+      ┌─────┴─────┐
+      │ No        │ Yes
+      ▼           ▼
+  Re-copy in   ┌──────────────────────────────┐
+  binary mode  │ Read HL reference runtime     │
+  (cp, not     │ source for function pool nav  │
+  text mode)   └──────────┬───────────────────┘
+                          ▼
+              ┌──────────────────────────────┐
+              │ Hex dump 100 bytes around     │
+              │ the failure boundary.         │
+              │ Compare actual gap between    │
+              │ consecutive valid 4-varint    │
+              │ headers to what nops claims.  │
+              └──────────┬───────────────────┘
+                          ▼
+              ┌──────────────────────────────┐
+              │ Heuristic scan: at every byte │
+              │ offset in the suspect region, │
+              │ try to decode 4 valid         │
+              │ VarInts. Map all valid header │
+              │ positions.                    │
+              └──────────┬───────────────────┘
+                          ▼
+         ┌──────────────────────────────────┐
+         │ For each violated assumption:    │
+         │ (sequential, signed/unsigned,    │
+         │  alignment, padding, index table)│
+         │ write a minimal test that        │
+         │ isolates it.                     │
+         └──────────┬───────────────────┘
+                    ▼
+         ┌──────────────────────────────────┐
+         │ Fix the parser model. Re-run     │
+         │ on the binary. All earlier passes│
+         │ (hex, scan, assumptions) are now │
+         │ the regression test suite.       │
+         └──────────────────────────────────┘
+```
+
+### 12.4 Tool Recipes
+
+**Hex dump at offset:**
+```bash
+# Dump 50 bytes before and after a known offset
+xxd -s $((OFFSET - 50)) -l 100 hlboot.dat
+
+# Or with Python for offset arithmetic
+python3 -c "
+data = open('hlboot.dat', 'rb').read()
+offset = 3025297
+# Show 20 bytes before, header bytes, 20 bytes after nops body
+print(' '.join(f'{b:02x}' for b in data[offset-20:offset+50]))
+"
+```
+
+**Heuristic header scan:**
+```bash
+python3 -c "
+import sys
+data = open('hlboot.dat', 'rb').read()
+# Walk every byte position, attempt 4 VarInts
+for i in range(2981430, min(len(data), 2981430+500)):
+    pos = i
+    valid = True
+    vals = []
+    for _ in range(4):
+        if pos >= len(data):
+            valid = False; break
+        b1 = data[pos]; pos += 1
+        if b1 & 0x80 == 0:
+            vals.append(b1)
+        elif b1 & 0x40 == 0:
+            if pos >= len(data): valid = False; break
+            b2 = data[pos]; pos += 1
+            vals.append(((b1 & 0x1F) << 8) | b2)
+        else:
+            if pos+3 > len(data): valid = False; break
+            b2,b3,b4 = data[pos:pos+3]; pos += 3
+            vals.append(((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4)
+    if valid:
+        print(f'offset={i} type={vals[0]} findex={vals[1]} nregs={vals[2]} nops={vals[3]}')
+" | head -30
+```
+
+**Compile a test HLB:**
+```bash
+# Requires Haxe compiler with HashLink target
+cat > test.hx << 'EOF'
+class Test {
+    static function main() {
+        var x = 1 + 2;
+        trace(x);
+    }
+}
+EOF
+haxe -hl test.hlb test.hx
+# Now compare our parser output against known structure
+```
+
+**Assumption isolation checklist:**
+
+| Assumption | Test | If False |
+|------------|------|----------|
+| Functions are sequential (no index table) | Hex dump: is the gap between func[N] end and func[N+1] start == 0? | Look for an offset table before the pool |
+| nops is the exact body size | Does valid header appear exactly `nops` bytes after header start? | nops includes padding, or is something else |
+| nops is signed | Raw `a001` → unsigned = 8193. Does hex gap match? | Parser should read unsigned |
+| No alignment padding | Compare func[N] end offset to func[N+1] start offset | Add padding detection |
+| Function pool is monolithic after globals | Verify pool start offset against nglobals/ nnatives calc | Pool may interleave with other data |
+
+### 12.5 Real-World Example: Farever func[2]
+
+**Symptom:** func[2] type=15037, nops=15038. Body read of 96,658 bytes corrupts subsequent functions.
+
+**Assumption violated (unconfirmed):** Either nops is unsigned (15038 vs -1 under signed) or functions are not purely sequential.
+
+**Next evidence step:** Hex dump at func[2] body end + heuristic scan to map where the next valid header actually appears. Compare the gap to nops=15038 and nops=-1 values. The answer determines whether the pool has padding, an offset table, or a different navigation model.
+
+### 12.6 When to Use This Protocol
+
+- **Always** before declaring a binary "corrupt"
+- **Always** before adding heuristic robustness layers that work around a misunderstanding
+- **Always** when the parser disagrees with a shipping game binary
+- **Never** skip steps — each evidence tool eliminates one class of wrong assumption

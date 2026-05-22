@@ -1,6 +1,6 @@
 from PyQt6.QtCore import QThread, pyqtSignal
 from hl_parser import HLParser
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, ERROR, INFO
 
 class HLParseWorker(QThread):
     progress = pyqtSignal(str, int)
@@ -20,7 +20,7 @@ class HLParseWorker(QThread):
         except Exception as e:
             error_msg = str(e)
             if self._logger:
-                self._logger.log("ERROR", f"Parse failed: {error_msg}")
+                self._logger.log("ERROR", f"Parse failed: {error_msg}", level=ERROR)
             self.failed.emit(error_msg)
         finally:
             if self._logger:
@@ -28,5 +28,5 @@ class HLParseWorker(QThread):
 
     def emit_progress(self, message: str, val: int):
         if self._logger:
-            self._logger.log("PROGRESS", f"{message} ({val}%)")
+            self._logger.log("PROGRESS", f"{message} ({val}%)", level=INFO)
         self.progress.emit(message, val)

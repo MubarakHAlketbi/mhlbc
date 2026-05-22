@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
 import struct
 
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
 
 
 # ============================================================================
@@ -238,7 +238,7 @@ class OpcodeDecoder:
 
     def __init__(self, logger: Optional[VerboseLogger] = None):
         self._logger = logger
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (lambda tag, msg, level=INFO: None)
 
     @staticmethod
     def mnemonic_for(opcode: int) -> str:
@@ -285,7 +285,7 @@ class OpcodeDecoder:
 
         for i in range(nops):
             if pos >= data_len:
-                self._log("DISASM", f"  instr[{i}]: truncated — no opcode byte at offset {pos}")
+                self._log("DISASM", f"  instr[{i}]: truncated — no opcode byte at offset {pos}", level=WARN)
                 break
 
             instr_start = pos
@@ -293,7 +293,7 @@ class OpcodeDecoder:
             pos += 1
 
             if opcode >= len(_OPCODE_NARGS):
-                self._log("DISASM", f"  instr[{i}]: out-of-range opcode={opcode} at offset {instr_start}")
+                self._log("DISASM", f"  instr[{i}]: out-of-range opcode={opcode} at offset {instr_start}", level=WARN)
                 # Skip 0 args, treat as nop
                 instr = Instruction(
                     index=i, opcode=opcode,
@@ -321,7 +321,7 @@ class OpcodeDecoder:
                         valid = False
                         break
                 if not valid:
-                    self._log("DISASM", f"  instr[{i}]: truncated args for {_OPCODE_NAMES[opcode]}")
+                    self._log("DISASM", f"  instr[{i}]: truncated args for {_OPCODE_NAMES[opcode]}", level=WARN)
             else:
                 # Variable-arg opcode: OCallN family, OSwitch, OMakeEnum
                 # Format per HL reference (code.c):
@@ -416,7 +416,7 @@ class OpcodeDecoder:
                 instr.jump_cases = extra_cases if extra_cases else None
                 instr.jump_default = extra_default
 
-            self._log("DISASM", f"  {instr}")
+            self._log("DISASM", f"  {instr}", level=TRACE)
 
         return instructions
 
@@ -800,7 +800,7 @@ class Disassembler:
         self.decoder = OpcodeDecoder(logger)
         self._instructions: Dict[int, List[Instruction]] = {}  # func_idx → instructions
         self._cfgs: Dict[int, List[BasicBlock]] = {}           # func_idx → cfg blocks
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (lambda tag, msg, level=INFO: None)
 
     def disassemble_function(self, func_idx: int) -> List[Instruction]:
         """Decode instructions for a single function by index into parser.functions.
@@ -811,12 +811,12 @@ class Disassembler:
             return self._instructions[func_idx]
 
         if func_idx < 0 or func_idx >= len(self.parser.functions):
-            self._log("DISASM", f"func[{func_idx}]: index out of range ({len(self.parser.functions)})")
+            self._log("DISASM", f"func[{func_idx}]: index out of range ({len(self.parser.functions)})", level=WARN)
             return []
 
         func = self.parser.functions[func_idx]
         if func.get("malformed") or func.get("nops", 0) <= 0:
-            self._log("DISASM", f"func[{func_idx}]: malformed or zero-op, skipping")
+            self._log("DISASM", f"func[{func_idx}]: malformed or zero-op, skipping", level=WARN)
             return []
 
         op_start = func["opcode_start"]
@@ -824,7 +824,7 @@ class Disassembler:
         nops = func["nops"]
 
         if op_end <= op_start:
-            self._log("DISASM", f"func[{func_idx}]: empty opcode range")
+            self._log("DISASM", f"func[{func_idx}]: empty opcode range", level=WARN)
             return []
 
         # Read raw bytes from parser's stored data (in-memory or from original file)
@@ -905,7 +905,7 @@ class Disassembler:
                 if func.get("malformed"):
                     msg += " [malformed — expected]"
                 warnings.append(msg)
-                self._log("DISASM", f"[WARN] {msg}")
+                self._log("DISASM", f"[WARN] {msg}", level=WARN)
         return warnings
 
 

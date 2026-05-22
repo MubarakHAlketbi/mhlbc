@@ -7,14 +7,15 @@ SQLite database. Enables ad-hoc SQL queries, anomaly detection, and sample
 extraction without burning tokens on raw log dumps.
 
 Subcommands:
-    index   LOG.md [--db DB] [--light]     Import log into SQLite
-    query   DB "SQL" [--fmt json|table]    Run SQL, return results
-    errors  DB [--context N]               Extract all errors with context
-    stats   DB [--section TAG]             Section counts, timing, anomalies
-    sample  DB --section TAG [--n N]       Extract representative samples
+    index     LOG [--db DB] [--light]              Import log into SQLite
+    index-dir DIR [--db DB] [--light]              Index all .log files in a directory tree
+    query     DB "SQL" [--fmt json|table] [--level L]  Run SQL, return results
+    errors    DB [--context N] [--level L]         Extract all errors with context
+    stats     DB [--section TAG]                   Section counts, timing, anomalies
+    sample    DB --section TAG [--n N]             Extract representative samples
 
 Schema (one table):
-    entries(line, ts_sec, ts_raw, tag, scope, scope_idx, sub_idx,
+    entries(line, ts_sec, ts_raw, tag, level, level_int, scope, scope_idx, sub_idx,
             field, raw_bytes, decoded, msg)
 
 Indexed on: tag, (tag, scope_idx), field, (scope, scope_idx)
@@ -28,10 +29,39 @@ import sqlite3
 import sys
 from pathlib import Path
 
+from hl_logger import level_from_name, name_from_level
+
+# ── Level constants ──────────────────────────────────────────────────────────
+ERROR = 40
+WARN = 30
+INFO = 20
+DEBUG = 10
+TRACE = 5
+
+_LEVEL_PADDED = {lvl: name.ljust(5) for lvl, name in {
+    ERROR: "ERROR",
+    WARN:  "WARN",
+    INFO:  "INFO",
+    DEBUG: "DEBUG",
+    TRACE: "TRACE",
+}.items()}
+_REVERSE_LEVEL = {name.ljust(5): lvl for lvl, name in {
+    ERROR: "ERROR",
+    WARN:  "WARN",
+    INFO:  "INFO",
+    DEBUG: "DEBUG",
+    TRACE: "TRACE",
+}.items()}
+
 # ── Regex patterns ──────────────────────────────────────────────────────────
 
-# Line structure: [HH:MM:SS.mmm] [TAG] message
-_LINE_RE = re.compile(
+# New format: [HH:MM:SS.mmm] [LEVEL] [TAG] message
+# LEVEL is 5-char padded (ERROR, WARN , INFO , DEBUG, TRACE) so allow trailing spaces
+_LINE_RE_NEW = re.compile(
+    r"^\[(?P<ts>\d{2}:\d{2}:\d{2}\.\d{3})\]\s+\[(?P<level>\w+\s*)\]\s+\[(?P<tag>\w+)\]\s+(?P<msg>.+)$"
+)
+# Old format:  [HH:MM:SS.mmm] [TAG] message  (backward compat)
+_LINE_RE_OLD = re.compile(
     r"^\[(?P<ts>\d{2}:\d{2}:\d{2}\.\d{3})\]\s+\[(?P<tag>\w+)\]\s+(?P<msg>.+)$"
 )
 
@@ -52,6 +82,51 @@ _RAW_DECODED_RE = re.compile(
 
 # Header key=value lines
 _HEADER_KV_RE = re.compile(r"(?P<key>\w+)=(?P<value>\S+)")
+
+# Header/footer lines to skip
+_HEADER_FOOTER_RE = re.compile(
+    r"^(={2,}|Chunk:|  )"
+)
+
+
+def parse_line(line: str) -> dict | None:
+    """Parse a log line, returning a dict with keys or None if not a log line.
+
+    Handles both new format ([HH:MM:SS.mmm] [LEVEL] [TAG] msg) and old format
+    ([HH:MM:SS.mmm] [TAG] msg). For old format, level defaults to INFO.
+    Skips header/footer lines (starting with ===, Chunk:, or two spaces).
+    """
+    # Skip header/footer lines
+    if _HEADER_FOOTER_RE.match(line):
+        return None
+
+    # Try new format first
+    m = _LINE_RE_NEW.match(line)
+    if m:
+        level_name = m.group("level")
+        padded = level_name.ljust(5) if len(level_name) < 5 else level_name
+        level_int = _REVERSE_LEVEL.get(padded, INFO)
+        return {
+            "ts_raw": m.group("ts"),
+            "level": padded,
+            "level_int": level_int,
+            "tag": m.group("tag"),
+            "msg": m.group("msg"),
+        }
+
+    # Fall back to old format
+    m = _LINE_RE_OLD.match(line)
+    if m:
+        return {
+            "ts_raw": m.group("ts"),
+            "level": "INFO ",
+            "level_int": INFO,
+            "tag": m.group("tag"),
+            "msg": m.group("msg"),
+        }
+
+    return None
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -141,13 +216,15 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
     conn.execute("PRAGMA synchronous=OFF")
     conn.execute("PRAGMA cache_size=-64000")  # 64MB cache
 
-    # Schema
+    # Schema — with level columns for new log format
     conn.execute("""
         CREATE TABLE entries (
             line       INTEGER PRIMARY KEY,
             ts_sec     REAL,
             ts_raw     TEXT,
             tag        TEXT NOT NULL,
+            level      TEXT,
+            level_int  INTEGER,
             scope      TEXT,
             scope_idx  INTEGER,
             sub_idx    INTEGER,
@@ -165,6 +242,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
         CREATE INDEX IF NOT EXISTS idx_field ON entries(field);
         CREATE INDEX IF NOT EXISTS idx_scope ON entries(scope, scope_idx);
         CREATE INDEX IF NOT EXISTS idx_ts ON entries(ts_sec);
+        CREATE INDEX IF NOT EXISTS idx_level ON entries(level_int);
     """
 
     base_ts: float | None = None
@@ -178,14 +256,15 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
             if not line:
                 continue
 
-            m = _LINE_RE.match(line)
-            if not m:
-                # Non-log lines (separator bars, etc.)
+            parsed = parse_line(line)
+            if parsed is None:
                 continue
 
-            ts_raw = m.group("ts")
-            tag = m.group("tag")
-            msg = m.group("msg")
+            ts_raw = parsed["ts_raw"]
+            tag = parsed["tag"]
+            msg = parsed["msg"]
+            level = parsed["level"]
+            level_int = parsed["level_int"]
 
             # Compute seconds
             if base_ts is None:
@@ -221,7 +300,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
                     scope_idx = int(sm.group("idx"))
 
             batch.append((
-                line_num, ts_sec, ts_raw, tag,
+                line_num, ts_sec, ts_raw, tag, level, level_int,
                 scope, scope_idx, sub_idx, field,
                 raw_bytes, decoded, msg,
             ))
@@ -230,7 +309,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
             # Batch insert every 5000 rows
             if len(batch) >= 5000:
                 conn.executemany(
-                    "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     batch,
                 )
                 batch.clear()
@@ -238,7 +317,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
     # Final batch
     if batch:
         conn.executemany(
-            "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             batch,
         )
 
@@ -262,7 +341,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
     conn.execute(
         "INSERT OR REPLACE INTO meta VALUES ('skipped_varint_light', ?)", (str(skipped_varint),)
     )
-    
+
     # Extract parser version and source file from APP entries
     for row in conn.execute(
         "SELECT msg FROM entries WHERE tag='APP' AND (msg LIKE 'Parser version:%' OR msg LIKE 'File:%')"
@@ -274,7 +353,7 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
         elif msg.startswith("File:"):
             fname = msg.split("File:", 1)[1].strip()
             conn.execute("INSERT OR REPLACE INTO meta VALUES ('source_file', ?)", (fname,))
-    
+
     conn.commit()
     conn.close()
 
@@ -282,9 +361,199 @@ def index_log(log_path: str, db_path: str, light: bool = False) -> tuple[int, fl
     return total, elapsed
 
 
+# ── Index-dir (directory tree of chunked logs) ──────────────────────────────
+
+def index_dir(dir_path: str, db_path: str | None = None, light: bool = False) -> tuple[int, float]:
+    """
+    Walk a directory tree of chunked logs (logs/{date}/{time}/chunk-NNNNN-NNNNN.log)
+    and index all .log files into a single .db file.
+
+    Returns (total_lines, elapsed_seconds).
+    """
+    import time
+    t0 = time.time()
+
+    root = Path(dir_path)
+    if not root.is_dir():
+        print(f"ERROR: Directory not found: {dir_path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Collect all .log files recursively
+    log_files = sorted(root.rglob("*.log"))
+    if not log_files:
+        print(f"ERROR: No .log files found under {dir_path}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(log_files)} .log files in {dir_path}", file=sys.stderr)
+
+    # Derive DB name from parent directory if not specified
+    if db_path is None:
+        db_path = root.name + ".db"
+
+    # Remove existing DB
+    Path(db_path).unlink(missing_ok=True)
+
+    conn = sqlite3.connect(db_path)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=OFF")
+    conn.execute("PRAGMA cache_size=-64000")
+
+    # Schema
+    conn.execute("""
+        CREATE TABLE entries (
+            line       INTEGER PRIMARY KEY,
+            ts_sec     REAL,
+            ts_raw     TEXT,
+            tag        TEXT NOT NULL,
+            level      TEXT,
+            level_int  INTEGER,
+            scope      TEXT,
+            scope_idx  INTEGER,
+            sub_idx    INTEGER,
+            field      TEXT,
+            raw_bytes  TEXT,
+            decoded    INTEGER,
+            msg        TEXT
+        )
+    """)
+
+    _create_indexes = """
+        CREATE INDEX IF NOT EXISTS idx_tag ON entries(tag);
+        CREATE INDEX IF NOT EXISTS idx_tag_scope ON entries(tag, scope_idx);
+        CREATE INDEX IF NOT EXISTS idx_field ON entries(field);
+        CREATE INDEX IF NOT EXISTS idx_scope ON entries(scope, scope_idx);
+        CREATE INDEX IF NOT EXISTS idx_ts ON entries(ts_sec);
+        CREATE INDEX IF NOT EXISTS idx_level ON entries(level_int);
+    """
+
+    base_ts: float | None = None
+    batch: list[tuple] = []
+    total = 0
+    skipped_varint = 0
+    file_num = 0
+
+    for log_path in log_files:
+        file_num += 1
+        print(f"  [{file_num}/{len(log_files)}] {log_path.name}", file=sys.stderr)
+
+        with open(log_path, "r", encoding="utf-8", errors="replace") as fh:
+            for line_num, raw_line in enumerate(fh, 1):
+                line = raw_line.rstrip("\n\r")
+                if not line:
+                    continue
+
+                parsed = parse_line(line)
+                if parsed is None:
+                    continue
+
+                ts_raw = parsed["ts_raw"]
+                tag = parsed["tag"]
+                msg = parsed["msg"]
+                level = parsed["level"]
+                level_int = parsed["level_int"]
+
+                # Compute seconds
+                if base_ts is None:
+                    base_ts = _ts_to_seconds(ts_raw)
+                ts_sec = _ts_to_seconds(ts_raw, base_ts)
+
+                scope: str | None = None
+                scope_idx: int | None = None
+                sub_idx: int | None = None
+                field: str | None = None
+                raw_bytes: str | None = None
+                decoded: int | None = None
+
+                if tag == "VARINT":
+                    scope, scope_idx, sub_idx, field = _parse_scope_and_field(msg)
+                    raw_bytes, decoded = _parse_raw_decoded(msg)
+
+                    if light and field == "regtype":
+                        skipped_varint += 1
+                        continue
+
+                    if light and scope == "type":
+                        skipped_varint += 1
+                        continue
+
+                elif tag in ("HEADER", "FUNC", "TYPE", "OPCODE"):
+                    sm = _SCOPE_RE.search(msg)
+                    if sm:
+                        scope = sm.group("scope")
+                        scope_idx = int(sm.group("idx"))
+
+                # Use a composite line number across files: file_idx * 10^9 + line_num
+                composite_line = file_num * 10**9 + line_num
+
+                batch.append((
+                    composite_line, ts_sec, ts_raw, tag, level, level_int,
+                    scope, scope_idx, sub_idx, field,
+                    raw_bytes, decoded, msg,
+                ))
+                total += 1
+
+                if len(batch) >= 5000:
+                    conn.executemany(
+                        "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        batch,
+                    )
+                    batch.clear()
+
+    # Final batch
+    if batch:
+        conn.executemany(
+            "INSERT INTO entries VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            batch,
+        )
+
+    conn.executescript(_create_indexes)
+    conn.commit()
+
+    # Store metadata
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS meta (
+            key   TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.execute(
+        "INSERT OR REPLACE INTO meta VALUES ('source_dir', ?)", (str(root.resolve()),)
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO meta VALUES ('total_files', ?)", (str(len(log_files)),)
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO meta VALUES ('total_lines', ?)", (str(total),)
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO meta VALUES ('skipped_varint_light', ?)", (str(skipped_varint),)
+    )
+
+    conn.commit()
+    conn.close()
+
+    elapsed = time.time() - t0
+    return total, elapsed
+
+
+# ── Level filter helper ─────────────────────────────────────────────────────
+
+def _level_filter_clause(level: str | None) -> tuple[str, list]:
+    """Return (sql_where_clause, params) for a level threshold filter.
+
+    The level argument is a case-insensitive level name (error, warn, info, debug, trace).
+    Returns a SQL fragment that filters entries with level_int >= the threshold.
+    """
+    if level is None:
+        return "", []
+
+    threshold = level_from_name(level)
+    return "AND level_int >= ?", [threshold]
+
+
 # ── Query ────────────────────────────────────────────────────────────────────
 
-def run_query(db_path: str, sql: str, fmt: str = "json") -> None:
+def run_query(db_path: str, sql: str, fmt: str = "json", level: str | None = None) -> None:
     """Execute SQL against the DB, output results."""
     if not Path(db_path).exists():
         print(f"ERROR: Database not found: {db_path}", file=sys.stderr)
@@ -292,6 +561,13 @@ def run_query(db_path: str, sql: str, fmt: str = "json") -> None:
 
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
+
+    # Apply level filter if specified
+    if level is not None:
+        threshold = level_from_name(level)
+        # Wrap user query as subquery with level_int filter
+        sql = f"SELECT * FROM ({sql}) AS _q WHERE level_int >= {threshold}"
+
     cur = conn.execute(sql)
 
     rows = cur.fetchall()
@@ -331,8 +607,12 @@ def run_query(db_path: str, sql: str, fmt: str = "json") -> None:
 
 # ── Errors ───────────────────────────────────────────────────────────────────
 
-def show_errors(db_path: str, context: int = 10) -> None:
-    """Show all ERROR lines with surrounding context."""
+def show_errors(db_path: str, context: int = 10, level: str | None = None) -> None:
+    """Show all ERROR-level lines with surrounding context.
+
+    Matches entries where level_int >= ERROR (40) OR tag == 'ERROR' (old format).
+    When --level is specified, additionally filters by minimum level threshold.
+    """
     if not Path(db_path).exists():
         print(f"ERROR: Database not found: {db_path}", file=sys.stderr)
         sys.exit(1)
@@ -340,7 +620,19 @@ def show_errors(db_path: str, context: int = 10) -> None:
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
 
-    errors = conn.execute("SELECT line, msg FROM entries WHERE tag='ERROR'").fetchall()
+    # Build level filter
+    # Default: show everything at ERROR level (level_int >= 40) or with tag='ERROR' (old format)
+    # With --level: apply the user-specified threshold instead of ERROR
+    if level is not None:
+        threshold = level_from_name(level)
+    else:
+        threshold = ERROR
+
+    errors = conn.execute(
+        f"SELECT line, msg, level_int FROM entries WHERE (tag='ERROR' OR level_int >= ?) "
+        f"AND level_int >= ? ORDER BY line",
+        (threshold, threshold),
+    ).fetchall()
 
     if not errors:
         print(json.dumps({"errors": 0, "items": []}))
@@ -398,7 +690,7 @@ def show_stats(db_path: str, section: str | None = None) -> None:
     result = {
         "meta": {
             k: meta.get(k, "")
-            for k in ["parser_version", "source_file", "source", "total_lines"]
+            for k in ["parser_version", "source_file", "source", "source_dir", "total_lines", "total_files"]
         },
         "sections": [{"tag": r["tag"], "count": r["cnt"]} for r in counts],
     }
@@ -575,18 +867,31 @@ def main() -> None:
     p_idx.add_argument("--light", action="store_true",
                        help="Skip regtype and type-scoped VARINT lines (smaller DB)")
 
+    # index-dir
+    p_id = sub.add_parser("index-dir", help="Index all .log files in a directory tree into SQLite")
+    p_id.add_argument("dir", help="Path to directory tree of chunked logs")
+    p_id.add_argument("--db", default=None, help="Output DB path (default: <dirname>.db)")
+    p_id.add_argument("--light", action="store_true",
+                      help="Skip regtype and type-scoped VARINT lines (smaller DB)")
+
     # query
     p_q = sub.add_parser("query", help="Run SQL query against DB")
     p_q.add_argument("db", help="Path to SQLite DB")
     p_q.add_argument("sql", help="SQL query string (or path to .sql file)")
     p_q.add_argument("--fmt", choices=["json", "table"], default="json",
                      help="Output format (default: json)")
+    p_q.add_argument("--level", default=None,
+                     choices=["error", "warn", "info", "debug", "trace"],
+                     help="Filter by minimum level threshold")
 
     # errors
     p_e = sub.add_parser("errors", help="Extract errors with context")
     p_e.add_argument("db", help="Path to SQLite DB")
     p_e.add_argument("--context", type=int, default=10,
                      help="Lines of context before/after error (default: 10)")
+    p_e.add_argument("--level", default=None,
+                     choices=["error", "warn", "info", "debug", "trace"],
+                     help="Filter by minimum level threshold")
 
     # stats
     p_s = sub.add_parser("stats", help="Section counts, timing, anomalies")
@@ -617,15 +922,26 @@ def main() -> None:
             file=sys.stderr,
         )
 
+    elif args.command == "index-dir":
+        db_path = args.db or (Path(args.dir).name + ".db")
+        print(f"Indexing directory {args.dir} -> {db_path} ...", file=sys.stderr)
+        total, elapsed = index_dir(args.dir, db_path, light=args.light)
+        db_size_mb = os.path.getsize(db_path) / (1024 * 1024)
+        print(
+            f"Done. {total} lines indexed from directory in {elapsed:.1f}s. "
+            f"DB size: {db_size_mb:.0f} MB.",
+            file=sys.stderr,
+        )
+
     elif args.command == "query":
         sql = args.sql
         if os.path.isfile(sql):
             with open(sql) as f:
                 sql = f.read()
-        run_query(args.db, sql, fmt=args.fmt)
+        run_query(args.db, sql, fmt=args.fmt, level=args.level)
 
     elif args.command == "errors":
-        show_errors(args.db, context=args.context)
+        show_errors(args.db, context=args.context, level=args.level)
 
     elif args.command == "stats":
         show_stats(args.db, section=args.section)

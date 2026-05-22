@@ -1,9 +1,12 @@
 __pycache__/
 *.pyc
 logs/
+*.db
 .pytest_cache/
 dump.md
 dump.db
 _investigate.py
 .brv
 .coverage
+workspace/*/decompiled/
+workspace/*/*.log/

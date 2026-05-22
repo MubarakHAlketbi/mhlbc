@@ -20,7 +20,7 @@ Headless: no PyQt6 dependency. Used by both cli.py and app.py.
 from dataclasses import dataclass, field
 from typing import (List, Optional, Dict, Tuple, Set, Any, Union)
 
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
 from hl_disasm import (Instruction, BasicBlock, Disassembler, OpcodeDecoder,
                         _OPCODE_NARGS, _OPCODE_NAMES, _JUMP_OPCODES, _VARARG_OPCODES)
 
@@ -643,8 +643,8 @@ class ExprBuilder:
         self.disasm = disasm
         self.reg_names = reg_names
         self._logger = logger
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (
-            lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
+            lambda tag, msg, level=INFO: None)
 
     def build_body(self, instructions: List[Instruction],
                    func_idx: int) -> List[IRStmt]:
@@ -973,7 +973,8 @@ class ExprBuilder:
         # Unknown opcode
         op_name = _OPCODE_NAMES[op] if op < len(_OPCODE_NAMES) else f"OP_{op}"
         self._log("DECOMPILE",
-                  f"  Unknown opcode {op} ({op_name}) at @{instr.index}")
+                  f"  Unknown opcode {op} ({op_name}) at @{instr.index}",
+                  level=DEBUG)
         return IRStmt("comment",
                       comment=f"UNKNOWN: {op_name} {args}")
 
@@ -1117,8 +1118,8 @@ class ControlStructurer:
         self.cfg = cfg
         self.parser = parser
         self._logger = logger
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (
-            lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
+            lambda tag, msg, level=INFO: None)
         self._ip_to_block: Dict[int, int] = {}
         self._build_ip_map()
 
@@ -1288,8 +1289,8 @@ class FunctionSigBuilder:
     def __init__(self, parser: Any, logger: Optional[VerboseLogger] = None):
         self.parser = parser
         self._logger = logger
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (
-            lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
+            lambda tag, msg, level=INFO: None)
 
     def build(self, func_idx: int) -> FunctionSig:
         """Build a function signature from the parsed function and type data."""
@@ -1445,8 +1446,8 @@ class ClassBuilder:
         self.parser = parser
         self.type_resolver = type_resolver
         self._logger = logger
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (
-            lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
+            lambda tag, msg, level=INFO: None)
 
     def build(self) -> Tuple[Dict[str, ClassDef], Dict[str, EnumDef], List[int]]:
         """Build class and enum definitions from parser types.
@@ -1987,8 +1988,8 @@ class Decompiler:
         self.disasm = disasm
         self.logger = logger
         self.type_resolver = TypeResolver(parser)
-        self._log = (lambda tag, msg: logger.log(tag, msg)) if logger else (
-            lambda tag, msg: None)
+        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
+            lambda tag, msg, level=INFO: None)
 
     def decompile_all(self,
                       progress_callback=None) -> DecompileResult:
@@ -2038,7 +2039,7 @@ class Decompiler:
                 result.functions[i] = ir_fn
             except Exception as e:
                 err = f"func[{i}]: decompilation failed: {e}"
-                self._log("DECOMPILE", f"  [ERROR] {err}")
+                self._log("DECOMPILE", f"  [ERROR] {err}", level=WARN)
                 result.errors.append(err)
 
         # Set version
@@ -2063,7 +2064,7 @@ class Decompiler:
         try:
             return self._decompile_function(func_idx)
         except Exception as e:
-            self._log("DECOMPILE", f"  [ERROR] func[{func_idx}]: {e}")
+            self._log("DECOMPILE", f"  [ERROR] func[{func_idx}]: {e}", level=WARN)
             return None
 
     def _decompile_function(self, func_idx: int) -> IRFunction:

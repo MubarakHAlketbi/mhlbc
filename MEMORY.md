@@ -186,3 +186,28 @@
 - **HL reference verified:** Both 2-byte and 4-byte use bit 5 (0x20) for sign, value mask is 0x1F (5 bits) for both cases.
 - **Log analysis:** Indexed 622MB Farever log — 8,261,081 lines, 0 errors. All 13,348 opcodes out-of-range due to genuine function pool corruption (nregs=-1/nops=-1 at func[2]).
 - **278 tests still passing.**
+
+## Session 13 — May 22, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 278 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: a7594ff (Session 12 — decompile crash fix + VarInt encoder bug).
+- Version: g4.0-4-ga7594ff, clean working tree.
+- **Key lesson — P24 validated:** Farever binary is NOT corrupt — it's a working game. The parser's function pool model (sequential bodies, signed VarInts) may be incomplete. Evidence approach established: hex dump, HL reference source, heuristic scans.
+- **Key discovery — DECOMPILE logging is silent:** The decompiler's `self._log("DECOMPILE", ...)` produces zero entries in verbose logs. Logger chain needs tracing.
+- **Key discovery — `--log-path` creates directory, not file:** VerboseLogger writes a timestamp-named log inside the specified directory path.
+- **Key finding — Decompile on Farever:** Produces 39 files (2.2 MB). Class/enum skeletons recovered from type definitions. Zero method bodies — all show "// (no decompiled methods)". _orphans.hx (2 MB) holds raw function stubs with register declarations only.
+- **Skill created:** `farever-log-index` for indexing Steam Farever logs via logalyzer.
+- **Pitfall catalog added to AGENTS.md:** 25 entries (P1-P25) organized into 4 categories: bytecode parsing, debugging/log analysis, architecture/design, workflow/process.
+- MEMORY.md session notes updated.
+- AGENTS.md pitfalls section (§3) added.
+- **Phase 2 COMPLETE — Logging full refactor (C1-C7):**
+  - VerboseLogger rewritten with 5-level system (ERROR/WARN/INFO/DEBUG/TRACE), default INFO
+  - Output: `logs/{date}/{time}/chunk-NNNNN-NNNNN.log` with auto-rotation at 10K lines
+  - All 57 hl_parser.py call sites gated with appropriate levels (VARINT→TRACE, TYPE/FUNC→DEBUG, HEADER/POOL→INFO)
+  - All hl_disasm.py (10 sites), hl_decompile.py (8 sites), hl_worker.py (2 sites) gated
+  - CLI: `--verbose`→count `-v/-vv`, `--quiet`, `--log-level {error,warn,info,debug,trace}`
+  - logalyzer: `--level` filter on errors/query, `index-dir` for chunked dirs, new format parser
+  - GUI: level dropdown replaces binary "Verbose" checkbox
+  - CONTRIBUTING.md: §8 Integration Pattern, §9 Log Format/Levels/Tooling/Workflow rewritten, §11.6 CLI logging flag docs updated
+  - 286 tests passing

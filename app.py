@@ -31,7 +31,7 @@ from hl_parser import (
     HLParser, KIND_NAMES, K_OBJ, K_STRUCT, K_ENUM, K_VIRTUAL,
     K_ABSTRACT, K_FUN, K_METHOD, PRIMITIVE_KINDS, get_parser_version
 )
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, INFO
 from hl_disasm import Disassembler
 from hl_decompile import Decompiler, HaxeWriter
 
@@ -1069,7 +1069,7 @@ class DecompilerApp(QMainWindow):
         use_verbose = self._verbose or self.cb_verbose.isChecked()
         logger = VerboseLogger() if use_verbose else None
         if logger:
-            logger.log("APP", f"Opening: {filepath}")
+            logger.log("APP", f"Opening: {filepath}", level=INFO)
             self._msg_label.setText(f"Verbose -> {logger.log_path}")
 
         self.worker = HLParseWorker(filepath, logger=logger)

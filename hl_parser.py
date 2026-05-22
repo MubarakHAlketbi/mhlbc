@@ -4,7 +4,7 @@ import os
 import subprocess
 from typing import BinaryIO, List, Optional
 
-from hl_logger import VerboseLogger
+from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
 
 # === Version Identifier ===
 # Format: g{gate}.{build}.{commit}[-dirty]
@@ -234,14 +234,14 @@ class HLParser:
         # Raw bytecode data (populated during execute() for disassembler access)
         self._raw_data: Optional[bytes] = None
 
-    def _log(self, tag: str, message: str):
+    def _log(self, tag: str, message: str, level: int = INFO):
         if self._logger:
-            self._logger.log(tag, message)
+            self._logger.log(tag, message, level=level)
 
     def _log_varint(self, context: str, raw_bytes: bytes, value: int):
         if self._logger:
             hex_repr = " ".join(f"{b:02x}" for b in raw_bytes)
-            self._logger.log("VARINT", f"{context}: raw=[{hex_repr}] decoded={value}")
+            self._logger.log("VARINT", f"{context}: raw=[{hex_repr}] decoded={value}", level=TRACE)
 
     def read_varint(self, stream: BinaryIO, context: str = "") -> int:
         """Reads a signed variable-length integer according to HashLink specifications.
@@ -297,52 +297,52 @@ class HLParser:
 
     def _warn(self, tag: str, msg: str):
         """Log a non-fatal warning and record it for downstream inspection."""
-        self._log(tag, msg)
+        self._log(tag, msg, level=WARN)
         self.parse_warnings.append({"tag": tag, "message": msg})
 
     def parse_header(self, stream: BinaryIO):
         """Parses the bytecode header structure dynamically by version."""
         magic = stream.read(3)
-        self._log("HEADER", f"magic={(magic or b'').hex()}")
+        self._log("HEADER", f"magic={(magic or b'').hex()}", level=INFO)
         if magic != b"HLB":
             raise HLParserError("Invalid magic bytes. Not a valid HashLink file.")
             
         self.version = int(struct.unpack("<B", stream.read(1))[0])
-        self._log("HEADER", f"version={self.version}")
+        self._log("HEADER", f"version={self.version}", level=INFO)
         if self.version < 3 or self.version > 5:
             self._warn("HEADER", f"Unsupported bytecode version {self.version} — parsing may produce incorrect results")
             
         self.flags = self.read_varint(stream, context="flags")
         self.has_debug = (self.flags & 1) != 0
-        self._log("HEADER", f"flags={self.flags} has_debug={self.has_debug}")
+        self._log("HEADER", f"flags={self.flags} has_debug={self.has_debug}", level=INFO)
         
         self.nints = self.read_varint(stream, context="nints")
         self.nfloats = self.read_varint(stream, context="nfloats")
         self.nstrings = self.read_varint(stream, context="nstrings")
-        self._log("HEADER", f"nints={self.nints} nfloats={self.nfloats} nstrings={self.nstrings}")
+        self._log("HEADER", f"nints={self.nints} nfloats={self.nfloats} nstrings={self.nstrings}", level=INFO)
         
         if self.version >= 5:
             self.nbytes = self.read_varint(stream, context="nbytes")
-            self._log("HEADER", f"nbytes={self.nbytes}")
+            self._log("HEADER", f"nbytes={self.nbytes}", level=INFO)
             
         self.ntypes = self.read_varint(stream, context="ntypes")
         self.nglobals = self.read_varint(stream, context="nglobals")
         self.nnatives = self.read_varint(stream, context="nnatives")
         self.nfunctions = self.read_varint(stream, context="nfunctions")
-        self._log("HEADER", f"ntypes={self.ntypes} nglobals={self.nglobals} nnatives={self.nnatives} nfunctions={self.nfunctions}")
+        self._log("HEADER", f"ntypes={self.ntypes} nglobals={self.nglobals} nnatives={self.nnatives} nfunctions={self.nfunctions}", level=INFO)
         
         if self.version >= 4:
             self.nconstants = self.read_varint(stream, context="nconstants")
-            self._log("HEADER", f"nconstants={self.nconstants}")
+            self._log("HEADER", f"nconstants={self.nconstants}", level=INFO)
             
         self.entrypoint = self.read_varint(stream, context="entrypoint")
-        self._log("HEADER", f"entrypoint={self.entrypoint}")
+        self._log("HEADER", f"entrypoint={self.entrypoint}", level=INFO)
 
     def parse_pools(self, stream: BinaryIO, progress_callback=None):
         """Loads data pools into memory based on parsed header counts."""
         
         offset_before = stream.tell()
-        self._log("POOL", f"Starting pool read at byte offset {offset_before}")
+        self._log("POOL", f"Starting pool read at byte offset {offset_before}", level=INFO)
         
         # 1. Ints Pool
         if progress_callback: progress_callback("Loading Int Pool...", 10)
@@ -353,7 +353,7 @@ class HLParser:
                 raise HLParserError("Truncated integer pool data.")
             val = struct.unpack("<i", data)[0]
             self.ints.append(val)
-        self._log("POOL", f"Read {self.nints} ints ({(self.nints * 4)} bytes)")
+        self._log("POOL", f"Read {self.nints} ints ({(self.nints * 4)} bytes)", level=INFO)
 
         # 2. Floats Pool
         if progress_callback: progress_callback("Loading Float Pool...", 25)
@@ -364,7 +364,7 @@ class HLParser:
                 raise HLParserError("Truncated float pool data.")
             val = struct.unpack("<d", data)[0]
             self.floats.append(val)
-        self._log("POOL", f"Read {self.nfloats} floats ({(self.nfloats * 8)} bytes)")
+        self._log("POOL", f"Read {self.nfloats} floats ({(self.nfloats * 8)} bytes)", level=INFO)
 
         # 3. Strings Pool
         if progress_callback: progress_callback("Loading Strings Pool...", 45)
@@ -372,7 +372,7 @@ class HLParser:
         if len(raw_size_data) < 4:
             raise HLParserError("Failed to read string pool size.")
         strings_size = struct.unpack("<i", raw_size_data)[0]
-        self._log("POOL", f"String pool size header: {strings_size} bytes")
+        self._log("POOL", f"String pool size header: {strings_size} bytes", level=INFO)
         
         strings_bytes = stream.read(strings_size)
         if len(strings_bytes) != strings_size:
@@ -390,7 +390,7 @@ class HLParser:
             s = strings_bytes[offset:end].decode("utf-8", errors="replace")
             self.strings.append(s)
             offset = end + 1
-        self._log("POOL", f"Parsed {len(self.strings)} strings from {strings_size} payload bytes")
+        self._log("POOL", f"Parsed {len(self.strings)} strings from {strings_size} payload bytes", level=INFO)
 
         # 4. Bytes Pool (Version >= 5)
         if self.version >= 5 and self.nbytes > 0:
@@ -399,7 +399,7 @@ class HLParser:
             if len(raw_bytes_size_data) < 4:
                 raise HLParserError("Failed to read bytes pool size.")
             bytes_size = struct.unpack("<i", raw_bytes_size_data)[0]
-            self._log("POOL", f"Bytes pool size header: {bytes_size} bytes, nbytes={self.nbytes}")
+            self._log("POOL", f"Bytes pool size header: {bytes_size} bytes, nbytes={self.nbytes}", level=INFO)
             
             self.bytes_data = stream.read(bytes_size)
             if len(self.bytes_data) != bytes_size:
@@ -409,21 +409,21 @@ class HLParser:
             for i in range(self.nbytes):
                 off = self.read_varint(stream, context=f"bytes_offset[{i}]")
                 self.bytes_offsets.append(off)
-            self._log("POOL", f"Read {len(self.bytes_offsets)} byte offset entries")
+            self._log("POOL", f"Read {len(self.bytes_offsets)} byte offset entries", level=INFO)
 
         # 5. Debug Files List
         if self.has_debug:
             if progress_callback: progress_callback("Loading Debug Info...", 90)
             ndebugfiles = self.read_varint(stream, context="ndebugfiles")
-            self._log("POOL", f"ndebugfiles={ndebugfiles}")
+            self._log("POOL", f"ndebugfiles={ndebugfiles}", level=INFO)
             
             self.debug_files = []
             for i in range(ndebugfiles):
                 self.debug_files.append(self.read_varint(stream, context=f"debug_file[{i}]"))
-            self._log("POOL", f"Read {len(self.debug_files)} debug file string indices")
+            self._log("POOL", f"Read {len(self.debug_files)} debug file string indices", level=INFO)
         
         offset_after = stream.tell()
-        self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes")
+        self._log("POOL", f"Pool read complete at byte offset {offset_after}, consumed {offset_after - offset_before} bytes", level=INFO)
 
     # === Type Parsing ===
 
@@ -437,7 +437,7 @@ class HLParser:
             progress_callback("Parsing Types...", 50)
 
         offset_before = stream.tell()
-        self._log("TYPE", f"Starting type read at byte offset {offset_before}, ntypes={self.ntypes}")
+        self._log("TYPE", f"Starting type read at byte offset {offset_before}, ntypes={self.ntypes}", level=DEBUG)
 
         self.types = []
         for i in range(self.ntypes):
@@ -445,7 +445,7 @@ class HLParser:
             self.types.append(t)
 
         offset_after = stream.tell()
-        self._log("TYPE", f"Read {len(self.types)} types, consumed {offset_after - offset_before} bytes")
+        self._log("TYPE", f"Read {len(self.types)} types, consumed {offset_after - offset_before} bytes", level=DEBUG)
         if progress_callback:
             progress_callback("Types parsed.", 100)
 
@@ -459,7 +459,7 @@ class HLParser:
         kind = kind_byte[0]
 
         t = {"kind": kind}
-        self._log("TYPE", f"  type[{index}]: kind={kind} ({KIND_NAMES.get(kind, 'UNKNOWN')})")
+        self._log("TYPE", f"  type[{index}]: kind={kind} ({KIND_NAMES.get(kind, 'UNKNOWN')})", level=DEBUG)
 
         if kind in PRIMITIVE_KINDS:
             # No additional data beyond the kind byte
@@ -567,7 +567,7 @@ class HLParser:
                 # the default case treats unrecognized kinds < HLAST as no-op primitives.
                 # For kinds >= HLAST, the VM raises "Invalid type", but we log a warning
                 # and continue to maximise parseability of real-world targets.
-                self._log("TYPE", f"  type[{index}]: unknown kind={kind} — treating as primitive (no payload)")
+                self._log("TYPE", f"  type[{index}]: unknown kind={kind} — treating as primitive (no payload)", level=DEBUG)
                 t["unknown_kind"] = True
 
         return t
@@ -580,7 +580,7 @@ class HLParser:
             progress_callback("Parsing Globals...", 55)
 
         offset_before = stream.tell()
-        self._log("GLOBAL", f"Starting globals read at byte offset {offset_before}, nglobals={self.nglobals}")
+        self._log("GLOBAL", f"Starting globals read at byte offset {offset_before}, nglobals={self.nglobals}", level=INFO)
 
         self.globals = []
         for i in range(self.nglobals):
@@ -588,7 +588,7 @@ class HLParser:
             self.globals.append(t)
 
         offset_after = stream.tell()
-        self._log("GLOBAL", f"Read {len(self.globals)} globals, consumed {offset_after - offset_before} bytes")
+        self._log("GLOBAL", f"Read {len(self.globals)} globals, consumed {offset_after - offset_before} bytes", level=INFO)
         if progress_callback:
             progress_callback("Globals parsed.", 60)
 
@@ -598,7 +598,7 @@ class HLParser:
             progress_callback("Parsing Natives...", 65)
 
         offset_before = stream.tell()
-        self._log("NATIVE", f"Starting natives read at byte offset {offset_before}, nnatives={self.nnatives}")
+        self._log("NATIVE", f"Starting natives read at byte offset {offset_before}, nnatives={self.nnatives}", level=INFO)
 
         self.natives = []
         for i in range(self.nnatives):
@@ -614,7 +614,7 @@ class HLParser:
             })
 
         offset_after = stream.tell()
-        self._log("NATIVE", f"Read {len(self.natives)} natives, consumed {offset_after - offset_before} bytes")
+        self._log("NATIVE", f"Read {len(self.natives)} natives, consumed {offset_after - offset_before} bytes", level=INFO)
         if progress_callback:
             progress_callback("Natives parsed.", 70)
 
@@ -642,7 +642,7 @@ class HLParser:
             if 0 <= op_idx < len(_OPCODE_NARGS):
                 nargs = _OPCODE_NARGS[op_idx]
             else:
-                self._log("OPCODE", f"opcode[{i}]: out-of-range idx={op_idx} — treating as 0-arg nop, stream at offset {stream.tell()}")
+                self._log("OPCODE", f"opcode[{i}]: out-of-range idx={op_idx} — treating as 0-arg nop, stream at offset {stream.tell()}", level=TRACE)
                 nargs = 0
             if nargs >= 0:
                 for j in range(nargs):
@@ -685,16 +685,16 @@ class HLParser:
         start = stream.tell()
         for j in range(count):
             if self._remaining_bytes(stream) < 1:
-                self._log("FUNC", f"EOF while reading {context_fmt.format(j)}, stopping")
+                self._log("FUNC", f"EOF while reading {context_fmt.format(j)}, stopping", level=DEBUG)
                 break
             if max_bytes is not None and stream.tell() - start >= max_bytes:
-                self._log("FUNC", f"byte limit ({max_bytes}) exceeded for {context_fmt.format(j)}, stopping")
+                self._log("FUNC", f"byte limit ({max_bytes}) exceeded for {context_fmt.format(j)}, stopping", level=DEBUG)
                 break
             try:
                 val = self.read_varint(stream, context=context_fmt.format(j))
                 results.append(val)
             except HLParserError:
-                self._log("FUNC", f"read error at {context_fmt.format(j)}, stopping")
+                self._log("FUNC", f"read error at {context_fmt.format(j)}, stopping", level=DEBUG)
                 break
         return results
 
@@ -841,7 +841,7 @@ class HLParser:
             progress_callback("Parsing Functions...", 72)
 
         offset_before = stream.tell()
-        self._log("FUNC", f"Starting function read at byte offset {offset_before}, nfunctions={self.nfunctions}")
+        self._log("FUNC", f"Starting function read at byte offset {offset_before}, nfunctions={self.nfunctions}", level=DEBUG)
 
         self.functions = []
         func_i = 0
@@ -935,7 +935,7 @@ class HLParser:
                 }
                 self.functions.append(func)
                 self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
-                                 f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-READ]")
+                                 f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-READ]", level=DEBUG)
                 func_i += 1
                 continue
 
@@ -1078,7 +1078,7 @@ class HLParser:
             self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
                              f"nregs={nregs} nops={nops} "
                              f"body_offset={body_offset} body_size={body_size}"
-                             f"{' [MALFORMED]' if malformed else ''}")
+                             f"{' [MALFORMED]' if malformed else ''}", level=DEBUG)
 
             # ── Stream resync for malformed functions ──────────────────
             if malformed:
@@ -1092,7 +1092,7 @@ class HLParser:
             func_i += 1
 
         offset_after = stream.tell()
-        self._log("FUNC", f"Read {len(self.functions)} functions, consumed {offset_after - offset_before} bytes")
+        self._log("FUNC", f"Read {len(self.functions)} functions, consumed {offset_after - offset_before} bytes", level=DEBUG)
 
         # Resolve function names from protos/bindings
         self._resolve_function_names()
@@ -1128,7 +1128,7 @@ class HLParser:
                     self.functions[fn_idx]["parent_type"] = t_idx
                     self._log("FUNC", f"  Resolved proto: findex={p_findex} "
                                       f"→ func[{fn_idx}] name={proto.get('name')} "
-                                      f"type[{t_idx}]")
+                                      f"type[{t_idx}]", level=DEBUG)
             # Bindings: static methods/properties
             for binding in t.get("bindings", []):
                 b_findex = binding.get("findex")
@@ -1141,7 +1141,7 @@ class HLParser:
                         self.functions[fn_idx]["parent_type"] = t_idx
                     self._log("FUNC", f"  Resolved binding: findex={b_findex} "
                                       f"→ func[{fn_idx}] name={field_name} "
-                                      f"type[{t_idx}]")
+                                      f"type[{t_idx}]", level=DEBUG)
 
         # Special: resolve natives by findex too
         for nat in self.natives:
@@ -1154,7 +1154,7 @@ class HLParser:
         if ep in findex_to_idx:
             fn_idx = findex_to_idx[ep]
             self.functions[fn_idx]["name"] = "init"
-            self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init")
+            self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init", level=DEBUG)
 
     # === Constants Parsing ===
 
@@ -1168,14 +1168,14 @@ class HLParser:
         """
         self.constants = []
         if self.nconstants == 0:
-            self._log("CONST", "No constants to parse")
+            self._log("CONST", "No constants to parse", level=INFO)
             return
 
         if progress_callback:
             progress_callback("Parsing Constants...", 85)
 
         offset_before = stream.tell()
-        self._log("CONST", f"Starting constants read at byte offset {offset_before}")
+        self._log("CONST", f"Starting constants read at byte offset {offset_before}", level=INFO)
 
         for i in range(self.nconstants):
             global_idx = self.read_varint(stream, context=f"const[{i}].global")
@@ -1195,15 +1195,15 @@ class HLParser:
 
         offset_after = stream.tell()
         bytes_read = offset_after - offset_before
-        self._log("CONST", f"Parsed {self.nconstants} constants ({bytes_read} bytes)")
+        self._log("CONST", f"Parsed {self.nconstants} constants ({bytes_read} bytes)", level=INFO)
 
     # === Main Entry Point ===
 
     def execute(self, stream=None, progress_callback=None):
         # Log parser version for diagnostic traceability
         ver = get_parser_version()
-        self._log("APP", f"Parser version: {ver}")
-        self._log("APP", f"File: {self.filepath}")
+        self._log("APP", f"Parser version: {ver}", level=INFO)
+        self._log("APP", f"File: {self.filepath}", level=INFO)
         
         if stream is not None:
             # Try to determine file size from a seekable stream
