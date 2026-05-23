@@ -1,0 +1,129 @@
+# mhlbc Action Checklist
+
+Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 — all issues, suggestions, recommendations, code smells, test gaps, documentation gaps, architecture concerns, and farever investigation items converted to actionable checklist items.
+
+**Legend:** `[ ]` pending, `[x]` done. Priority: P0 (blocker), P1 (high), P2 (medium), P3 (low).
+
+---
+
+## A. Critical Bugs (P0)
+
+- [ ] **A1** — Fix type pool stream misalignment (BLOCKER). Type kinds decode as ASCII values (47, 97-120) instead of valid HL kinds (0-22). Single root cause cascading through types, globals, natives, functions, disasm, and decompiler. `[report: Finding #1, Section 3.2, 10, 11]`
+- [ ] **A2** — Compile 3-5 minimal Haxe programs to HLB (v3, v4, v5) using Haxe 4.3.6. Use as ground-truth fixtures. `[report: Rec 2, Phase A1-A3]`
+- [ ] **A3** — Parse each compiled HLB and validate header counts match compiler output. If types produce correct kinds (0-22), the parser works on standard HLB and the bug is Farever-specific (shiroTools). If types fail on standard HLB, the parser has a fundamental alignment error. `[report: Phase A2-A5]`
+- [ ] **A4** — Add standard HLB files as test fixtures in `tests/fixtures/`. `[report: Phase A7, Rec 2, Finding #2]`
+- [ ] **A5** — Write integration tests that parse real `.hlb` files and assert pool counts, type kinds, function counts match known truth. `[report: Phase A8, Test Suite gaps]`
+
+---
+
+## B. Parser Hardening (P1)
+
+- [ ] **B1** — Add `ParseValidator` class: post-parse validation pass that checks consistency after `HLParser.execute()` completes. `[report: Rec 3]`
+  - [ ] Type kinds must be 0-22
+  - [ ] Native findex must be in `[0, nnatives)`
+  - [ ] Function nregs must be < 500
+  - [ ] Function nops must be < 100,000
+  - [ ] String pool indices in types/natives/functions must be < `len(strings)`
+- [ ] **B2** — Add type kind range validation in `parse_types()`: `if kind > 22: warn()`. Would have caught the Farever type alignment bug immediately. `[report: Section 6.3 code smell #3]`
+- [ ] **B3** — Add nregs sanity bounds (< 500) in function header parsing with warning. `[report: Rec 3, B3]`
+- [ ] **B4** — Add nops sanity bounds (< 100,000) in function header parsing with warning. `[report: B3]`
+- [ ] **B5** — Add string pool index validation: all string references in types, natives, and functions must be < `len(strings)`. `[report: B4]`
+- [ ] **B6** — Fix function name resolution: currently produces numeric strings (e.g., '39', '1284') instead of resolved type/method names. `[report: Finding #5]`
+
+---
+
+## C. Disassembler Hardening (P1)
+
+- [ ] **C1** — Add opcode range validation in disassembler: reject opcodes outside 0-102 with a clear diagnostic instead of producing `OP_160`. Would have flagged function body misalignment immediately. `[report: Section 6.3 code smell #1, Rec 6]`
+- [ ] **C2** — Add warning for unknown opcodes (0-102 range) in disassembly output. `[report: Section 3.4]`
+- [ ] **C3** — Validate disassembly on standard HLB against known opcode sequences. `[report: Phase D1]`
+
+---
+
+## D. Decompiler Hardening (P1)
+
+- [ ] **D1** — Fix `IRExpr.__str__()` IndexError: validate args length before indexing. `[report: Finding #3, Section 6.3 code smell #4]`
+- [ ] **D2** — All IR constructors should validate arity constraints. `[report: Rec 4]`
+- [ ] **D3** — `write_function()` should wrap each function in try/except and produce `// (decompilation error)` comment on failure instead of crashing. `[report: Rec 4]`
+- [ ] **D4** — The decompiler must never crash — worst case produces a stub with diagnostic comment. `[report: Rec 4]`
+- [ ] **D5** — Validate decompilation output on standard HLB by comparing against original Haxe source. `[report: Phase D2]`
+
+---
+
+## E. Test Suite Gaps
+
+- [ ] **E1** — Integration tests on real HLB files (not just synthetic bytecode from `hl_helper.py`). `[report: Section 7.2]`
+- [ ] **E2** — Round-trip tests: Compile Haxe -> parse HLB -> verify counts match compiler output. `[report: Section 7.2]`
+- [ ] **E3** — Regression fixtures: known-good HLB files that must parse identically after every change. `[report: Section 7.2]`
+- [ ] **E4** — Fuzzer tests: random byte mutations to stress-test robustness. `[report: Section 7.2]`
+- [ ] **E5** — Decompiler crash tests: malformed IR input should degrade gracefully, not crash. `[report: Section 7.2]`
+- [ ] **E6** — Cross-version tests: same Haxe program compiled at v3, v4, v5 should produce consistent type/function counts. `[report: Section 7.2]`
+- [ ] **E7** — Rule: every 10 synthetic tests = 1 real HLB integration test. `[report: Risk R6]`
+
+---
+
+## F. Architecture Improvements (P2)
+
+- [ ] **F1** — Split `hl_parser.py` (1,320 lines) into modules for independent testing and easier stream alignment debugging: `[report: Rec 5]`
+  - [ ] `hl_parser/header.py` — `parse_header()`
+  - [ ] `hl_parser/pools.py` — `parse_pools()` (ints, floats, strings, bytes, debug)
+  - [ ] `hl_parser/types.py` — `parse_types()` (all 24 kinds)
+  - [ ] `hl_parser/globals.py` — `parse_globals()`
+  - [ ] `hl_parser/natives.py` — `parse_natives()`
+  - [ ] `hl_parser/functions.py` — `parse_functions()` (headers, bodies, names)
+  - [ ] `hl_parser/constants.py` — `parse_constants()`
+  - [ ] `hl_parser/varint.py` — `read_varint`, `read_uvarint`
+  - [ ] `hl_parser/stream.py` — `ByteStream` wrapper
+- [ ] **F2** — Add typed dataclass/NamedTuple intermediate layer instead of raw dicts. Would catch structural errors at construction time. `[report: Section 9.2]`
+- [ ] **F3** — Add `ParseDiagnostic` dataclass with section, offset, severity, and recovery action for structured error accumulation. `[report: Section 9.2]`
+- [ ] **F4** — Consider memory-mapped I/O for files > 50MB instead of reading entire file into `_raw_data`. `[report: Section 9.2]`
+- [ ] **F5** — Verify `hl_worker.py` (31 lines) signal completeness — ensure all parser output fields are emitted. `[report: Section 6.2]`
+
+---
+
+## G. Documentation Fixes (P2)
+
+- [ ] **G1** — Fix CONTRIBUTING.md test count: says "278" — should be "286". `[report: Section 8.2]`
+- [ ] **G2** — Sync README.md and CONTRIBUTING.md doc counts (both should say "286"). `[report: Section 8.2, B5-B6]`
+- [ ] **G3** — Add "Known Issues" section to README.md so external users know about the Farever parsing limitation. `[report: Section 8.2]`
+- [ ] **G4** — Add architecture diagram beyond CONTRIBUTING.md Section 1. `[report: Section 8.2]`
+- [ ] **G5** — Verify `decompilation_patterns.md` (376 lines) is fully populated, not skeletal. `[report: Section 8.2]`
+
+---
+
+## H. CI/CD & Process (P2-P3)
+
+- [ ] **H1** — Add CI pipeline (GitHub Actions): run pytest on every push to catch regressions automatically. `[report: Section 6.2, Phase D4]`
+- [ ] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. `[report: Phase D5]`
+- [ ] **H3** — Write "Getting Started" guide for external contributors. `[report: Phase D6]`
+- [ ] **H4** — Do NOT proceed to Tiers 2-5 until Tier 1 is validated on 3+ standard HLB files. `[report: Rec 7, Risk R5]`
+- [ ] **H5** — Validate before tagging: don't mark Gate N complete until output is manually verified on at least one real HLB. "286 tests pass" does not equal "parser works on real games." `[report: Section 14, point 4]`
+
+---
+
+## I. Farever Resolution (Requires Windows Interactive)
+
+- [ ] **I1** — Ghidra analysis of shiroTools `libhl.dll`: find `hl_read_type` function and compare type kind handling against open-source HL. `[report: Section 4.3 #2c, Phase C1]`
+- [ ] **I2** — Compare shiroTools type kinds against open-source HL type kinds. Determine if extensions exist. `[report: Phase C4]`
+- [ ] **I3** — Mutation fuzzing: flip debug flag in hlboot.dat, test if game still runs. `[report: Section 4.3 #4, Phase C2]`
+- [ ] **I4** — Memory dump: extract `hl_code` struct from running Farever game process. `[report: Section 4.3 #3, Phase C3]`
+- [ ] **I5** — Frida hook: intercept `hl_read_type` and `hl_read_function` in running Farever to capture actual parsing behavior. `[report: Section 4.3 #6, Phase C4]`
+- [ ] **I6** — API Monitor: trace `libhl.dll` calls during Farever startup. `[report: Section 4.3 #7, Phase C5]`
+- [ ] **I7** — If shiroTools has format extensions: add custom type kind handler to parser. `[report: Phase C5]`
+
+---
+
+## Summary
+
+| Section | Items | Priority |
+|---------|-------|----------|
+| A. Critical Bugs | 5 | P0 |
+| B. Parser Hardening | 6 | P1 |
+| C. Disassembler Hardening | 3 | P1 |
+| D. Decompiler Hardening | 5 | P1 |
+| E. Test Suite Gaps | 7 | P1-P2 |
+| F. Architecture Improvements | 5 (13 sub-items) | P2 |
+| G. Documentation Fixes | 5 | P2 |
+| H. CI/CD & Process | 5 | P2-P3 |
+| I. Farever Resolution | 7 | P1-P2 (Windows) |
+| **Total** | **48 items + 13 sub-items** | |

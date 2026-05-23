@@ -36,7 +36,7 @@ hl_decompiler/
 └── tests/
     ├── hl_helper.py           # Test helpers: build bytecode programmatically
     ├── test_varint.py         # VarInt encoding/decoding tests
-    ├── test_parser.py         # Full pipeline tests (317+ tests)
+   ├── test_parser.py         # Full pipeline tests (317+ tests)
     ├── test_logger.py         # VerboseLogger write/flush/close tests
     ├── test_disasm.py         # Opcode decode, CFG builder, CLI disasm tests
     └── test_decompile.py      # Decompilation engine tests (Gate 5)

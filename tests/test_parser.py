@@ -1060,7 +1060,7 @@ class TestFunctionNameResolution:
         parser.parse_functions(stream_from_bytes(fn_data))
 
         assert len(parser.functions) == 1
-        assert parser.functions[0]["name"] == 5  # name is string index 5
+        assert parser.functions[0]["name"] == "toString"  # name index 5 -> resolved to string
         assert parser.functions[0]["parent_type"] == 1
 
     def test_function_name_from_binding(self, parser):
@@ -1083,7 +1083,7 @@ class TestFunctionNameResolution:
         parser.entrypoint = 0
         parser.parse_functions(stream_from_bytes(fn_data))
 
-        assert parser.functions[0]["name"] == 10  # field index 10
+        assert parser.functions[0]["name"] == "10"  # field index 10 resolved to str
         assert parser.functions[0]["parent_type"] == 1
 
     def test_entrypoint_is_named_init(self, parser):
@@ -1110,6 +1110,7 @@ class TestFunctionNameResolution:
             bindings=[(10, 1)],   # field=10, findex=1
         )
         parser.ntypes = 2
+        parser.strings = [None, None, None, None, None, "toString"]
         parser.parse_types(stream_from_bytes(
             build_type_constructors_pool([t_void, t_obj])
         ))
@@ -1121,7 +1122,7 @@ class TestFunctionNameResolution:
         parser.parse_functions(stream_from_bytes(fn_data))
 
         # Proto sets name=5, then binding sees name is already set, skips
-        assert parser.functions[0]["name"] == 5  # proto won
+        assert parser.functions[0]["name"] == "toString"  # proto won (resolved string)
 
     def test_function_without_proto_or_binding_remains_unnamed(self, parser):
         """No proto or binding → name stays None."""

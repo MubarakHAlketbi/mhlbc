@@ -191,6 +191,49 @@ _FUNC_HEADER_MIN_BYTES = 4
 _FUNC_BODY_MAX_FRACTION = 0.5
 
 
+class ParseValidator:
+    """Post-parse validation pass checking consistency after HLParser.execute().
+
+    Runs sanity checks on parsed data and produces structured diagnostics
+    to catch stream alignment errors and format mismatches early.
+    """
+
+    def __init__(self, parser: 'HLParser'):
+        self.parser = parser
+        self.warnings: list[dict] = []
+
+    def _warn(self, msg: str) -> None:
+        self.warnings.append({"tag": "VALIDATE", "message": msg})
+
+    def validate(self) -> list[dict]:
+        """Run all checks and return list of warning dicts."""
+        self._check_native_findex_bounds()
+        self._check_function_findex_bounds()
+        self._check_globals_bounds()
+        return self.warnings
+
+    def _check_native_findex_bounds(self) -> None:
+        """Native findex must be non-negative."""
+        for i, n in enumerate(self.parser.natives or []):
+            fi = n.get("findex")
+            if fi is not None and fi < 0:
+                self._warn(f"native[{i}].findex={fi} is negative")
+
+    def _check_function_findex_bounds(self) -> None:
+        """Functions have combined namespace: natives[0..nnatives) + functions[nnatives..)."""
+        total = self.parser.nnatives + self.parser.nfunctions
+        for i, f in enumerate(self.parser.functions or []):
+            fi = f.get("findex")
+            if fi is not None and (fi < 0 or fi >= total):
+                self._warn(f"function[{i}].findex={fi} out of range [0, {total})")
+
+    def _check_globals_bounds(self) -> None:
+        """Global type indices must be in [0, ntypes)."""
+        for i, g in enumerate(self.parser.globals or []):
+            if g is not None and (g < 0 or g >= self.parser.ntypes):
+                self._warn(f"global[{i}].type={g} out of range [0, {self.parser.ntypes})")
+
+
 class HLParser:
     def __init__(self, filepath: str, logger: Optional[VerboseLogger] = None):
         self.filepath = filepath
@@ -313,6 +356,14 @@ class HLParser:
         """Log a non-fatal warning and record it for downstream inspection."""
         self._log(tag, msg, level=WARN)
         self.parse_warnings.append({"tag": tag, "message": msg})
+
+    def _validate_str_index(self, idx: int, field_desc: str) -> None:
+        """Warn if a string pool index is out of bounds."""
+        if not self.strings:
+            return
+        if not isinstance(idx, int) or idx < 0 or idx >= len(self.strings):
+            self._warn("POOL", f"Invalid string index {idx} for {field_desc} "
+                              f"(strings count={len(self.strings)})")
 
     def parse_header(self, stream: BinaryIO):
         """Parses the bytecode header structure dynamically by version."""
@@ -537,6 +588,10 @@ class HLParser:
 
         t = {"kind": kind}
         self._log("TYPE", f"  type[{index}]: kind={kind} ({KIND_NAMES.get(kind, 'UNKNOWN')})", level=DEBUG)
+        # Parser hardening: warn if kind exceeds documented HL range (0-22)
+        if kind > 22:
+            self._log("TYPE", f"  type[{index}]: kind={kind} exceeds standard HL range 0-22 - "
+                      f"possible stream alignment issue", level=WARN)
 
         if kind in PRIMITIVE_KINDS:
             # No additional data beyond the kind byte
@@ -566,6 +621,7 @@ class HLParser:
 
         elif kind == K_OBJ or kind == K_STRUCT:
             name = self.read_varint(stream, context=f"type[{index}].name")
+            self._validate_str_index(name, f"type[{index}].name")
             super_idx = self.read_varint(stream, context=f"type[{index}].super")
             global_idx = self.read_varint(stream, context=f"type[{index}].global")
             nfields = self.read_varint(stream, context=f"type[{index}].nfields")
@@ -584,15 +640,16 @@ class HLParser:
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
+                self._validate_str_index(f_name, f"type[{index}].field[{j}].name")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
                 fields.append({"name": f_name, "type": f_type})
             t["fields"] = fields
 
             # Protos (methods) — per HashLink VM (code.c): 3 VarInts: name + findex + pindex
-            # (proto_name_hash is computed by hl_hash_gen at runtime, NOT stored)
             protos = []
             for j in range(nprotos):
                 p_name = self.read_varint(stream, context=f"type[{index}].proto[{j}].name")
+                self._validate_str_index(p_name, f"type[{index}].proto[{j}].name")
                 p_findex = self.read_varint(stream, context=f"type[{index}].proto[{j}].findex")
                 p_pindex = self.read_varint(stream, context=f"type[{index}].proto[{j}].pindex")
                 protos.append({"name": p_name, "findex": p_findex, "pindex": p_pindex})
@@ -602,6 +659,7 @@ class HLParser:
             bindings = []
             for j in range(nbindings):
                 b_field = self.read_varint(stream, context=f"type[{index}].binding[{j}].field")
+                self._validate_str_index(b_field, f"type[{index}].binding[{j}].field")
                 b_findex = self.read_varint(stream, context=f"type[{index}].binding[{j}].findex")
                 bindings.append({"field": b_field, "findex": b_findex})
             t["bindings"] = bindings
@@ -613,16 +671,19 @@ class HLParser:
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
+                self._validate_str_index(f_name, f"type[{index}].field[{j}].name")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
                 fields.append({"name": f_name, "type": f_type})
             t["fields"] = fields
 
         elif kind == K_ABSTRACT:
             name = self.read_varint(stream, context=f"type[{index}].name")
+            self._validate_str_index(name, f"type[{index}].name")
             t["name"] = name
 
         elif kind == K_ENUM:
             name = self.read_varint(stream, context=f"type[{index}].name")
+            self._validate_str_index(name, f"type[{index}].name")
             global_idx = self.read_varint(stream, context=f"type[{index}].global")
             nconstructs = self.read_varint(stream, context=f"type[{index}].nconstructs")
             t["name"] = name
@@ -631,6 +692,7 @@ class HLParser:
             constructs = []
             for j in range(nconstructs):
                 c_name = self.read_varint(stream, context=f"type[{index}].construct[{j}].name")
+                self._validate_str_index(c_name, f"type[{index}].construct[{j}].name")
                 c_nparams = self.read_varint(stream, context=f"type[{index}].construct[{j}].nparams")
                 params = []
                 for k in range(c_nparams):
@@ -685,7 +747,9 @@ class HLParser:
         self.natives = []
         for i in range(self.nnatives):
             lib = self.read_varint(stream, context=f"native[{i}].lib")
+            self._validate_str_index(lib, f"native[{i}].lib")
             name = self.read_varint(stream, context=f"native[{i}].name")
+            self._validate_str_index(name, f"native[{i}].name")
             type_idx = self.read_varint(stream, context=f"native[{i}].type")
             findex = self.read_varint(stream, context=f"native[{i}].findex")
             self.natives.append({
@@ -950,6 +1014,10 @@ class HLParser:
             func_flags = []
             malformed = False
 
+            # Parser hardening: absolute upper bounds for nregs and nops
+            _MAX_SANE_NREGS = 500
+            _MAX_SANE_NOPS = 100000
+
             if nops < 0:
                 func_flags.append(f"negative nops={nops}, clamped to 0")
                 nops = 0
@@ -959,13 +1027,23 @@ class HLParser:
                 nregs = 0
                 malformed = True
 
-            # Bound nregs by available data (each regtype ≥ 1 byte)
+            # Bound nregs by available data (each regtype >= 1 byte)
             remaining_before_reg = self._remaining_bytes(stream)
             max_sane_nregs = remaining_before_reg  # absolute max
-            if nregs > max_sane_nregs:
+            if nregs > _MAX_SANE_NREGS:
+                func_flags.append(f"nregs={nregs} exceeds sanity limit ({_MAX_SANE_NREGS}), clamped")
+                nregs = _MAX_SANE_NREGS
+                malformed = True
+            elif nregs > max_sane_nregs:
                 func_flags.append(f"nregs={nregs} exceeds remaining ({remaining_before_reg}), "
                                   f"capped to {max_sane_nregs}")
                 nregs = max_sane_nregs
+                malformed = True
+
+            # Bound nops by sanity limit (catch stream misalignment)
+            if nops > _MAX_SANE_NOPS:
+                func_flags.append(f"nops={nops} exceeds sanity limit ({_MAX_SANE_NOPS}), clamped")
+                nops = _MAX_SANE_NOPS
                 malformed = True
 
             if malformed:
@@ -1191,7 +1269,15 @@ class HLParser:
         if not self.functions:
             return
 
-        # Build a map: findex → function index (within self.functions array)
+        def _resolve_str(idx):
+            """Resolve string pool index to actual string, or str of idx."""
+            if idx is None or not isinstance(idx, int):
+                return idx
+            if 0 <= idx < len(self.strings):
+                return self.strings[idx]
+            return str(idx)
+
+        # Build a map: findex -> function index (within self.functions array)
         findex_to_idx = {}
         for i, f in enumerate(self.functions):
             findex_to_idx[f["findex"]] = i
@@ -1201,28 +1287,28 @@ class HLParser:
             kind = t.get("kind")
             if kind not in (K_OBJ, K_STRUCT):
                 continue
-            # Protos: class methods
+            # Protos: methods
             for proto in t.get("protos", []):
                 p_findex = proto.get("findex")
                 if p_findex in findex_to_idx:
                     fn_idx = findex_to_idx[p_findex]
-                    self.functions[fn_idx]["name"] = proto.get("name")
+                    self.functions[fn_idx]["name"] = _resolve_str(proto.get("name"))
                     self.functions[fn_idx]["parent_type"] = t_idx
                     self._log("FUNC", f"  Resolved proto: findex={p_findex} "
-                                      f"→ func[{fn_idx}] name={proto.get('name')} "
+                                      f"\u2192 func[{fn_idx}] name={proto.get('name')} "
                                       f"type[{t_idx}]", level=DEBUG)
-            # Bindings: static methods/properties
+            # Bindings: static methods
             for binding in t.get("bindings", []):
                 b_findex = binding.get("findex")
                 if b_findex in findex_to_idx:
                     fn_idx = findex_to_idx[b_findex]
-                    field_name = binding.get("field")
+                    raw_field = binding.get("field")
                     if self.functions[fn_idx]["name"] is None:
-                        self.functions[fn_idx]["name"] = field_name
+                        self.functions[fn_idx]["name"] = _resolve_str(raw_field)
                     if self.functions[fn_idx]["parent_type"] is None:
                         self.functions[fn_idx]["parent_type"] = t_idx
                     self._log("FUNC", f"  Resolved binding: findex={b_findex} "
-                                      f"→ func[{fn_idx}] name={field_name} "
+                                      f"> func[{fn_idx}] name={raw_field} "
                                       f"type[{t_idx}]", level=DEBUG)
 
         # Special: resolve natives by findex too
@@ -1309,6 +1395,11 @@ class HLParser:
                     self.parse_constants(stream, progress_callback)
                 except HLParserError as e:
                     self._warn("CONST", f"Constants parsing failed (function pool may be incomplete): {e}")
+            # Post-parse validation
+            val = ParseValidator(self)
+            val_warnings = val.validate()
+            for w in val_warnings:
+                self._warn(w["tag"], w["message"])
             if progress_callback:
                 progress_callback("Parsing completed.", 100)
             return
@@ -1328,5 +1419,10 @@ class HLParser:
                     self.parse_constants(buf, progress_callback)
                 except HLParserError as e:
                     self._warn("CONST", f"Constants parsing failed (function pool may be incomplete): {e}")
+                # Post-parse validation
+                val = ParseValidator(self)
+                val_warnings = val.validate()
+                for w in val_warnings:
+                    self._warn(w["tag"], w["message"])
             if progress_callback:
                 progress_callback("Parsing completed.", 100)

@@ -129,7 +129,7 @@ mhlbc/
 ├── tests/
 │   ├── hl_helper.py               # Bytecode builder: primitives → .hl blobs
 │   ├── test_varint.py             # VarInt encode/decode + edge cases
-│   ├── test_parser.py             # Full pipeline tests (173 tests)
+│   ├── test_parser.py             # Full pipeline tests (317+ tests)
 │   ├── test_logger.py             # Logger write/flush/close behavior
 │   ├── test_disasm.py             # Opcode decode, CFG builder, CLI disasm (43 tests)
 │   └── test_decompile.py          # Decompilation engine: IR, Haxe writer (54 tests)

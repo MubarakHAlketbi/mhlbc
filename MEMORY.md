@@ -303,3 +303,18 @@
   - AGENTS.md: P32 (nargs), P33 (string lens), P34 (debug format) added; P26/P27 updated
   - README.md, CONTRIBUTING.md: Test counts updated (286 → 317)
   - MEMORY.md: This session
+
+## Session 17 — May 23, 2026 (continued — Parser Hardening)
+- **Parser Hardening Phase (checklist items B1-B5, G1-G2, Session 17 fix completed):**
+  - **B2:** Added type kind range validation — warns if kind > 22 (would catch Farever alignment)
+  - **B3/B4:** Added absolute nregs/nops sanity bounds (nregs < 500, nops < 100000) with clamping
+  - **B5:** Added `_validate_str_index()` — validates all string pool references in types, natives at parse time with WARN-level logging
+  - **B1:** Created `ParseValidator` class — post-parse validation checking native findex bounds, function findex bounds, and global type bounds. Integrated into `execute()`.
+  - **Session 17 fix completed:** Added `_resolve_str()` helper in `_resolve_function_names()` to convert string pool indices to actual strings. Updated test assertions.
+  - **G1/G2:** Fixed CONTRIBUTING.md and README.md test counts to 317
+  - **317 tests passing**, all real HLB fixtures verified
+- **Files changed:**
+  - hl_parser.py: Parser hardening (B1-B5), _resolve_str helper, ParseValidator class, kind validation, bounds checks, string index validation
+  - tests/test_parser.py: Updated function name resolution tests for string resolution
+  - README.md, CONTRIBUTING.md: Test count updates
+  - MEMORY.md: This session
