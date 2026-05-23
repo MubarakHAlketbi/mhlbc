@@ -1,5 +1,13 @@
 # Session Tracking
 
+## Session 21 — May 23, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 418 tests passing (pre-existing 4 fixture failures unrelated), Gates 1-5 complete.
+- Gate freeze still in effect; no development until Sato explicitly unfreezes.
+- report.md (742 lines, 14 sections) and checklist.md (48 items, 42/48 done) reviewed.
+- **Remaining checklist items (6):** H2 (g6.0 tag), H4 (process rules), I3-I6 (Windows/Farever).
+
 ## Session 20 — May 23, 2026
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

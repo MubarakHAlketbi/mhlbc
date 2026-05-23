@@ -81,7 +81,7 @@ The GUI provides 7 tabs:
 ## Running Tests
 
 ```bash
-# Run all 369 tests
+# Run all 422 tests
 pytest
 
 # Verbose output
@@ -118,7 +118,7 @@ mhlbc/
   cli.py               # CLI entry point (no PyQt)
   app.py               # PyQt6 dark GUI
   docs/                # Knowledge base (7 spec documents)
-  tests/               # 369 tests across 6 test files
+  tests/               # 422 tests across 6 test files
   workspace/           # Real-world HLB targets (e.g. Farever)
 ```
 

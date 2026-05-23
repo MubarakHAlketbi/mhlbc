@@ -139,7 +139,7 @@ mhlbc/
 ├── tests/
 │   ├── hl_helper.py               # Bytecode builder: primitives → .hl blobs
 │   ├── test_varint.py             # VarInt encode/decode + edge cases
-│   ├── test_parser.py             # Full pipeline tests (317+ tests)
+│   ├── test_parser.py             # Full pipeline tests (422+ tests)
 │   ├── test_logger.py             # Logger write/flush/close behavior
 │   ├── test_disasm.py             # Opcode decode, CFG builder, CLI disasm (43 tests)
 │   └── test_decompile.py          # Decompilation engine: IR, Haxe writer (54 tests)
@@ -184,7 +184,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 418 tests covering all gates
+  - 422 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -274,7 +274,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 418 tests, compact output
+pytest                     # All 422 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword
@@ -294,14 +294,18 @@ Found in: verbose logs, SQLite DB `meta` table, GUI title bar, GUI status bar.
 
 ### Farever (Shiro Games / Heaps Engine)
 
-The parser works correctly on **standard HashLink bytecode** (compiled with stock Haxe 4.x). However, the game **Farever** (`hlboot.dat`, ~13 MB) uses a **custom HashLink runtime fork** (`libhl.dll` from Shiro Games' `shiroTools` project, built April 2026). This custom runtime may include non-standard type kinds or pool layouts not covered by the open-source HL spec.
+The parser works correctly on **standard HashLink bytecode** (compiled with stock Haxe 4.x). The game **Farever** (`hlboot.dat`, ~13 MB) uses a **custom HashLink runtime fork** (Shiro Games' `shiroTools`, built April 2026).
+
+**Ghidra analysis (Session 21):**
+- The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`
+- `hl_read_type` was decompiled and compared against open-source HL — **identical**. Same 10 switch cases, same error handling, same type kind values. **No extra type kinds exist.**
+- `libhl.dll` is the runtime only (allocators, debug, file I/O, objects, dynamic dispatch)
 
 **Current status on Farever:**
 - Header and pools parse correctly (types, globals, natives all valid kinds 0-24)
 - ~1% of function opcodes decode as unknown (stream boundary issue, not a parser bug)
 - Decompiler produces partial output (skeleton classes, some functions)
-
-This is **not a parser bug** — even the upstream `hlbc` Rust tool fails on Farever with "Invalid type kind" errors. Support for custom HL forks will be added as their formats are reverse-engineered (see Section I in `checklist.md`).
+- Re-analysis confirms the remaining issues are in **function pool layout** (not type system)
 
 ### Function Body Alignment
 

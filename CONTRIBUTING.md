@@ -44,7 +44,7 @@ hl_decompiler/
 └── tests/
     ├── hl_helper.py           # Test helpers: build bytecode programmatically
     ├── test_varint.py         # VarInt encoding/decoding tests
-    ├── test_parser.py         # Full pipeline tests (418+ tests)
+    ├── test_parser.py         # Full pipeline tests (422+ tests)
     ├── test_logger.py         # VerboseLogger write/flush/close tests
     ├── test_disasm.py         # Opcode decode, CFG builder, CLI disasm tests
     └── test_decompile.py      # Decompilation engine tests (Gate 5)
@@ -237,14 +237,14 @@ The initial workspace copy was transferred incorrectly (likely via text-mode cop
 producing a truncated file that caused false "corrupt binary" conclusions.
 Always verify with the Steam copy.
 
-**Function pool analysis (clean copy, updated Session 13):**
-- Header: v4, flags=1 (has_debug bit set), nfunctions=45365, ntypes=43844, nglobals=28399
-- **Debug info is corrupt**: The debug flag is set but the string table size decodes to 185MB (impossible in a 13MB file). The parser detects this, backtracks, and sets `has_debug = False`. This **7-byte offset** was the root cause of all earlier function pool corruption.
-- After the debug fix: **194 / 45365 functions parse** (190 valid, 4 malformed) — up from ~30 (Session 12) and ~14 (Session 8). The remaining 45,171 functions are unreachable because the 190 valid functions (many with nops > 10,000) consume all available buffer space.
-- The HL runtime (`hashlink/src/code.c`) would also fail to parse this binary (UINDEX rejects the negative nregs/nops values). The game runs via a custom/modified HL runtime.
-- The Farever target remains a robustness regression target, not a completeness benchmark. It validates that the parser handles corrupt debug info, negative VarInts, oversize nregs/nops, and EOF gracefully without crashing.
+**Function pool analysis (clean copy, updated Session 21):**
+|- Header: v4, flags=1 (has_debug bit set), nfunctions=45365, ntypes=43844, nglobals=28399
+|- **Debug info is corrupt**: The debug flag is set but the string table size decodes to 185MB (impossible in a 13MB file). The parser detects this, backtracks, and sets `has_debug = False`. This **7-byte offset** was the root cause of all earlier function pool corruption.
+|- After the debug fix: **194 / 45365 functions parse** (190 valid, 4 malformed). The remaining 45,171 functions are unreachable because the 190 valid functions (many with nops > 10,000) consume all available buffer space.
+|- **Ghidra analysis (Session 21):** The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`. Decompilation of `hl_read_type` confirmed it is **identical to open-source HL** — same type kinds, same switch cases, same error handling. **No format extensions exist in the type system.** The remaining parsing issues are in the function pool layout, not type kinds or VarInt encoding.
+|- The Farever target remains a robustness regression target, not a completeness benchmark. It validates that the parser handles corrupt debug info, negative VarInts, oversize nregs/nops, and EOF gracefully without crashing.
 
-**shiroTools runtime discovery (Session 14):** The Farever game's `libhl.dll` (471 KB, 431 exports) was built from `E:\Projects\shiroTools\hashlink\src\`, compiled April 9, 2026 with MSVC 14.29. This is a custom HashLink fork maintained by **Shiro Games** (the game's developer). The fork may use different VarInt encoding, extended type kinds, or a different pool layout than open-source HL. This explains why both our parser and the third-party `hlbc` tool (Gui-Yom/hlbc v0.5.0) fail to fully parse Farever's `hlboot.dat`.
+|**shiroTools runtime discovery (Session 14–21):** The Farever game's `libhl.dll` (471 KB, 431 exports) was built from `E:\\Projects\\shiroTools\\hashlink\\src\\`, compiled April 9, 2026 with MSVC 14.29. This is a custom HashLink fork maintained by **Shiro Games** (the game's developer). `libhl.dll` is the **runtime** (allocators, debug, objects, dispatch); the bytecode reader is in **`Farever.exe`** directly. Headless Ghidra analysis confirmed the type system matches open-source HL exactly — no extended type kinds, no different VarInt encoding. The function pool layout remains the open question.
 
 ---
 
@@ -455,14 +455,15 @@ git tag g4.0 -m "Gate 4 starts: opcode decoding, CFG visualizer"
 
 Rules:
 
-1. **Tag at Gate 0 only when the repository has no tags yet.** Once any `p*` or `g*` tag exists, the version scheme is active.
-2. **Always push tags when pushing commits:**
+1. **Validate output on real bytecode before tagging.** A Gate is not complete until the output has been manually verified on at least one real `.hlb` file — not just synthetic test fixtures. "N tests pass" does not mean the parser works on real game binaries. Check types produce valid kinds (0-22), functions have reasonable register/opcode counts, opcodes decode in range 0-102, and decompiled output resembles the original Haxe source.
+2. **Tag at Gate 0 only when the repository has no tags yet.** Once any `p*` or `g*` tag exists, the version scheme is active.
+3. **Always push tags when pushing commits:**
    ```bash
    git push --tags origin main
    ```
-3. **The `{build}` counter resets at each new gate tag.** `g4.0` starts at build 0.
-4. **`-dirty` alerts you that the working tree has uncommitted changes.** Only index dumps and DBs from clean working trees should be treated as reference baselines.
-5. **Do not delete or move gate tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`g3.1`) rather than moving `g3.0`. Legacy `p*` tags remain valid and are matched for backward compatibility.
+4. **The `{build}` counter resets at each new gate tag.** `g4.0` starts at build 0.
+5. **`-dirty` alerts you that the working tree has uncommitted changes.** Only index dumps and DBs from clean working trees should be treated as reference baselines.
+6. **Do not delete or move gate tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`g3.1`) rather than moving `g3.0`. Legacy `p*` tags remain valid and are matched for backward compatibility.
 
 #### Where versions appear
 

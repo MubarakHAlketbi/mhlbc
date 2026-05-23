@@ -288,3 +288,9 @@ If a production game runs on a binary, the data is valid. The parser's assumptio
 
 **P25 — Version tags: tag at gate milestones, push with `--tags`.**
 Format: `g{gate}.{build}` (e.g. `g4.0`). Legacy `p*` tags are backward-compatible. Never delete or move gate tags — create a sub-number instead.
+
+**P36 — Bytecode reader is in Farever.exe, not libhl.dll.**
+The shiroTools fork compiles `hl_code_read` and `hl_read_type` into the game EXE, not the runtime DLL. `libhl.dll` only contains runtime operations (allocators, debug registers, file I/O, dynamic dispatch, object fields). When searching for bytecode parser functions in a HashLink game, check both the EXE and the DLL.
+
+**P37 — Headless Ghidra (analyzeHeadless) enables automated binary analysis.**
+Available at `/home/mubarak/re_tools/ghidra_12.0.4_PUBLIC/support/analyzeHeadless`. Works with Java 25. Python (PyGhidra) is NOT available — scripts must be Java. Use `-postScript` to run scripts after analysis. Key workflow: import target → analyze → run Java Ghidra script → save decompiled output.

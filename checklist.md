@@ -101,19 +101,19 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 - [ ] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. `[report: Phase D5]`
 - [x] **H3** — Write "Getting Started" guide for external contributors. Created `docs/getting_started.md` — covers installation, CLI/GUI usage, test suite, project structure, pipeline overview, common tasks, scripting examples. `[report: Phase D6]`
 - [ ] **H4** — Do NOT proceed to Tiers 2-5 until Tier 1 is validated on 3+ standard HLB files. `[report: Rec 7, Risk R5]`
-- [ ] **H5** — Validate before tagging: don't mark Gate N complete until output is manually verified on at least one real HLB. "286 tests pass" does not equal "parser works on real games." `[report: Section 14, point 4]`
+- [x] **H5** — Validate before tagging: don't mark Gate N complete until output is manually verified on at least one real HLB. "418 tests pass" does not equal "parser works on real games." Rule added to CONTRIBUTING.md §10. `[report: Section 14, point 4]`
 
 ---
 
 ## I. Farever Resolution (Requires Windows Interactive)
 
-- [ ] **I1** — Ghidra analysis of shiroTools `libhl.dll`: find `hl_read_type` function and compare type kind handling against open-source HL. `[report: Section 4.3 #2c, Phase C1]`
-- [ ] **I2** — Compare shiroTools type kinds against open-source HL type kinds. Determine if extensions exist. `[report: Phase C4]`
+- [x] **I1** — Ghidra analysis of shiroTools `libhl.dll` + `Farever.exe`: found `hl_read_type` at FUN_140001430 in Farever.exe (not libhl.dll). Type kind handling matches open-source HL exactly. No extra type kinds or extensions. `[report: Section 4.3 #2c, Phase C1]`
+- [x] **I2** — Compare shiroTools type kinds against open-source HL type kinds. Determine if extensions exist. **No extensions found** — hl_read_type is identical to open-source HL. Same 10 case values, same error handling, no extra type kinds. Verified via headless Ghidra decompilation of Farever.exe FUN_140001430. `[report: Phase C4]`
 - [ ] **I3** — Mutation fuzzing: flip debug flag in hlboot.dat, test if game still runs. `[report: Section 4.3 #4, Phase C2]`
 - [ ] **I4** — Memory dump: extract `hl_code` struct from running Farever game process. `[report: Section 4.3 #3, Phase C3]`
 - [ ] **I5** — Frida hook: intercept `hl_read_type` and `hl_read_function` in running Farever to capture actual parsing behavior. `[report: Section 4.3 #6, Phase C4]`
 - [ ] **I6** — API Monitor: trace `libhl.dll` calls during Farever startup. `[report: Section 4.3 #7, Phase C5]`
-- [ ] **I7** — If shiroTools has format extensions: add custom type kind handler to parser. `[report: Phase C5]`
+- [x] **I7** — If shiroTools has format extensions: add custom type kind handler to parser. **MOOT** — I1/I2 proved no extensions exist. Standard HL type kind system works. `[report: Phase C5]`
 
 ---
 
@@ -126,8 +126,8 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 || C. Disassembler Hardening | 3 | P1 | **3/3** |
 || D. Decompiler Hardening | 5 | P1 | **5/5** |
 || E. Test Suite Gaps | 7 | P1-P2 | **7/7** |
-||| F. Architecture Improvements | 5 (9 sub) | P2 | **5/5** |
+|| F. Architecture Improvements | 5 (9 sub) | P2 | **5/5** |
 || G. Documentation Fixes | 5 | P2 | **5/5** |
 || H. CI/CD & Process | 5 | P2-P3 | **3/5** |
-|| I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
-||| **Total** | **48 items + sub-items** | | **38/48** |
+|| I. Farever Resolution | 7 | P1-P2 (Windows) | **4/7** |
+|| **Total** | **48 items + sub-items** | | **42/48** |
