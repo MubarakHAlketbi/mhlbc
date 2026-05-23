@@ -1074,29 +1074,37 @@ class HLParser:
             kind = t.kind
             if kind not in (K_OBJ, K_STRUCT):
                 continue
-            # Protos: methods
-            for proto in t.protos:
-                p_findex = proto.findex
-                if p_findex in findex_to_idx:
-                    fn_idx = findex_to_idx[p_findex]
-                    self.functions[fn_idx].name = _resolve_str(proto.name)
-                    self.functions[fn_idx].parent_type = t_idx
-                    self._log("FUNC", f"  Resolved proto: findex={p_findex} "
-                                      f"→ func[{fn_idx}] name={proto.name} "
-                                      f"type[{t_idx}]", level=DEBUG)
-            # Bindings: static methods
-            for binding in t.bindings:
-                b_findex = binding.findex
-                if b_findex in findex_to_idx:
-                    fn_idx = findex_to_idx[b_findex]
-                    raw_field = binding.field
-                    if self.functions[fn_idx].name is None:
-                        self.functions[fn_idx].name = _resolve_str(raw_field)
-                    if self.functions[fn_idx].parent_type is None:
+            type_name = _resolve_str(t.name)
+            is_guid_wrapper = bool(type_name and type_name.startswith('$'))
+
+            # Protos and bindings from $Class types (GUID wrappers) have
+            # overlapping findex entries from standard library methods that
+            # wrongly override real method names. Skip them entirely.
+            if not is_guid_wrapper:
+                for proto in t.protos:
+                    p_findex = proto.findex
+                    if p_findex in findex_to_idx:
+                        fn_idx = findex_to_idx[p_findex]
+                        self.functions[fn_idx].name = _resolve_str(proto.name)
                         self.functions[fn_idx].parent_type = t_idx
-                    self._log("FUNC", f"  Resolved binding: findex={b_findex} "
-                                      f"> func[{fn_idx}] name={raw_field} "
-                                      f"type[{t_idx}]", level=DEBUG)
+                        self._log("FUNC", f"  Resolved proto: findex={p_findex} "
+                                          f"→ func[{fn_idx}] name={proto.name} "
+                                          f"type[{t_idx}]", level=DEBUG)
+
+            # Bindings: static methods
+            if not is_guid_wrapper:
+                for binding in t.bindings:
+                    b_findex = binding.findex
+                    if b_findex in findex_to_idx:
+                        fn_idx = findex_to_idx[b_findex]
+                        raw_field = binding.field
+                        if self.functions[fn_idx].name is None:
+                            self.functions[fn_idx].name = _resolve_str(raw_field)
+                        if self.functions[fn_idx].parent_type is None:
+                            self.functions[fn_idx].parent_type = t_idx
+                        self._log("FUNC", f"  Resolved binding: findex={b_findex} "
+                                          f"> func[{fn_idx}] name={raw_field} "
+                                          f"type[{t_idx}]", level=DEBUG)
 
         # Special: resolve natives by findex too
         for nat in self.natives:

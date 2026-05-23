@@ -19,7 +19,7 @@ The original `hlbc` tool suite attempted this but carried design flaws that made
 
 ## Long-Term Vision
 
-The core decompiler (Gates 1–5) is the foundation. The full vision spans five tiers:
+The core decompiler (Gates 1–6) is the foundation. Tier 1 is the sole focus; Tiers 2–5 are frozen until Tier 1 is validated on 3+ standard HLB files.
 
 | Tier | Scope | Goal |
 |------|-------|------|
@@ -29,7 +29,7 @@ The core decompiler (Gates 1–5) is the foundation. The full vision spans five 
 | **Tier 4 — Engine Bindings** | `.hdll` native libraries | Reverse-engineer Heaps/Kha engine glue, understand native function interfaces |
 | **Tier 5 — Full Modding SDK** | Complete game directory | Integrated toolkit: bytecode editor + asset browser + engine hooking → rebuild modified game packages |
 
-Tiers 2–5 are exploratory. Each requires distinct skills (bytecode analysis, binary RE, asset format engineering, GPU shader decompilation) and will be scoped when Tier 1 is complete.
+Tiers 2–5 are frozen (see `checklist.md` H4). Tier 1 must be validated on 3+ standard HLB files before any Tier 2 work begins.
 
 ### What This Unlocks
 
@@ -213,16 +213,17 @@ mhlbc/
   - 54 tests covering all pipeline stages
   - CLI exit codes per CONTRIBUTING.md §11.4
 
-- [ ] **Gate 6: LLM-Enhanced Readability (Exploratory — shelved)**
-  - Post-decompilation annotation pass only — never reconstruction
-  - Every output line must trace back to deterministic bytecode
-  - Variable name suggestions for anonymous registers
-  - Doc-comment generation from usage patterns
-  - Idiomatic Haxe code formatting
-  - Disableable: core decompiler produces correct output without LLM
+- [x] **Gate 6: End-to-End Validation** ⬅ **CURRENT WORK**
+  - Validate decompiler output matches original Haxe source on 3+ real compiled programs
+  - Manual verification: parse → disassemble → decompile produces correct, readable output
+  - Tag `g6.0` when all gates produce verified correct output on standard HLB files
+  - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
+
+### Tiers 2–5 (Frozen per process rule — see `checklist.md` H4)
+
+These tiers are **not started** and will not be worked on until Tier 1 is validated on 3+ standard HLB files.
 
 ### Tier 2 — Bytecode Manipulation (Exploratory)
-
 - [ ] Binary patching: rewrite opcodes and constants in-place
 - [ ] Function injection: insert new functions into the bytecode pool
 - [ ] String replacement: swap string pool entries for translation patches
@@ -230,7 +231,6 @@ mhlbc/
 - [ ] Checksum/fixup handling for modified binaries
 
 ### Tier 3 — Asset Pipeline (Exploratory)
-
 - [ ] Heaps PAK format parser (`res.pak`, `res.*.pak`)
 - [ ] Texture extraction/conversion (DDS, KTX, PNG)
 - [ ] 3D model extraction (Heaps `h3d` format)
@@ -240,7 +240,6 @@ mhlbc/
 - [ ] Asset replacement: rebuild PAK with modified assets
 
 ### Tier 4 — Engine Bindings (Exploratory)
-
 - [ ] `.hdll` binary analysis (PE header, exports, imports)
 - [ ] Native function mapping: bind `.hdll` exports to HL native pool entries
 - [ ] Heaps engine API documentation from binary signatures
@@ -248,12 +247,15 @@ mhlbc/
 - [ ] Custom `libhl.dll` analysis for forked/modified runtimes
 
 ### Tier 5 — Full Modding SDK (Vision)
-
 - [ ] Integrated workspace: bytecode editor + asset browser + engine inspector
 - [ ] Project system: open a game directory, see all moddable layers
 - [ ] Patch compiler: human-readable mod scripts → binary `.hl` diffs
 - [ ] Mod packager: bundle patches + assets → distributable mod
 - [ ] Regression testing: verify modded game still parses and runs
+
+---
+
+**Footnote — LLM-Enhanced Readability:** Originally proposed as Gate 6 in early project discussions, LLM-based annotation (variable name suggestions, doc-comment generation, formatting) is explicitly **out of scope**. The decompiler must produce correct, readable output deterministically. LLM post-processing would add no tangible value and introduces hallucination risk for no benefit.
 
 ---
 
