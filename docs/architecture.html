@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>mhlbc — Architecture Diagram</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #020617; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 40px 20px; }
+.diagram-container { max-width: 1200px; width: 100%; background: #0f172a; border: 1px solid #1e293b; border-radius: 16px; padding: 40px; }
+.header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+.pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(34,211,238,0.4)} 50%{opacity:0.6;box-shadow:0 0 0 8px rgba(34,211,238,0)} }
+h1 { font-size: 24px; font-weight: 700; color: #f1f5f9; }
+h1 span { color: #64748b; font-weight: 400; }
+.subtitle { color: #94a3b8; font-size: 12px; margin-top: 4px; }
+svg { width: 100%; height: auto; display: block; }
+text { font-family: 'JetBrains Mono', monospace; }
+.card-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 24px; }
+.card { background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 16px; }
+.card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.card-dot { width: 8px; height: 8px; border-radius: 50%; }
+.card-dot.cyan { background: #22d3ee; }
+.card-dot.emerald { background: #34d399; }
+.card-dot.violet { background: #a78bfa; }
+.card-dot.amber { background: #fbbf24; }
+.card h3 { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+.card ul { list-style: none; }
+.card li { color: #94a3b8; font-size: 11px; line-height: 1.8; }
+.footer { display: flex; justify-content: space-between; margin-top: 24px; color: #475569; font-size: 10px; border-top: 1px solid #1e293b; padding-top: 16px; }
+</style>
+</head>
+<body>
+<div class="diagram-container">
+<div class="header">
+<div class="pulse-dot"></div>
+<div>
+<h1>mhlbc <span>| Architecture</span></h1>
+<div class="subtitle">Modern HashLink Bytecode Decompiler — Data Flow &amp; Component Map</div>
+</div>
+</div>
+
+<svg viewBox="0 0 1120 820" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+    <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+  </pattern>
+  <marker id="arrow-cyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#22d3ee"/>
+  </marker>
+  <marker id="arrow-emerald" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#34d399"/>
+  </marker>
+  <marker id="arrow-violet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#a78bfa"/>
+  </marker>
+  <marker id="arrow-slate" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M 0 0 L 10 5 L 0 10 Z" fill="#94a3b8"/>
+  </marker>
+  <filter id="glow">
+    <feGaussianBlur stdDeviation="2" result="blur"/>
+    <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+</defs>
+
+<!-- Grid background -->
+<rect width="1120" height="820" fill="url(#grid)" rx="8"/>
+
+<!-- ===== INPUT ===== -->
+<rect x="40" y="30" width="180" height="70" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5" rx="6"/>
+<text x="130" y="58" fill="#94a3b8" font-size="12" font-weight="600" text-anchor="middle">hlboot.dat</text>
+<text x="130" y="74" fill="#64748b" font-size="9" text-anchor="middle">HashLink Bytecode</text>
+<text x="130" y="86" fill="#64748b" font-size="8" text-anchor="middle">(.hlb / .hl)</text>
+
+<!-- Arrow: input -> parser -->
+<line x1="220" y1="65" x2="310" y2="65" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow-slate)"/>
+
+<!-- ===== PARSER LAYER ===== -->
+<rect x="320" y="20" width="480" height="130" fill="rgba(6,78,59,0.08)" stroke="#34d399" stroke-width="1" rx="12" stroke-dasharray="8,4"/>
+<text x="560" y="42" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle" opacity="0.8">hl_parser/ — Parser Package (headless)</text>
+
+<!-- Subcomponents -->
+<rect x="340" y="55" width="130" height="36" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="6"/>
+<text x="405" y="70" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle">_parser.py</text>
+<text x="405" y="82" fill="#6ee7b7" font-size="7" text-anchor="middle">HLParser class</text>
+
+<rect x="485" y="55" width="130" height="36" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="6"/>
+<text x="550" y="70" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle">_consts.py</text>
+<text x="550" y="82" fill="#6ee7b7" font-size="7" text-anchor="middle">K_* / OPCODE_NARGS</text>
+
+<rect x="630" y="55" width="150" height="36" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="6"/>
+<text x="705" y="70" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle">_varint.py / _version.py</text>
+<text x="705" y="82" fill="#6ee7b7" font-size="7" text-anchor="middle">VarInt decode / Version</text>
+
+<rect x="340" y="100" width="200" height="30" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="6"/>
+<text x="440" y="118" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle">_validator.py — ParseValidator</text>
+
+<rect x="560" y="100" width="220" height="30" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="6"/>
+<text x="670" y="118" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle">_exceptions.py — HLParserError</text>
+
+<!-- Arrow: parser -> parsed data -->
+<line x1="560" y1="150" x2="560" y2="200" stroke="#34d399" stroke-width="1.5" marker-end="url(#arrow-emerald)"/>
+<text x="575" y="178" fill="#6ee7b7" font-size="8">Parsed dicts</text>
+
+<!-- ===== PARSED DATA ===== -->
+<rect x="40" y="200" width="1040" height="120" fill="rgba(8,51,68,0.08)" stroke="#22d3ee" stroke-width="1" rx="12" stroke-dasharray="8,4"/>
+<text x="560" y="222" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle" opacity="0.8">Parsed Data Structures</text>
+
+<!-- Data boxes -->
+<rect x="60" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="115" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Header</text>
+<text x="115" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">version/flags/counts</text>
+
+<rect x="190" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="245" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Pools</text>
+<text x="245" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">ints/floats/strings</text>
+
+<rect x="320" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="375" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Types</text>
+<text x="375" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">24 kinds, Obj/Enum</text>
+
+<rect x="450" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="505" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Globals</text>
+<text x="505" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">type refs</text>
+
+<rect x="580" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="635" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Natives</text>
+<text x="635" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">lib/name/type/findex</text>
+
+<rect x="710" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="765" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Functions</text>
+<text x="765" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">nops/nregs/body</text>
+
+<rect x="840" y="235" width="110" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="895" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Constants</text>
+<text x="895" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">global init values</text>
+
+<rect x="970" y="235" width="90" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="1015" y="250" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle">Warnings</text>
+<text x="1015" y="262" fill="#67e8f9" font-size="7" text-anchor="middle">diagnostics</text>
+
+<text x="560" y="300" fill="#475569" font-size="8" text-anchor="middle">All parsed data is plain Python dicts → consumed by all downstream components</text>
+
+<!-- ===== CONSUMERS ===== -->
+<!-- CLI -->
+<rect x="60" y="340" width="220" height="80" fill="rgba(120,53,15,0.2)" stroke="#fbbf24" stroke-width="1.5" rx="8"/>
+<rect x="62" y="342" width="216" height="76" fill="rgba(120,53,15,0.15)" rx="6"/>
+<text x="170" y="370" fill="#fbbf24" font-size="12" font-weight="600" text-anchor="middle">cli.py — CLI Backbone</text>
+<text x="170" y="388" fill="#fde68a" font-size="9" text-anchor="middle">argparse · 6 subcommands</text>
+<text x="170" y="402" fill="#fde68a" font-size="8" text-anchor="middle">--json / --csv / --text</text>
+
+<!-- Arrow: parsed data -> CLI -->
+<line x1="280" y1="260" x2="280" y2="340" stroke="#fbbf24" stroke-width="1" marker-end="url(#arrow-amber)" stroke-dasharray="4,3" opacity="0.6"/>
+
+<!-- Disassembler -->
+<rect x="310" y="340" width="220" height="80" fill="rgba(76,29,149,0.3)" stroke="#a78bfa" stroke-width="1.5" rx="8"/>
+<rect x="312" y="342" width="216" height="76" fill="rgba(76,29,149,0.2)" rx="6"/>
+<text x="420" y="370" fill="#a78bfa" font-size="12" font-weight="600" text-anchor="middle">hl_disasm.py</text>
+<text x="420" y="388" fill="#ddd6fe" font-size="9" text-anchor="middle">OpcodeDecoder / CFGBuilder</text>
+<text x="420" y="402" fill="#ddd6fe" font-size="8" text-anchor="middle">103 opcodes · Register Tracking</text>
+
+<!-- Arrow: parsed data -> disasm -->
+<line x1="420" y1="260" x2="420" y2="340" stroke="#a78bfa" stroke-width="1" marker-end="url(#arrow-violet)" stroke-dasharray="4,3" opacity="0.6"/>
+
+<!-- Decompiler -->
+<rect x="560" y="340" width="250" height="80" fill="rgba(76,29,149,0.3)" stroke="#a78bfa" stroke-width="1.5" rx="8"/>
+<rect x="562" y="342" width="246" height="76" fill="rgba(76,29,149,0.2)" rx="6"/>
+<text x="685" y="370" fill="#a78bfa" font-size="12" font-weight="600" text-anchor="middle">hl_decompile.py</text>
+<text x="685" y="388" fill="#ddd6fe" font-size="9" text-anchor="middle">IR · AST · VarMapper</text>
+<text x="685" y="402" fill="#ddd6fe" font-size="8" text-anchor="middle">ControlStructurer · HaxeWriter</text>
+
+<!-- Arrow: disasm -> decompile (consumes instructions + CFG) -->
+<line x1="530" y1="380" x2="560" y2="380" stroke="#a78bfa" stroke-width="1" marker-end="url(#arrow-violet)"/>
+
+<!-- Logalyzer -->
+<rect x="840" y="340" width="220" height="80" fill="rgba(120,53,15,0.2)" stroke="#fbbf24" stroke-width="1.5" rx="8"/>
+<rect x="842" y="342" width="216" height="76" fill="rgba(120,53,15,0.15)" rx="6"/>
+<text x="950" y="370" fill="#fbbf24" font-size="12" font-weight="600" text-anchor="middle">logalyzer.py</text>
+<text x="950" y="388" fill="#fde68a" font-size="9" text-anchor="middle">SQLite-backed log analysis</text>
+<text x="950" y="402" fill="#fde68a" font-size="8" text-anchor="middle">index / query / errors / stats</text>
+
+<!-- Arrow: logger -> logalyzer -->
+<line x1="950" y1="320" x2="950" y2="340" stroke="#fbbf24" stroke-width="1" marker-end="url(#arrow-amber)" stroke-dasharray="4,3" opacity="0.6"/>
+
+<!-- ===== LOGGER ===== -->
+<rect x="840" y="275" width="220" height="40" fill="rgba(251,146,60,0.2)" stroke="#fb923c" stroke-width="1.5" rx="6"/>
+<text x="950" y="294" fill="#fb923c" font-size="10" font-weight="600" text-anchor="middle">hl_logger.py — VerboseLogger</text>
+<text x="950" y="307" fill="#fdba74" font-size="8" text-anchor="middle">5 levels · chunk rotation</text>
+
+<!-- Arrow: parser -> logger -->
+<line x1="800" y1="90" x2="950" y2="275" stroke="#fb923c" stroke-width="1" marker-end="url(#arrow-amber)" stroke-dasharray="4,3" opacity="0.4"/>
+
+<!-- ===== GUI LAYER ===== -->
+<rect x="60" y="460" width="1040" height="120" fill="rgba(8,51,68,0.08)" stroke="#22d3ee" stroke-width="1" rx="12" stroke-dasharray="8,4"/>
+<text x="560" y="482" fill="#22d3ee" font-size="10" font-weight="600" text-anchor="middle" opacity="0.8">app.py — Dark GUI (PyQt6)</text>
+
+<!-- GUI Tabs -->
+<rect x="80" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="137" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Overview</text>
+<text x="137" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">header + stats</text>
+
+<rect x="210" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="267" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Types</text>
+<text x="267" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">QListView + proxy</text>
+
+<rect x="340" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="397" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Globals</text>
+<text x="397" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">filter proxy</text>
+
+<rect x="470" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="527" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Natives</text>
+<text x="527" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">lib/name resolved</text>
+
+<rect x="600" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="657" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Functions</text>
+<text x="657" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">malformed filter</text>
+
+<rect x="730" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="787" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">CFG</text>
+<text x="787" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">function browser</text>
+
+<rect x="860" y="495" width="115" height="36" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="6"/>
+<text x="917" y="510" fill="#22d3ee" font-size="9" font-weight="600" text-anchor="middle">Decomp</text>
+<text x="917" y="522" fill="#67e8f9" font-size="7" text-anchor="middle">dark source view</text>
+
+<!-- Arrow: worker -> GUI -->
+<line x1="560" y1="420" x2="560" y2="460" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+<text x="575" y="445" fill="#67e8f9" font-size="8">hl_worker.py</text>
+<text x="575" y="455" fill="#475569" font-size="7">QThread + signals</text>
+
+<!-- ===== OUTPUT ===== -->
+<rect x="60" y="620" width="1040" height="70" fill="rgba(6,78,59,0.08)" stroke="#34d399" stroke-width="1" rx="12" stroke-dasharray="8,4"/>
+<text x="560" y="642" fill="#34d399" font-size="10" font-weight="600" text-anchor="middle" opacity="0.8">Output Formats</text>
+
+<rect x="80" y="655" width="150" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="155" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">Human-readable text</text>
+
+<rect x="250" y="655" width="120" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="310" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">JSON (--json)</text>
+
+<rect x="390" y="655" width="110" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="445" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">CSV (--csv)</text>
+
+<rect x="520" y="655" width="120" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="580" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">Haxe source</text>
+
+<rect x="660" y="655" width="120" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="720" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">Verbose logs</text>
+
+<rect x="800" y="655" width="120" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="860" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">SQLite DB</text>
+
+<rect x="940" y="655" width="140" height="24" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1" rx="6"/>
+<text x="1010" y="671" fill="#6ee7b7" font-size="8" text-anchor="middle">Disassembly / CFG</text>
+
+<!-- ===== LEGEND ===== -->
+<rect x="60" y="720" width="1040" height="70" fill="rgba(30,41,59,0.5)" stroke="#94a3b8" stroke-width="1" rx="8"/>
+<text x="100" y="742" fill="#94a3b8" font-size="10" font-weight="600">Legend</text>
+
+<rect x="100" y="752" width="12" height="12" fill="rgba(8,51,68,0.4)" stroke="#22d3ee" stroke-width="1.5" rx="2"/>
+<text x="118" y="762" fill="#94a3b8" font-size="9">Parser / Data</text>
+
+<rect x="200" y="752" width="12" height="12" fill="rgba(6,78,59,0.4)" stroke="#34d399" stroke-width="1.5" rx="2"/>
+<text x="218" y="762" fill="#94a3b8" font-size="9">CLI / Output</text>
+
+<rect x="300" y="752" width="12" height="12" fill="rgba(76,29,149,0.3)" stroke="#a78bfa" stroke-width="1.5" rx="2"/>
+<text x="318" y="762" fill="#94a3b8" font-size="9">Disasm / Decompile</text>
+
+<rect x="440" y="752" width="12" height="12" fill="rgba(120,53,15,0.2)" stroke="#fbbf24" stroke-width="1.5" rx="2"/>
+<text x="458" y="762" fill="#94a3b8" font-size="9">CLI Infrastructure</text>
+
+<rect x="580" y="752" width="12" height="12" fill="rgba(251,146,60,0.2)" stroke="#fb923c" stroke-width="1.5" rx="2"/>
+<text x="598" y="762" fill="#94a3b8" font-size="9">Logging</text>
+
+<line x1="700" y1="758" x2="730" y2="758" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+<text x="738" y="762" fill="#94a3b8" font-size="9">Data flow</text>
+
+<line x1="820" y1="758" x2="850" y2="758" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3" opacity="0.6"/>
+<text x="858" y="762" fill="#94a3b8" font-size="9">Optional flow</text>
+</svg>
+
+<div class="card-grid">
+<div class="card">
+<div class="card-header"><div class="card-dot cyan"></div><h3>Parser Package</h3></div>
+<ul>
+<li>• 6 modules in hl_parser/ (1,400+ lines)</li>
+<li>• VarInt decoder: 3 size classes, signed/unsigned</li>
+<li>• Post-parse validation via ParseValidator</li>
+<li>• Headless: zero UI dependencies</li>
+</ul>
+</div>
+<div class="card">
+<div class="card-header"><div class="card-dot emerald"></div><h3>CLI + GUI Parity</h3></div>
+<ul>
+<li>• Same parser powers both entry points</li>
+<li>• CLI: cli.py with 7 subcommands, 3 output formats</li>
+<li>• GUI: app.py with 7 tabs, dark theme, live filtering</li>
+<li>• Worker thread: QThread + pyqtSignal progress</li>
+</ul>
+</div>
+<div class="card">
+<div class="card-header"><div class="card-dot violet"></div><h3>Decompilation Pipeline</h3></div>
+<ul>
+<li>• hl_disasm.py: 103 opcodes decoded, CFG built</li>
+<li>• hl_decompile.py: IR expressions, AST, Haxe output</li>
+<li>• 369 tests across 6 test files</li>
+<li>• logalyzer.py: SQLite-backed log analysis</li>
+</ul>
+</div>
+</div>
+
+<div class="footer">
+<span>mhlbc / g5.7.2c19533-dirty</span>
+<span>Modern HashLink Bytecode Decompiler</span>
+<span>369 tests passing · 7,800+ LOC</span>
+</div>
+</div>
+</body>
+</html>

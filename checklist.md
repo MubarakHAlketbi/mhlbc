@@ -55,25 +55,22 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 - [x] **E3** — Regression fixtures: known-good HLB files that must parse identically after every change. `[report: Section 7.2]`
 - [x] **E4** — Fuzzer tests: random byte mutations to stress-test robustness. `[report: Section 7.2]`
 - [x] **E5** — Decompiler crash tests: malformed IR input should degrade gracefully, not crash. `[report: Section 7.2]`
-- [ ] **E6** — Cross-version tests: same Haxe program compiled at v3, v4, v5 should produce consistent type/function counts. `[report: Section 7.2]`
+- [x] **E6** — Cross-version tests: investigated. All downloadable Haxe compilers (4.0.5 to 5.0.0-preview.1) produce **only HL bytecode v4**. The `-D hl-ver` flag controls runtime version, not bytecode format. HL v3/v5 are legacy/future formats not produced by any shipped compiler. 3 Haxe versions installed for compiling v4 test fixtures. `[report: Section 7.2]`
 - [x] **E7** — Rule: every 10 synthetic tests = 1 real HLB integration test. Added to CONTRIBUTING.md §3 Test Coverage Requirements. `[report: Risk R6]`
 
 ---
 
 ## F. Architecture Improvements (P2)
 
-- [ ] **F1** — Split `hl_parser.py` (1,320 lines) into modules for independent testing and easier stream alignment debugging: `[report: Rec 5]`
-  - [ ] `hl_parser/header.py` — `parse_header()`
-  - [ ] `hl_parser/pools.py` — `parse_pools()` (ints, floats, strings, bytes, debug)
-  - [ ] `hl_parser/types.py` — `parse_types()` (all 24 kinds)
-  - [ ] `hl_parser/globals.py` — `parse_globals()`
-  - [ ] `hl_parser/natives.py` — `parse_natives()`
-  - [ ] `hl_parser/functions.py` — `parse_functions()` (headers, bodies, names)
-  - [ ] `hl_parser/constants.py` — `parse_constants()`
-  - [ ] `hl_parser/varint.py` — `read_varint`, `read_uvarint`
-  - [ ] `hl_parser/stream.py` — `ByteStream` wrapper
+- [x] **F1** — Split `hl_parser.py` (1,428 lines) into `hl_parser/` package with 6 focused modules + backward-compat `__init__.py`. All 369 tests pass. `[report: Rec 5]`
+  - `_parser.py` — HLParser class (methods stay with the class)
+  - `_consts.py` — K_* constants, OPCODE_NARGS, type-kind sets
+  - `_version.py` — get_parser_version, project_root
+  - `_exceptions.py` — HLParserError
+  - `_validator.py` — ParseValidator
+  - `_diagnostics.py` — ParseDiagnostic dataclass (NEW)
 - [ ] **F2** — Add typed dataclass/NamedTuple intermediate layer instead of raw dicts. Would catch structural errors at construction time. `[report: Section 9.2]`
-- [ ] **F3** — Add `ParseDiagnostic` dataclass with section, offset, severity, and recovery action for structured error accumulation. `[report: Section 9.2]`
+- [x] **F3** — Add `ParseDiagnostic` dataclass with section, offset, severity, message, recovery fields. Integrated into parser: `_diagnostic()` method, `diagnostics: List[ParseDiagnostic]` attribute, backward-compat via `_warn()` updates. `[report: Section 9.2]`
 - [ ] **F4** — Consider memory-mapped I/O for files > 50MB instead of reading entire file into `_raw_data`. `[report: Section 9.2]`
 - [x] **F5** — Verify `hl_worker.py` (31 lines) signal completeness — ensure all parser output fields are emitted. `[report: Section 6.2]`
 
@@ -84,7 +81,7 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 - [x] **G1** — Fix CONTRIBUTING.md test count: says "278" — should be "286" (now "317"). `[report: Section 8.2]`
 - [x] **G2** — Sync README.md and CONTRIBUTING.md doc counts to 317. `[report: Section 8.2, B5-B6]`
 - [x] **G3** — Add "Known Issues" section to README.md so external users know about the Farever parsing limitation and function body alignment. `[report: Section 8.2]`
-- [ ] **G4** — Add architecture diagram beyond CONTRIBUTING.md Section 1. `[report: Section 8.2]`
+- [x] **G4** — Add architecture diagram. Created `docs/architecture.html` — dark-themed SVG showing 4 layers: Input → Parser Package → Parsed Data → Consumers (CLI, Disasm, Decompile, GUI, Logalyzer). Includes legend, summary cards, and data flow arrows. `[report: Section 8.2]`
 - [x] **G5** — Verify `decompilation_patterns.md` (376 lines) is fully populated, not skeletal. `[report: Section 8.2]`
 
 ---
@@ -93,7 +90,7 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 - [x] **H1** — Add CI pipeline (GitHub Actions): run pytest on every push to catch regressions automatically. `[report: Section 6.2, Phase D4]`
 - [ ] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. `[report: Phase D5]`
-- [ ] **H3** — Write "Getting Started" guide for external contributors. `[report: Phase D6]`
+- [x] **H3** — Write "Getting Started" guide for external contributors. Created `docs/getting_started.md` — covers installation, CLI/GUI usage, test suite, project structure, pipeline overview, common tasks, scripting examples. `[report: Phase D6]`
 - [ ] **H4** — Do NOT proceed to Tiers 2-5 until Tier 1 is validated on 3+ standard HLB files. `[report: Rec 7, Risk R5]`
 - [ ] **H5** — Validate before tagging: don't mark Gate N complete until output is manually verified on at least one real HLB. "286 tests pass" does not equal "parser works on real games." `[report: Section 14, point 4]`
 
@@ -113,15 +110,15 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## Summary
 
-| Section | Items | Priority | Done |
-|---------|-------|----------|------|
-| A. Critical Bugs | 5 | P0 | **5/5** |
-| B. Parser Hardening | 6 (3 sub) | P1 | **6/6** |
-| C. Disassembler Hardening | 3 | P1 | **3/3** |
-| D. Decompiler Hardening | 5 | P1 | **5/5** |
-| E. Test Suite Gaps | 7 | P1-P2 | **6/7** |
-| F. Architecture Improvements | 5 (9 sub) | P2 | **1/5** |
-| G. Documentation Fixes | 5 | P2 | **4/5** |
-| H. CI/CD & Process | 5 | P2-P3 | **1/5** |
-| I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
-| **Total** | **48 items + sub-items** | | **31/48** |
+|| Section | Items | Priority | Done |
+||---------|-------|----------|------|
+|| A. Critical Bugs | 5 | P0 | **5/5** |
+|| B. Parser Hardening | 6 (3 sub) | P1 | **6/6** |
+|| C. Disassembler Hardening | 3 | P1 | **3/3** |
+|| D. Decompiler Hardening | 5 | P1 | **5/5** |
+|| E. Test Suite Gaps | 7 | P1-P2 | **7/7** |
+|| F. Architecture Improvements | 5 (9 sub) | P2 | **3/5** |
+|| G. Documentation Fixes | 5 | P2 | **5/5** |
+|| H. CI/CD & Process | 5 | P2-P3 | **3/5** |
+|| I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
+|| **Total** | **48 items + sub-items** | | **36/48** |

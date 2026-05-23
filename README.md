@@ -116,9 +116,19 @@ mhlbc/
 │   ├── version_deltas.md          # v3/v4/v5 structural differences
 │   ├── header_format.md           # Header field reference
 │   ├── varint_encoding.md         # VarInt bitwise encoding spec
-│   └── decompilation_patterns.md  # Bytecode → AST reconstruction patterns
+│   ├── decompilation_patterns.md  # Bytecode → AST reconstruction patterns
+│   ├── architecture.html          # Architecture diagram (HTML/SVG)
+│   └── getting_started.md         # Quick start guide for new users
 │
-├── hl_parser.py                   # Headless bytecode parser (pure logic)
+├── hl_parser/                     # Modular parser package (headless)
+│   ├── __init__.py                # Public API re-exports
+│   ├── _parser.py                 # HLParser class
+│   ├── _consts.py                 # Type constants, opcode table
+│   ├── _version.py                # Version string (git describe)
+│   ├── _varint.py                 # VarInt encode/decode
+│   ├── _validator.py              # Post-parse validation
+│   ├── _diagnostics.py            # ParseDiagnostic dataclass
+│   └── _exceptions.py             # HLParserError
 ├── hl_disasm.py                   # Disassembly engine: opcodes, CFG, jumps
 ├── hl_decompile.py                # Decompilation engine: IR, AST, Haxe output
 ├── hl_worker.py                   # QThread wrapper for background parsing

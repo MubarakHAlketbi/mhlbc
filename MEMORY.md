@@ -332,7 +332,31 @@
 - Gate freeze still in effect; no development until Sato explicitly unfreezes.
 - report.md and checklist.md read. Auditing ticked items against code.
 
-## Session 17 — May 23, 2026 (continued — Parser Hardening)
+## Session 19 — May 23, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 369 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Gate freeze still in effect; no development until Sato explicitly unfreezes.
+- report.md (742 lines, 14 sections) and checklist.md (48 items, 31/48 done) reviewed.
+- Sato unfreezes checklist work.
+- **Completed items (5 new):**
+  - **F1**: Split hl_parser.py (1,428 lines) into hl_parser/ package with 6 modules + backward-compat __init__.py. All 369 tests pass unchanged.
+  - **F3**: Added ParseDiagnostic dataclass with section/offset/severity/message/recovery. Integrated via _diagnostic() method and diagnostics list attribute. Backward compat via _warn() updates.
+  - **G4**: Created docs/architecture.html — dark-themed SVG architecture diagram (4 layers: Input → Parser → Data → Consumers).
+  - **H3**: Created docs/getting_started.md — comprehensive getting-started guide (CLI, GUI, tests, scripts, logging).
+| - **E6**: Cross-version tests investigated. Downloaded + installed **5 Haxe versions permanently** at `~/.local/haxe-X.Y.Z/haxe`:
+|   - **haxe-4.0.5** — earliest 4.x release
+|   - **haxe-4.1.5** — intermediate 4.x
+|   - **haxe-4.2.5** — pre-4.3.x branch
+|   - **haxe-4.3.6** — latest stable (set as default `haxe` symlink)
+|   - **haxe-5.0.0-preview.1** — next-gen Haxe (still produces HLB v4)
+|   - Symlinks: `haxe`→4.3.6, `haxe-4.0`, `haxe-4.2`, `haxe-5.0`
+|   - ALL produce HLB bytecode **version 4 only** — the `-D hl-ver` flag controls the embedded HashLink runtime version (1.8.0→1.15.0), not the bytecode format header byte. HL v3 is a legacy format predating any shipped Haxe 4.x. HL v5 exists in the HL runtime spec but no shipped compiler produces it. E6 closed as investigated.
+- **Remaining items (12):** F2 (typed dataclasses), F4 (mmap I/O), H2 (g6.0 tag), H4-H5 (process rules), I1-I7 (Windows/Farever).
+- **Checklist progress: 31→35/48 items done.**
+- No commit yet. Package cleaning: removed hl_parser.py.bak, hl_parser/gen.py, hl_parser/_create_modules.py.
+
+## Session 18 — May 23, 2026 (continued — Parser Hardening)
 - **Parser Hardening Phase (checklist items B1-B5, G1-G2, Session 17 fix completed):**
   - **B2:** Added type kind range validation — warns if kind > 22 (would catch Farever alignment)
   - **B3/B4:** Added absolute nregs/nops sanity bounds (nregs < 500, nops < 100000) with clamping

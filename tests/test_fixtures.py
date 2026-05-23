@@ -32,6 +32,26 @@ FIXTURE_META = {
         "ntypes": 434, "nglobals": 101, "nnatives": 54,
         "nfunctions": 339, "nconstants": 50, "entrypoint": 392,
     },
+    "Main.hl": {
+        "version": 4, "nints": 45, "nfloats": 1, "nstrings": 375,
+        "ntypes": 416, "nglobals": 92, "nnatives": 52,
+        "nfunctions": 333, "nconstants": 49, "entrypoint": 384,
+    },
+    "Shapes.hl": {
+        "version": 4, "nints": 46, "nfloats": 7, "nstrings": 397,
+        "ntypes": 432, "nglobals": 101, "nnatives": 53,
+        "nfunctions": 337, "nconstants": 50, "entrypoint": 389,
+    },
+    "Enums.hl": {
+        "version": 4, "nints": 50, "nfloats": 1, "nstrings": 381,
+        "ntypes": 418, "nglobals": 95, "nnatives": 53,
+        "nfunctions": 333, "nconstants": 50, "entrypoint": 385,
+    },
+    "Natives.hl": {
+        "version": 4, "nints": 47, "nfloats": 1, "nstrings": 387,
+        "ntypes": 424, "nglobals": 98, "nnatives": 54,
+        "nfunctions": 336, "nconstants": 53, "entrypoint": 389,
+    },
 }
 
 
@@ -192,7 +212,7 @@ def test_fixtures_present():
 # E2: Round-trip tests — compile Haxe → parse HLB → verify output
 # ============================================================================
 
-HAXE_BIN = "/tmp/haxe_20240807093059_760c0dd/haxe"
+HAXE_BIN = os.path.expanduser("~/.local/haxe-4.3.6/haxe")
 SRC_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "src")
 HL_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
 

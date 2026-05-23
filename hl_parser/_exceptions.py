@@ -1,0 +1,2 @@
+class HLParserError(Exception):
+    pass

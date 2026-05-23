@@ -1,3 +1,5 @@
+"""HLParser — main HashLink bytecode parser class."""
+
 import struct
 import io
 import os
@@ -5,234 +7,19 @@ import subprocess
 from typing import BinaryIO, List, Optional
 
 from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
-
-# === Version Identifier ===
-# Format: g{gate}.{build}.{commit}[-dirty]
-#   gate   = roadmap gate (1-6, from README), incremented when crossing milestones
-#   build  = number of commits since the latest {gate} tag (0 if exactly on tag)
-#   commit = short git hash for precise traceability
-#
-# Tag workflow:
-#   git tag g3.0        # Gate 3 starts
-#   git tag g4.0        # Gate 4 starts (resets build counter)
-# Tag format matters — parsed by get_parser_version().
-_PARSER_VERSION = None  # lazy-loaded
-
-_PROJECT_ROOT = None  # lazy-loaded
-
-def _project_root() -> str:
-    global _PROJECT_ROOT
-    if _PROJECT_ROOT is not None:
-        return _PROJECT_ROOT
-    # Walk up from the parser file to find .git
-    _PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
-    return _PROJECT_ROOT
-
-def get_parser_version() -> str:
-    """Return version string: p{phase}.{build}.{commit}[-dirty].
-
-    Falls back to 'p0.0.unknown' if git is unavailable.
-    """
-    global _PARSER_VERSION
-    if _PARSER_VERSION is not None:
-        return _PARSER_VERSION
-    try:
-        root = _project_root()
-        desc = subprocess.check_output(
-            ["git", "describe", "--tags", "--match", "p*", "--match", "g*", "--dirty", "--always"],
-            cwd=root,
-            stderr=subprocess.DEVNULL,
-            timeout=2,
-        ).decode("utf-8").strip()
-    except Exception:
-        _PARSER_VERSION = "g0.0.unknown"
-        return _PARSER_VERSION
-
-    # Parse git describe output:
-    #   "g4.0"                    → g4.0.0
-    #   "g4.0-3-gabc1234"        → g4.3.gabc1234
-    #   "g4.0-3-gabc1234-dirty"  → g4.3.gabc1234-dirty
-    #   "abc1234"                 → g0.0.abc1234  (no gate tag yet)
-    #   "abc1234-dirty"           → g0.0.abc1234-dirty
-    # Backward compat: legacy p* tags (p3.0) are also matched.
-
-    gate = "0"
-    build = "0"
-    commit = "0"
-    dirty_suffix = ""
-
-    parts = desc.split("-")
-    if len(parts) >= 2 and parts[1].isdigit():
-        # Has a commit count: e.g. ["g4.0", "3", "gabc1234[-dirty]"]
-        tag = parts[0]
-        build = parts[1]
-        rest = "-".join(parts[2:])  # e.g. "gabc1234" or "gabc1234-dirty"
-        # Extract gate number from tag prefix (p3 → 3, g4 → 4)
-        if len(tag) >= 2 and tag[0] in ("p", "g") and tag[1].isdigit():
-            gate = tag[1]
-        # Clean the commit suffix
-        if rest.endswith("-dirty"):
-            dirty_suffix = "-dirty"
-            commit = rest[:-6]
-        else:
-            commit = rest
-    else:
-        # No commit count: exactly on tag, or no gate tag at all
-        first = parts[0]
-        if len(first) >= 2 and first[0] in ("p", "g") and "." in first:
-            gate = first[1] if first[1].isdigit() else "0"
-            # Check for dirty via the full desc string, since split already consumed it
-            if desc.endswith("-dirty"):
-                dirty_suffix = "-dirty"
-            # build and commit stay "0" (exactly on tag)
-        else:
-            # Raw commit hash, no gate tag
-            commit = first.rstrip("-dirty")
-            if commit.startswith("g"):
-                commit = commit[1:]
-            if desc.endswith("-dirty"):
-                dirty_suffix = "-dirty"
-
-    if commit.startswith("g"):
-        commit = commit[1:]  # strip leading 'g' from git describe
-
-    _PARSER_VERSION = f"g{gate}.{build}.{commit}{dirty_suffix}"
-    return _PARSER_VERSION
-
-# === HashLink Type Kind Constants ===
-# From hashlink/src/hl.h hl_type_kind enum
-K_VOID     = 0
-K_UI8      = 1
-K_UI16     = 2
-K_I32      = 3
-K_I64      = 4
-K_F32      = 5
-K_F64      = 6
-K_BOOL     = 7
-K_BYTES    = 8
-K_DYN      = 9
-K_FUN      = 10
-K_OBJ      = 11
-K_ARRAY    = 12
-K_TYPE     = 13
-K_REF      = 14
-K_VIRTUAL  = 15
-K_DYNOBJ   = 16
-K_ABSTRACT = 17
-K_ENUM     = 18
-K_NULL     = 19
-K_METHOD   = 20
-K_STRUCT   = 21
-K_PACKED   = 22
-K_GUID     = 23
-K_HLAST    = 24  # Sentinel — marks end of hl_type_kind enum, not a real type
-                 # but appears in some real-world compiled bytecode
-
-# === Opcode Argument Count Table ===
-# Maps each opcode index (0-102) to its number of VarInt arguments.
-# From hashlink/src/code.c hl_op_nargs via X-macro formula:
-#   (_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))
-# -1 = variable-length (opcode-specific handler required)
-_OPCODE_NARGS = [
-     2,  2,  2,  2,  2,  2,  1,  3,  3,  3,
-     3,  3,  3,  3,  3,  3,  3,  3,  3,  3,
-     2,  2,  1,  1,  2,  3,  4,  5,  6, -1,
-    -1, -1, -1,  2,  3,  3,  2,  2,  3,  3,
-     2,  2,  3,  3,  2,  2,  2,  2,  3,  3,
-     3,  3,  3,  3,  3,  3,  3,  3,  1,  2,
-     2,  2,  2,  2,  2,  2,  0,  1,  1,  1,
-    -1,  1,  2,  1,  3,  3,  3,  3,  3,  3,
-     3,  3,  1,  2,  2,  2,  2,  2,  2,  2,
-    -1,  2,  2,  4,  3,  0,  2,  3,  0,  3,
-     3,  1,  0,
-]
-
-# Primitives that have no serialized data beyond the kind byte
-PRIMITIVE_KINDS = frozenset({
+from ._consts import (
     K_VOID, K_UI8, K_UI16, K_I32, K_I64, K_F32, K_F64,
-    K_BOOL, K_BYTES, K_DYN, K_ARRAY, K_TYPE, K_DYNOBJ, K_GUID, K_HLAST,
-})
-
-# Maximum known type kind value (inclusive) per HashLink spec.
-# Kinds beyond this threshold may appear in real-world bytecode from
-# newer or extended compiler versions — treat as primitives (no payload).
-MAX_VALID_TYPE_KIND = K_HLAST
-
-# Kinds that serialize as: kind byte + VarInt inner_type_index
-WRAPPER_KINDS = frozenset({K_REF, K_NULL, K_PACKED})
-
-# Kinds that serialize as: kind byte + args + return_type (function-like)
-FUN_LIKE_KINDS = frozenset({K_FUN, K_METHOD})
-
-# Human-readable names for kind numbers
-KIND_NAMES = {
-    K_VOID: "void", K_UI8: "ui8", K_UI16: "ui16",
-    K_I32: "i32", K_I64: "i64", K_F32: "f32", K_F64: "f64",
-    K_BOOL: "bool", K_BYTES: "bytes", K_DYN: "dyn",
-    K_FUN: "fun", K_OBJ: "obj", K_ARRAY: "array", K_TYPE: "type",
-    K_REF: "ref", K_VIRTUAL: "virtual", K_DYNOBJ: "dynobj",
-    K_ABSTRACT: "abstract", K_ENUM: "enum", K_NULL: "null",
-    K_METHOD: "method", K_STRUCT: "struct", K_PACKED: "packed",
-    K_GUID: "guid", K_HLAST: "hlast",
-}
-
-
-class HLParserError(Exception):
-    pass
-
-
-# Maximum bytes to scan forward when resyncing from a malformed function
-_RESYNC_MAX_SCAN = 65536  # 64KB should cover any realistic function preamble
-
-# Minimum function header bytes for a plausible function (4 VarInts, each 1 byte)
-_FUNC_HEADER_MIN_BYTES = 4
-
-# Maximum body size fraction of remaining file for a single function
-_FUNC_BODY_MAX_FRACTION = 0.5
-
-
-class ParseValidator:
-    """Post-parse validation pass checking consistency after HLParser.execute().
-
-    Runs sanity checks on parsed data and produces structured diagnostics
-    to catch stream alignment errors and format mismatches early.
-    """
-
-    def __init__(self, parser: 'HLParser'):
-        self.parser = parser
-        self.warnings: list[dict] = []
-
-    def _warn(self, msg: str) -> None:
-        self.warnings.append({"tag": "VALIDATE", "message": msg})
-
-    def validate(self) -> list[dict]:
-        """Run all checks and return list of warning dicts."""
-        self._check_native_findex_bounds()
-        self._check_function_findex_bounds()
-        self._check_globals_bounds()
-        return self.warnings
-
-    def _check_native_findex_bounds(self) -> None:
-        """Native findex must be non-negative."""
-        for i, n in enumerate(self.parser.natives or []):
-            fi = n.get("findex")
-            if fi is not None and fi < 0:
-                self._warn(f"native[{i}].findex={fi} is negative")
-
-    def _check_function_findex_bounds(self) -> None:
-        """Functions have combined namespace: natives[0..nnatives) + functions[nnatives..)."""
-        total = self.parser.nnatives + self.parser.nfunctions
-        for i, f in enumerate(self.parser.functions or []):
-            fi = f.get("findex")
-            if fi is not None and (fi < 0 or fi >= total):
-                self._warn(f"function[{i}].findex={fi} out of range [0, {total})")
-
-    def _check_globals_bounds(self) -> None:
-        """Global type indices must be in [0, ntypes)."""
-        for i, g in enumerate(self.parser.globals or []):
-            if g is not None and (g < 0 or g >= self.parser.ntypes):
-                self._warn(f"global[{i}].type={g} out of range [0, {self.parser.ntypes})")
-
+    K_BOOL, K_BYTES, K_DYN, K_FUN, K_OBJ, K_ARRAY, K_TYPE,
+    K_REF, K_VIRTUAL, K_DYNOBJ, K_ABSTRACT, K_ENUM, K_NULL,
+    K_METHOD, K_STRUCT, K_PACKED, K_GUID, K_HLAST,
+    KIND_NAMES, OPCODE_NARGS, PRIMITIVE_KINDS,
+    WRAPPER_KINDS, FUN_LIKE_KINDS, MAX_VALID_TYPE_KIND,
+    RESYNC_MAX_SCAN, FUNC_HEADER_MIN_BYTES, FUNC_BODY_MAX_FRACTION,
+)
+from ._exceptions import HLParserError
+from ._version import get_parser_version
+from ._validator import ParseValidator
+from ._diagnostics import ParseDiagnostic
 
 class HLParser:
     def __init__(self, filepath: str, logger: Optional[VerboseLogger] = None):
@@ -273,6 +60,9 @@ class HLParser:
         
         # Parse warnings collected during execution
         self.parse_warnings: List[dict] = []
+
+        # Structured diagnostics collected during execution
+        self.diagnostics: List[ParseDiagnostic] = []
 
         # Raw bytecode data (populated during execute() for disassembler access)
         self._raw_data: Optional[bytes] = None
@@ -352,10 +142,24 @@ class HLParser:
         except (io.UnsupportedOperation, OSError):
             return 2 ** 31  # unknown → effectively unlimited
 
+    def _diagnostic(self, section: str, message: str,
+                    severity: str = 'WARN', offset: int = -1,
+                    recovery: Optional[str] = None) -> None:
+        """Create a structured ParseDiagnostic and store it."""
+        diag = ParseDiagnostic(
+            section=section,
+            offset=offset,
+            severity=severity,
+            message=message,
+            recovery=recovery,
+        )
+        self.diagnostics.append(diag)
+
     def _warn(self, tag: str, msg: str):
         """Log a non-fatal warning and record it for downstream inspection."""
         self._log(tag, msg, level=WARN)
         self.parse_warnings.append({"tag": tag, "message": msg})
+        self._diagnostic(section=tag, message=msg, severity='WARN')
 
     def _validate_str_index(self, idx: int, field_desc: str) -> None:
         """Warn if a string pool index is out of bounds."""
@@ -785,8 +589,8 @@ class HLParser:
             if not b:
                 break
             op_idx = b[0]
-            if 0 <= op_idx < len(_OPCODE_NARGS):
-                nargs = _OPCODE_NARGS[op_idx]
+            if 0 <= op_idx < len(OPCODE_NARGS):
+                nargs = OPCODE_NARGS[op_idx]
             else:
                 self._log("OPCODE", f"opcode[{i}]: out-of-range idx={op_idx} — treating as 0-arg nop, stream at offset {stream.tell()}", level=TRACE)
                 nargs = 0
@@ -872,7 +676,7 @@ class HLParser:
         best_offset = None
         # Start from min_skip to avoid matching the current (corrupted) position
         start = min(min_skip, data_len)
-        for offset in range(start, data_len - _FUNC_HEADER_MIN_BYTES + 1):
+        for offset in range(start, data_len - FUNC_HEADER_MIN_BYTES + 1):
             buf = io.BytesIO(data[offset:])
             try:
                 # Read type_idx silently
@@ -995,7 +799,7 @@ class HLParser:
             func_start = stream.tell()
             
             # If we've drifted too far (past plausible end), resync
-            if self._remaining_bytes(stream) < _FUNC_HEADER_MIN_BYTES:
+            if self._remaining_bytes(stream) < FUNC_HEADER_MIN_BYTES:
                 self._warn("FUNC", f"Only {self._remaining_bytes(stream)} bytes remain, "
                                    f"stopping at func[{func_i}] ({len(self.functions)} parsed)")
                 break
@@ -1205,7 +1009,7 @@ class HLParser:
             remaining_after = self._remaining_bytes(stream)
 
             # ── Body size sanity check ──────────────────────────────────
-            max_sane_body = self._file_size * _FUNC_BODY_MAX_FRACTION if self._file_size else 2**30
+            max_sane_body = self._file_size * FUNC_BODY_MAX_FRACTION if self._file_size else 2**30
             if body_size > max_sane_body and not malformed:
                 self._warn("FUNC", f"func[{func_i}]: body_size={body_size} exceeds {max_sane_body} "
                                    f"(>50% of file), flagging")

@@ -20,10 +20,18 @@ hl_decompiler/
 │   ├── version_deltas.md      # HashLink bytecode version variations (v3, v4, v5+)
 │   ├── header_format.md       # Header field layout reference
 │   ├── varint_encoding.md     # Variable-length integer encoding spec
-│   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
-│
-├── hl_parser.py               # Pure logic, sequential, headless bytecode parser
-├── hl_disasm.py               # Disassembly engine (Gate 4)
+|   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
+|
+├── hl_parser/                   # Modular parser package (headless)
+|   ├── __init__.py              # Public API re-exports
+|   ├── _parser.py               # HLParser class
+|   ├── _consts.py               # Type constants, opcode table
+|   ├── _version.py              # Version string (git describe)
+|   ├── _varint.py               # VarInt encode/decode
+|   ├── _validator.py            # Post-parse validation
+|   ├── _diagnostics.py          # ParseDiagnostic dataclass
+|   └── _exceptions.py           # HLParserError
+├── hl_disasm.py                 # Disassembly engine (Gate 4)
 ├── hl_decompile.py            # Decompilation engine (Gate 5)
 ├── hl_worker.py               # PyQt QThread wrapper for background processing
 ├── hl_logger.py               # VerboseLogger for byte-level debug logging
