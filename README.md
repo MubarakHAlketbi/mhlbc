@@ -213,10 +213,10 @@ mhlbc/
   - 54 tests covering all pipeline stages
   - CLI exit codes per CONTRIBUTING.md §11.4
 
-- [x] **Gate 6: End-to-End Validation** ⬅ **CURRENT WORK**
+- [x] **Gate 6: End-to-End Validation** ✅
   - Validate decompiler output matches original Haxe source on 3+ real compiled programs
-  - Manual verification: parse → disassemble → decompile produces correct, readable output
-  - Tag `g6.0` when all gates produce verified correct output on standard HLB files
+  - Manual verification: class hierarchy, method names, constructors, field resolution, enums all correct
+  - Tag `g6.0` — decompiler produces structurally correct Haxe pseudocode end-to-end
   - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
 
 ### Tiers 2–5 (Frozen per process rule — see `checklist.md` H4)

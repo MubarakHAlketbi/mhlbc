@@ -664,6 +664,7 @@ class ExprBuilder:
         self.parser = parser
         self.disasm = disasm
         self.reg_names = reg_names
+        self._func_idx: int = -1  # set by build_body
         self._logger = logger
         self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
             lambda tag, msg, level=INFO: None)
@@ -671,6 +672,7 @@ class ExprBuilder:
     def build_body(self, instructions: List[Instruction],
                    func_idx: int) -> List[IRStmt]:
         """Build a flat list of IR statements from an instruction list."""
+        self._func_idx = func_idx
         stmts: List[IRStmt] = []
         func = self.parser.functions[func_idx] if func_idx < len(
             self.parser.functions) else None
@@ -714,6 +716,11 @@ class ExprBuilder:
             val = self._reg_var(args[0]) if args else IRConst("?")
             return IRStmt("switch", src=val,
                           comment=f"{len(instr.jump_cases or [])} cases")
+
+        if op == 71:  # ONullCheck — throw if null
+            val = self._reg_var(args[0]) if args else IRConst("?")
+            return IRStmt("comment",
+                          comment=f"nullcheck({val})")
 
         # --- Return ---
         if op == 67:  # ORet
@@ -798,12 +805,13 @@ class ExprBuilder:
         if op in (59, 60, 61, 62, 63, 64, 65):
             dst = self._reg_var(args[0])
             src = self._reg_var(args[1])
-            conv_names = {59: "toDyn", 60: "toSFloat", 61: "toUFloat",
-                          62: "toInt", 63: "safeCast", 64: "unsafeCast",
-                          65: "toVirtual"}
-            name = conv_names.get(op, "convert")
+            conv_names = {59: "_toDyn", 60: "_toSFloat", 61: "_toUFloat",
+                          62: "_toInt", 63: "_safeCast", 64: "_unsafeCast",
+                          65: "_toVirtual"}
+            # Use underscore-prefix to avoid collision with field access formatting
+            stripped = conv_names.get(op, "_convert").lstrip("_")
             return IRStmt("assign", dst=dst,
-                          src=IRExpr(name, [src]))
+                          src=IRExpr("call", [IRConst(stripped), src]))
 
         # --- Calls ---
         if op in (24, 25, 26, 27, 28):  # OCall0..OCall4
@@ -841,27 +849,27 @@ class ExprBuilder:
         if op == 38:  # OField
             dst = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2]) if len(args) >= 3 else f"f{args[2]}"
+            field = self._resolve_field_name(args[2], self._func_idx) if len(args) >= 3 else f"f{args[2]}"
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get", [obj, IRConst(field)]))
 
         if op == 39:  # OSetField
             src = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2]) if len(args) >= 3 else f"f{args[2]}"
+            field = self._resolve_field_name(args[2], self._func_idx) if len(args) >= 3 else f"f{args[2]}"
             return IRStmt("expr",
                           src=IRExpr("field_set", [obj, IRConst(field), src]))
 
         if op == 40:  # OGetThis
             dst = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1]) if len(args) >= 2 else f"f{args[1]}"
+            field_name = self._resolve_field_name(args[1], self._func_idx) if len(args) >= 2 else f"f{args[1]}"
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get",
                                      [IRVar("this"), IRConst(field_name)]))
 
         if op == 41:  # OSetThis
             src = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1]) if len(args) >= 2 else f"f{args[1]}"
+            field_name = self._resolve_field_name(args[1], self._func_idx) if len(args) >= 2 else f"f{args[1]}"
             return IRStmt("expr",
                           src=IRExpr("field_set",
                                      [IRVar("this"), IRConst(field_name), src]))
@@ -1101,13 +1109,28 @@ class ExprBuilder:
             pass
         return f"fun[{findex}]"
 
-    def _resolve_field_name(self, field_idx: int) -> str:
+    def _resolve_field_name(self, field_idx: int,
+                            func_idx: Optional[int] = None) -> str:
         """Resolve a field index to a name.
 
-        This is best-effort since we need the parent type context.
-        The full resolution happens in ControlStructurer/ClassBuilder.
-        Returns a placeholder if unresolved.
+        If func_idx is provided, tries to determine the parent class type
+        from the function's type signature and resolves field names
+        from that class's definition.
         """
+        if func_idx is not None and func_idx >= 0 and self.parser is not None and func_idx < len(self.parser.functions):
+            fn = self.parser.functions[func_idx]
+            ft = fn.type
+            if ft > 0 and ft < len(self.parser.types):
+                ftt = self.parser.types[ft]
+                if ftt.kind in (K_FUN, K_METHOD) and len(ftt.args) > 0:
+                    # First arg of FUN type is the 'this' type for methods
+                    this_type = ftt.args[0]
+                    if this_type > 0 and this_type < len(self.parser.types):
+                        this_t = self.parser.types[this_type]
+                        if this_t.kind in (K_OBJ, K_STRUCT) and field_idx < len(this_t.fields):
+                            f = this_t.fields[field_idx]
+                            if f.name is not None and f.name < len(self.parser.strings):
+                                return self.parser.strings[f.name]
         return f"f{field_idx}"
 
     def _arith_op(self, opcode: int) -> str:
@@ -1339,6 +1362,7 @@ class FunctionSigBuilder:
         func_type = func.type
         ret_type = K_VOID
         param_types: List[int] = []
+        ft_kind: Optional[int] = None
         has_this = False
 
         if func_type > 0 and func_type < len(self.parser.types):
@@ -1349,6 +1373,36 @@ class FunctionSigBuilder:
                 ret_type = ft.ret if ft.ret is not None else K_VOID
             if ft_kind == K_METHOD or is_method:
                 has_this = True
+
+        # Constructor detection: unnamed functions whose FUN type's first arg
+        # is a class type index are constructors (HL stores ctor outside protos)
+        if (func.name is None or func.name == "?") and not is_method:
+            if ft_kind == K_FUN and len(param_types) > 0:
+                first_arg = param_types[0]
+                if 0 < first_arg < len(self.parser.types):
+                    pt = self.parser.types[first_arg]
+                    pt_kind = pt.kind
+                    if pt_kind in (K_OBJ, K_STRUCT):
+                        pt_name_idx = pt.name
+                        if pt_name_idx is not None and pt_name_idx < len(self.parser.strings):
+                            parent_name = self.parser.strings[pt_name_idx]
+                            is_method = True
+                            has_this = True
+                            name = "new"
+                            # Skip first param ('this') for constructor params
+                            start_idx = 1
+                            params: List[Tuple[str, int]] = []
+                            for i in range(start_idx, len(param_types)):
+                                pname = f"p{i - start_idx}"
+                                params.append((pname, param_types[i]))
+                            return FunctionSig(
+                                name=name,
+                                params=params,
+                                ret_type=ret_type,
+                                is_method=is_method,
+                                parent_class=parent_name,
+                                has_this=has_this,
+                            )
 
         # Build parameter list
         # If method, first param is 'this' — skip it for the visible params
@@ -1484,6 +1538,14 @@ class ClassBuilder:
         for t_idx, t in enumerate(self.parser.types):
             kind = t.kind
             if kind == K_OBJ or kind == K_STRUCT:
+                # Skip $Class (GUID wrapper) types — they're metadata copies
+                # of class types with wrong binding names (HL internal strings).
+                name_idx = t.name if t.name is not None else -1
+                if name_idx >= 0 and name_idx < len(self.parser.strings):
+                    name = self.parser.strings[name_idx]
+                    # GUID wrappers have $ prefix on the last component
+                    if name.startswith("$") or ".$" in name:
+                        continue
                 cls = self._build_class(t_idx, t)
                 if cls is not None:
                     classes[cls.name] = cls
@@ -1549,6 +1611,43 @@ class ClassBuilder:
                 static_sig = self._sig_from_findex(b_findex)
                 if static_sig is not None:
                     static_methods.append(static_sig)
+
+        # Constructor detection: unnamed functions whose FUN type has this class
+        # as the first arg are constructors (HL stores constructors outside protos).
+        # Skip if the class already has a proto-named constructor.
+        has_new = any(m.name == "new" for m in methods)
+        if not has_new:
+            for i, fn in enumerate(self.parser.functions):
+                if fn.name and fn.name != "?":
+                    continue  # skip named functions
+                if fn.malformed or fn.nops <= 0:
+                    continue
+                ft = fn.type
+                if ft <= 0 or ft >= len(self.parser.types):
+                    continue
+                ftt = self.parser.types[ft]
+                if ftt.kind not in (K_FUN, K_METHOD):
+                    continue
+                # Constructor: first arg is the class type, returns Void
+                args_list = ftt.args
+                if args_list and args_list[0] == t_idx:
+                    ret = ftt.ret if ftt.ret is not None else K_VOID
+                    if ret == K_VOID:
+                        params = []
+                        start = 1  # skip 'this'
+                        for j in range(start, len(args_list)):
+                            params.append((f"p{j - start}", args_list[j]))
+                        ctor_sig = FunctionSig(
+                            name="new",
+                            params=params,
+                            ret_type=K_VOID,
+                            is_method=True,
+                            parent_class=name,
+                            has_this=True,
+                            func_index=i,
+                        )
+                        methods.append(ctor_sig)
+                        break  # one constructor per class
 
         return ClassDef(
             name=name,

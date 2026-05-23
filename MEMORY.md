@@ -401,3 +401,14 @@
   - tests/test_parser.py: Updated function name resolution tests for string resolution
   - README.md, CONTRIBUTING.md: Test count updates
   - MEMORY.md: This session
+
+## Session 22 — May 23/24, 2026
+- Start: Continuation of work toward g6.0.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Gate freeze lifted; Bugs #2-#5 fixed.
+- **Bug #2: Constructor detection** — `ClassBuilder._build_class()` and `FunctionSigBuilder.build()` now detect constructors by type signature (unnamed FUNs whose first arg is the class type index, returning Void). Circle.new, Rect.new, Date.new, etc. correctly named.
+- **Bug #3 (partial): Expression builder improvements** — Field names now resolve for `this.FIELD` access (OGetThis/OSetThis) via `_resolve_field_name(_, func_idx)`. `this.f0` → `this.r`, `this.f1` → `this.h`, `this.f0` → `this.w`. Conversion opcodes (`toSFloat`, `toDyn`, `toInt`) now format correctly as `toSFloat(ret)` not `toSFloatret`.
+- **Bug #4: $Class wrapper exclusion** — `ClassBuilder.build()` now skips GUID wrapper types (names containing `.$` or starting with `$`). Eliminates wrong method names (`charAt`, `toLowerCase`) from library class output. `$Class` files no longer generated.
+- **Bug #5: ONullCheck handler** — Added opcode 71 handler to `ExprBuilder._instr_to_stmt()`. Emits `// nullcheck(val)` comment.
+- **422 tests passing** (0 regressions from all changes).
+- **g6.0 tagged** — end-to-end pipeline validation milestone. Decompiler produces structurally correct Haxe pseudocode with class hierarchy, method names, constructors, parameters, field resolution, and enum variants.

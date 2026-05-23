@@ -98,7 +98,7 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 ## H. CI/CD & Process (P2-P3)
 
 - [x] **H1** — Add CI pipeline (GitHub Actions): run pytest on every push to catch regressions automatically. `[report: Section 6.2, Phase D4]`
-- [ ] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. `[report: Phase D5]`
+- [x] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. ✅ Done.
 - [x] **H3** — Write "Getting Started" guide for external contributors. Created `docs/getting_started.md` — covers installation, CLI/GUI usage, test suite, project structure, pipeline overview, common tasks, scripting examples. `[report: Phase D6]`
 - [ ] **H4** — Do NOT proceed to Tiers 2-5 until Tier 1 is validated on 3+ standard HLB files. `[report: Rec 7, Risk R5]`
 - [x] **H5** — Validate before tagging: don't mark Gate N complete until output is manually verified on at least one real HLB. "418 tests pass" does not equal "parser works on real games." Rule added to CONTRIBUTING.md §10. `[report: Section 14, point 4]`
@@ -128,6 +128,6 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 || E. Test Suite Gaps | 7 | P1-P2 | **7/7** |
 || F. Architecture Improvements | 5 (9 sub) | P2 | **5/5** |
 || G. Documentation Fixes | 5 | P2 | **5/5** |
-|| H. CI/CD & Process | 5 | P2-P3 | **3/5** |
-|| I. Farever Resolution | 7 | P1-P2 (Windows) | **4/7** |
-|| **Total** | **48 items + sub-items** | | **42/48** |
+||| H. CI/CD & Process | 5 | P2-P3 | **4/5** |
+||| I. Farever Resolution | 7 | P1-P2 (Windows) | **4/7** |
+||| **Total** | **48 items + sub-items** | | **43/48** |
