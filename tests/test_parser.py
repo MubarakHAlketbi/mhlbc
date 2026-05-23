@@ -281,16 +281,18 @@ class TestDebugFiles:
         p.nints = 0
         p.nfloats = 0
         p.nstrings = 0
-        # Pool stream: ints(0) + floats(0) + strings_header(0) + debug_files
-        # Debug format (hl_read_strings): ndebugfiles + 4-byte LE size + raw strings
+        # Pool stream: ints(0) + floats(0) + strings_header(0) + string_lens(0) + debug_files
+        # Debug format (hl_read_strings): ndebugfiles + 4-byte LE size + raw strings + lens
         pool = struct.pack("<i", 0)  # strings pool header (size=0)
+        # No string lens needed since nstrings=0
         pool += encode_varint(2)       # ndebugfiles = 2
-        # Build string table data
-        file1 = encode_varint(4) + b"file\x00"    # "file" (len 4 + null)
-        file2 = encode_varint(5) + b"debug\x00"   # "debug" (len 5 + null)
-        table_data = file1 + file2
+        # Build null-terminated string table data (no UINDEX length prefixes)
+        table_data = b"file\x00debug\x00"
         pool += struct.pack("<i", len(table_data))  # string table size
-        pool += table_data                          # raw string data
+        pool += table_data                           # raw string data
+        # Append UINDEX string length values per HL hl_read_strings format
+        pool += encode_varint(4)   # len("file")
+        pool += encode_varint(5)   # len("debug")
         p.parse_pools(stream_from_bytes(pool))
         assert p.debug_files == ["file", "debug"]
 
@@ -1270,11 +1272,9 @@ class TestFareverTarget:
         p = HLParser(self.FAREVER_PATH)
         p.execute(stream_from_bytes(farever_data))
         assert p.version == 4
-        # Farever has the debug flag bit set but debug string table is corrupt
-        # (185MB string table in a 13MB file) — parser detects and skips it
-        assert p.has_debug is False, "Parser should detect and skip corrupt debug info"
-        assert any("debug" in w["message"].lower() for w in p.parse_warnings), \
-            f"Expected debug-related warning, got: {p.parse_warnings}"
+        # Farever debug section is now valid after string lens fix
+        assert p.has_debug is True
+        assert len(p.debug_files) > 0, "Expected debug files to be found"
         assert p.nints == 1541
         assert p.nfloats == 1674
         assert p.nstrings == 65650
@@ -1283,4 +1283,3 @@ class TestFareverTarget:
         assert p.nnatives == 723
         assert p.nfunctions == 45365
         assert p.nconstants == 22124
-        assert len(p.parse_warnings) > 0

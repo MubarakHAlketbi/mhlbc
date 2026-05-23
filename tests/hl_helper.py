@@ -91,10 +91,15 @@ def build_floats_pool(values: list[float]) -> bytes:
 
 
 def build_strings_pool(strings: list[str]) -> bytes:
-    """Build strings pool: size header + null-terminated UTF-8 strings."""
+    """Build strings pool: size header + null-terminated UTF-8 strings + UINDEX length values.
+
+    Per HL hl_read_strings (hashlink/src/code.c), after the string data block
+    there are nstrings UINDEX values encoding the byte length of each string."""
     raw = b"\x00".join(s.encode("utf-8") for s in strings) + b"\x00"
     header = struct.pack("<i", len(raw))
-    return header + raw
+    # Append UINDEX string length values per HL format
+    lens = b"".join(encode_varint(len(s.encode("utf-8"))) for s in strings)
+    return header + raw + lens
 
 
 def build_bytes_pool(data: bytes, offsets: list[int]) -> bytes:
@@ -169,10 +174,9 @@ def build_minimal_bytecode(
         pools += build_bytes_pool(bytes_data[0], bytes_data[1])
     
     # Debug files section (if has_debug) — hl_read_strings format
-    # ndebugfiles VarInt + 4-byte LE string table size + raw string data
+    # ndebugfiles VarInt; if > 0, then table_size + raw data + lens
     if has_debug:
-        pools += encode_varint(0)  # ndebugfiles = 0
-        pools += struct.pack("<i", 0)  # empty string table size
+        pools += encode_varint(0)  # ndebugfiles = 0 (no debug files)
     
     # Types section
     if types:
@@ -237,9 +241,14 @@ def build_type_wrapper(kind: int, inner_type_idx: int) -> bytes:
 
 
 def build_type_funlike(kind: int, arg_type_indices: list[int], ret_type_idx: int) -> bytes:
-    """Build a function-like type (FUN, METHOD): kind + arg_count + args + ret."""
+    """Build a function-like type (FUN, METHOD): kind + arg_count(byte) + args + ret.
+
+    Per HL reference (hashlink/src/code.c hl_read_type):
+    nargs is a single byte (READ/hl_read_b), NOT a VarInt."""
     data = bytes([kind])
-    data += encode_varint(len(arg_type_indices))
+    if len(arg_type_indices) > 255:
+        raise ValueError(f"nargs={len(arg_type_indices)} exceeds byte range [0, 255]")
+    data += bytes([len(arg_type_indices)])  # single byte per HL reference
     for a in arg_type_indices:
         data += encode_varint(a)
     data += encode_varint(ret_type_idx)

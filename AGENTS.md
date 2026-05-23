@@ -187,13 +187,19 @@ The project previously assumed pool counts could be signed. Verified against HL 
 **P13 — HLB files transferred via text mode (e.g. git, pipe) are truncated at 0x1A bytes.**
 Binary mode transfer preserves the full file. Always verify with `md5sum` against the Steam origin.
 
-**P26 — Debug file section uses hl_read_strings format, not VarInt indices.**
-The debug file section stores source file names as a complete string table (4-byte LE size + raw bytes with VarInt-length-prefixed strings). Our parser previously read `ndebugfiles` VarInts as string pool indices — this caused a 7-byte stream offset that cascaded through all downstream parsing (types, globals, natives, functions).
-*Fix: Read `ndebugfiles` VarInt, then 4-byte LE size, then `size` raw bytes with VarInt-prefixed strings.*
-
+|**P26 — Debug file section uses hl_read_strings format, NOT VarInt indices.**
+|The debug file section stores source file names in the same format as the main string pool:
+|INT32 table_size + null-terminated strings (same as main string pool) + ndebugfiles UINDEX
+|length values AFTER the data block.
+|*Fix: Read `ndebugfiles` VarInt, then 4-byte LE size, then `size` bytes of null-terminated
+|strings, then `ndebugfiles` UINDEX length values from the stream.*|
+||
 |**P27 — Debug string table size must be sanity-checked against remaining stream data.**
-|Some production binaries (Farever) have the debug flag set but store a corrupt string table size. Read the 4-byte size and compare against `_remaining_bytes(stream)`. If `table_size < 0` or `table_size > remaining`, backtrack to before `ndebugfiles` and set `has_debug = False`.
-|*This fixes the "7-byte offset" bug — the most impactful single fix ever made to this parser (194 vs 14 functions parsed).*
+|With the string lens fix (P33), the debug section position is now correct and
+|should not be corrupt for standard HLB files. The sanity check on table_size
+|is still needed for edge cases.
+|*Avoid: The old backtrack logic (Session 13) was a workaround for misaligned stream
+|position caused by missing string lens reads. With P33 fixed, debug is now valid.*|
 |
 |**P28 — Obj proto format is 3 VarInts: name, findex, pindex — NOT name, type, findex.**
 |Confirmed against both the HL source (`hl_read_type` in `hashlink/src/code.c`) and the hlbc Rust implementation (`ObjProto { name, findex, pindex }`). The "type" field of a method is obtained via `findex → Function.t`, not stored inline in the proto. Parsing protos as (name, type, findex) where type is a full recursive type consumes too many bytes, misaligning all subsequent Obj types.
@@ -210,6 +216,25 @@ The debug file section stores source file names as a complete string table (4-by
 |**P31 — Shiro Games (Farever developer) maintains a custom HL runtime fork.**
 |The Farever game's `libhl.dll` is built from `E:\Projects\shiroTools\hashlink\src\`. Built April 9, 2026 with MSVC 14.29. String evidence shows `shiroTools` is Shiro Games' internal HL fork. The runtime's behavior (VarInt encoding, type kinds, debug handling) may differ from open-source HL.
 |*Avoid: When analysis suggests the binary format differs from open-source HL, the shiroTools fork may be the source of the difference — not parser bugs.*
+
+**P32 — FUN/METHOD nargs is a single byte, not a VarInt.**
+Confirmed against `hashlink/src/code.c` `hl_read_type`: `nargs = READ()` (single byte), NOT `INDEX()` (VarInt). For nargs values < 128 the byte encoding is the same, but for function types with >= 128 arguments the VarInt would consume an extra byte and desync the stream.
+*Fix: Read `stream.read(1)[0]`, not `read_varint()`. The test helper builder must use `bytes([len]`) not `encode_varint(len)`.
+
+**P33 — String pool has nstrings UINDEX length values AFTER the string data block.**
+Per HashLink reference `hl_read_strings` in `hashlink/src/code.c`, after the raw string data (null-terminated strings), there are `nstrings` UINDEX values encoding the byte length of each string. Our parser did not read these, causing the stream to be misaligned by `nstrings` bytes (typically ~374 bytes for small programs, ~65K for Farever). This was THE root cause of the 7-byte-offset bug and all type pool corruption.
+*Fix: Add `for i in range(nstrings): read_varint(stream)` after reading the string data block.*
+
+**P34 — Debug file section uses the SAME hl_read_strings format as the main string pool.**
+In Haxe 4.3.6 (v4 bytecode), the section order is: header → ints → floats → strings (with lens) → debug files → types → globals → natives → functions → constants. The debug files section format:
+```
+UINDEX ndebugfiles
+if ndebugfiles > 0:
+    INT32 table_size
+    BYTES table_size bytes of null-terminated strings
+    ndebugfiles × UINDEX string length values
+```
+*Fix: Read debug files between strings and types, not before strings. The old "corrupt debug" detection was a side-effect of the missing string lens (P33).*
 
 ### 3.2 Debugging & Log Analysis
 

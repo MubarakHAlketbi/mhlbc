@@ -242,4 +242,64 @@
 - **Key — Proto format confirmed:** Obj protos are 3 VarInts (name, findex, pindex), NOT (name, type, findex). Proto type fix attempted and reverted.
 - **Unresolved:** Function pool still misaligned on standard HLB (reads ASCII text as opcodes). Type pool under-consumption suspected. Debug section format mismatch between hl_read_strings format and actual bytes.
 - **Pitfalls added to AGENTS.md:** P28 (proto format), P29 (hlbc fares vs Farever), P30 (flags=1 is not debug guarantee), P31 (shiroTools custom runtime).
-- **286 tests passing.
+- **286 tests passing.**
+
+## Session 15 — May 23, 2026
+- Start: New session initialized.
+- Model: qwen/qwen3.7-max via OpenRouter.
+- Project state: 286 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: 58aca94 (Session 14 plan update).
+- Version: g5.2-3-g58aca94, clean working tree.
+- **Full project audit completed** — `report.md` written (37KB, 14 sections).
+- **CRITICAL FINDING: Type pool produces garbage on Farever** — type kinds decode as ASCII values (97-120) instead of 0-22. Stream alignment error in pools section cascades through all downstream sections.
+- **Native pool broken** — library names are Heaps API names instead of HL native libs.
+- **Disassembly broken** — OP_160 (unknown opcode), registers in thousands.
+- **Decompiler crashes** — IndexError in IRExpr.__str__() on malformed IR.
+- **No real-world validation** — all 286 tests use synthetic bytecode only.
+- **Strategic recommendation:** Stop building upward. Fix type pool alignment. Compile standard HLB fixtures. Validate before proceeding.
+- **Action plan:** Phase A (foundation fix, 1-2 sessions) → Phase B (quality hardening) → Phase C (Farever RE) → Phase D (validation & release).
+- **report.md created** — comprehensive audit document for project planning.
+
+## Session 16 — May 23, 2026
+- Clean session: reset all prior work, started fresh.
+- Model: qwen3-max via OpenRouter.
+- **DEVELOPMENT FROZEN** — gate freeze remains in effect until Sato explicitly unfreezes.
+- **report.md reviewed** — 742 lines, 14 sections. Key findings: type pool misalignment (P0), no real-world validation (P0), decompiler crashes (P1).
+- **checklist.md created** — 48 action items extracted from report.md across 9 sections (A-I). Each item tagged with priority (P0-3), source reference, and implementation guidance.
+- Project state: 286 tests passing, Gates 1-5 complete, waiting for Sato's direction.
+
+## Session 17 — May 23, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 286 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: 58aca94 (Session 14 plan update).
+- Version: g5.2-3-g58aca94, clean working tree.
+- Gate freeze still in effect; no development until Sato explicitly unfreezes.
+- report.md (742 lines, 14 sections) and checklist.md (48 action items, 9 sections A-I) read.
+- Sato's direction is awaited on which checklist item(s) to tackle.
+
+## Session 17 — May 23, 2026 (continued)
+- **CRITICAL BUGFIX — Root cause of all type pool corruption found and fixed:**
+  - **P33 discovery:** The HL `hl_read_strings` function reads `nstrings` UINDEX length values
+    AFTER the string data block. Our parser was not reading these, causing the stream to be
+    misaligned by `nstrings` bytes (~65,650 bytes for Farever, ~374 for standard HLB).
+  - **P34 discovery:** Debug file section uses the SAME `hl_read_strings` format as the main
+    string pool (null-terminated strings + UINDEX lens AFTER the data block).
+    The debug section is between strings and types in v4 bytecode.
+  - **P32 fix:** FUN/METHOD `nargs` is a single byte (READ/hl_read_b), not a VarInt,
+    confirmed against HL reference `hashlink/src/code.c`.
+  - After fix: Farever 43,844 types ALL valid (was 97 unknown kinds).
+    Natives show `lib=std` (was garbage Heaps API names).
+    Standard HLB files (hello.hl/types.hl/classes.hl) all parse with 0 invalid type kinds.
+  - All 3 compiled HLB fixtures parse correctly: types (0-24), globals in range, natives valid.
+  - classes.hl: ALL 339 functions parsed, ALL 50 constants parsed, no warnings.
+  - 317 tests passing (+31 new integration tests for real HLB fixtures).
+- **Files changed:**
+  - hl_parser.py: String lens read after pool, debug section null-terminated parsing, FUN nargs byte fix
+  - tests/hl_helper.py: String lens emission, debug section fix for ndebugfiles=0
+  - tests/test_parser.py: Debug test format, Farever header test (has_debug is now True)
+  - tests/test_fixtures.py: NEW — 31 integration tests for real compiled HLB files
+  - docs/type_system.md: FUN/METHOD nargs is single byte
+  - AGENTS.md: P32 (nargs), P33 (string lens), P34 (debug format) added; P26/P27 updated
+  - README.md, CONTRIBUTING.md: Test counts updated (286 → 317)
+  - MEMORY.md: This session

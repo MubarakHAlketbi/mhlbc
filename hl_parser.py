@@ -406,6 +406,12 @@ class HLParser:
             offset = end + 1
         self._log("POOL", f"Parsed {len(self.strings)} strings from {strings_size} payload bytes", level=INFO)
 
+        # Read nstrings UINDEX string length values per HL hl_read_strings format
+        # (hashlink/src/code.c: hl_read_strings reads lens AFTER the string data block)
+        self._log("POOL", f"Reading {self.nstrings} string length values", level=TRACE)
+        for i in range(self.nstrings):
+            self.read_varint(stream, context=f"string_len[{i}]")
+
         # 4. Bytes Pool (Version >= 5)
         if self.version >= 5 and self.nbytes > 0:
             if progress_callback: progress_callback("Loading Bytes Pool...", 70)
@@ -468,28 +474,29 @@ class HLParser:
                         stream.seek(ndebugfiles_pos)
                         self.has_debug = False
                     else:
-                        # Read raw string table data
+                        # Read raw string table data (null-terminated strings,
+                        # same format as main string pool, NOT UINDEX-length-prefixed)
                         raw_data = stream.read(table_size)
                         if len(raw_data) != table_size:
                             self._warn("POOL", "Truncated debug string table data, disabling debug")
                             stream.seek(ndebugfiles_pos)
                             self.has_debug = False
                         else:
-                            # Parse VarInt-length-prefixed strings within raw data
+                            # Parse null-terminated strings from raw_data buffer
                             self.debug_files = []
-                            buf = io.BytesIO(raw_data)
+                            offset = 0
                             for i in range(ndebugfiles):
-                                try:
-                                    sz = self.read_varint(buf, context=f"debug_file[{i}].len")
-                                    if sz < 0:
-                                        self._warn("POOL", f"Negative string length {sz} for debug file {i}, stopping")
-                                        break
-                                    s = buf.read(sz).decode("utf-8", errors="replace")
-                                    buf.read(1)  # skip null terminator
-                                    self.debug_files.append(s)
-                                except HLParserError:
-                                    self._warn("POOL", f"EOF reading debug file string {i}, stopping")
+                                if offset >= table_size:
                                     break
+                                end = raw_data.find(0, offset)
+                                if end == -1:
+                                    end = table_size
+                                s = raw_data[offset:end].decode("utf-8", errors="replace")
+                                self.debug_files.append(s)
+                                offset = end + 1
+                            # Read ndebugfiles UINDEX length values per hl_read_strings
+                            for i in range(ndebugfiles):
+                                self.read_varint(stream, context=f"debug_file_len[{i}]")
                             self._log("POOL", f"Read {len(self.debug_files)} debug file strings from {table_size} bytes", level=INFO)
         
         offset_after = stream.tell()
@@ -541,8 +548,13 @@ class HLParser:
             t["inner"] = inner
 
         elif kind in FUN_LIKE_KINDS:
-            # kind byte + arg_count + arg_types + return_type
-            nargs = self.read_varint(stream, context=f"type[{index}].nargs")
+            # kind byte + arg_count (single byte, per HL hl_read_type) + arg_types + return_type
+            nargs_byte = stream.read(1)
+            if not nargs_byte:
+                raise HLParserError(
+                    f"Unexpected EOF reading nargs for type index {index}"
+                )
+            nargs = nargs_byte[0]
             args = []
             for j in range(nargs):
                 a = self.read_varint(stream, context=f"type[{index}].arg[{j}]")

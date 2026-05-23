@@ -102,7 +102,7 @@ Marks a type as packed for FFI/C interop.
 
 ```
 byte: kind = 10
-VarInt: argument_count
+byte: argument_count       (single byte per HL ref hl_read_type, NOT a VarInt)
 argument_count × VarInt: argument_type_indices
 VarInt: return_type_index
 ```
@@ -113,7 +113,7 @@ Represents a function signature. Used for function references, closures.
 
 ```
 byte: kind = 20
-VarInt: argument_count
+byte: argument_count       (single byte per HL ref hl_read_type, NOT a VarInt)
 argument_count × VarInt: argument_type_indices
 VarInt: return_type_index
 ```
