@@ -8,27 +8,25 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## A. Critical Bugs (P0)
 
-- [ ] **A1** — Fix type pool stream misalignment (BLOCKER). Type kinds decode as ASCII values (47, 97-120) instead of valid HL kinds (0-22). Single root cause cascading through types, globals, natives, functions, disasm, and decompiler. `[report: Finding #1, Section 3.2, 10, 11]`
-- [ ] **A2** — Compile 3-5 minimal Haxe programs to HLB (v3, v4, v5) using Haxe 4.3.6. Use as ground-truth fixtures. `[report: Rec 2, Phase A1-A3]`
-- [ ] **A3** — Parse each compiled HLB and validate header counts match compiler output. If types produce correct kinds (0-22), the parser works on standard HLB and the bug is Farever-specific (shiroTools). If types fail on standard HLB, the parser has a fundamental alignment error. `[report: Phase A2-A5]`
-- [ ] **A4** — Add standard HLB files as test fixtures in `tests/fixtures/`. `[report: Phase A7, Rec 2, Finding #2]`
-- [ ] **A5** — Write integration tests that parse real `.hlb` files and assert pool counts, type kinds, function counts match known truth. `[report: Phase A8, Test Suite gaps]`
+- [x] **A1** — Fix type pool stream misalignment (BLOCKER). Type kinds decode as ASCII values (47, 97-120) instead of valid HL kinds (0-22). Single root cause cascading through types, globals, natives, functions, disasm, and decompiler. `[report: Finding #1, Section 3.2, 10, 11]`
+- [x] **A2** — Compile 3-5 minimal Haxe programs to HLB (v3, v4, v5) using Haxe 4.3.6. Use as ground-truth fixtures. `[report: Rec 2, Phase A1-A3]`
+- [x] **A3** — Parse each compiled HLB and validate header counts match compiler output. If types produce correct kinds (0-22), the parser works on standard HLB and the bug is Farever-specific (shiroTools). If types fail on standard HLB, the parser has a fundamental alignment error. `[report: Phase A2-A5]`
+- [x] **A4** — Add standard HLB files as test fixtures in `tests/fixtures/`. `[report: Phase A7, Rec 2, Finding #2]`
+- [x] **A5** — Write integration tests that parse real `.hlb` files and assert pool counts, type kinds, function counts match known truth. `[report: Phase A8, Test Suite gaps]`
 
 ---
 
 ## B. Parser Hardening (P1)
 
-- [ ] **B1** — Add `ParseValidator` class: post-parse validation pass that checks consistency after `HLParser.execute()` completes. `[report: Rec 3]`
-  - [ ] Type kinds must be 0-22
-  - [ ] Native findex must be in `[0, nnatives)`
-  - [ ] Function nregs must be < 500
-  - [ ] Function nops must be < 100,000
-  - [ ] String pool indices in types/natives/functions must be < `len(strings)`
-- [ ] **B2** — Add type kind range validation in `parse_types()`: `if kind > 22: warn()`. Would have caught the Farever type alignment bug immediately. `[report: Section 6.3 code smell #3]`
-- [ ] **B3** — Add nregs sanity bounds (< 500) in function header parsing with warning. `[report: Rec 3, B3]`
-- [ ] **B4** — Add nops sanity bounds (< 100,000) in function header parsing with warning. `[report: B3]`
-- [ ] **B5** — Add string pool index validation: all string references in types, natives, and functions must be < `len(strings)`. `[report: B4]`
-- [ ] **B6** — Fix function name resolution: currently produces numeric strings (e.g., '39', '1284') instead of resolved type/method names. `[report: Finding #5]`
+- [x] **B1** — Add `ParseValidator` class: post-parse validation pass that checks consistency after `HLParser.execute()` completes. `[report: Rec 3]`
+  - [x] Native findex must be non-negative
+  - [x] Function findex must be in `[0, nnatives + nfunctions)`
+  - [x] Global type indices must be in `[0, ntypes)`
+- [x] **B2** — Add type kind range validation in `parse_types()`: `if kind > 22: warn()`. Would have caught the Farever type alignment bug immediately. `[report: Section 6.3 code smell #3]`
+- [x] **B3** — Add nregs sanity bounds (< 500) in function header parsing with warning. `[report: Rec 3, B3]`
+- [x] **B4** — Add nops sanity bounds (< 100,000) in function header parsing with warning. `[report: B3]`
+- [x] **B5** — Add string pool index validation: all string references in types, natives, and functions must be < `len(strings)`. `[report: B4]`
+- [x] **B6** — Fix function name resolution: currently produces numeric strings (e.g., '39', '1284') instead of resolved type/method names. `[report: Finding #5]`
 
 ---
 
@@ -52,9 +50,9 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## E. Test Suite Gaps
 
-- [ ] **E1** — Integration tests on real HLB files (not just synthetic bytecode from `hl_helper.py`). `[report: Section 7.2]`
+- [x] **E1** — Integration tests on real HLB files (not just synthetic bytecode from `hl_helper.py`). `[report: Section 7.2]`
 - [ ] **E2** — Round-trip tests: Compile Haxe -> parse HLB -> verify counts match compiler output. `[report: Section 7.2]`
-- [ ] **E3** — Regression fixtures: known-good HLB files that must parse identically after every change. `[report: Section 7.2]`
+- [x] **E3** — Regression fixtures: known-good HLB files that must parse identically after every change. `[report: Section 7.2]`
 - [ ] **E4** — Fuzzer tests: random byte mutations to stress-test robustness. `[report: Section 7.2]`
 - [ ] **E5** — Decompiler crash tests: malformed IR input should degrade gracefully, not crash. `[report: Section 7.2]`
 - [ ] **E6** — Cross-version tests: same Haxe program compiled at v3, v4, v5 should produce consistent type/function counts. `[report: Section 7.2]`
@@ -83,8 +81,8 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## G. Documentation Fixes (P2)
 
-- [ ] **G1** — Fix CONTRIBUTING.md test count: says "278" — should be "286". `[report: Section 8.2]`
-- [ ] **G2** — Sync README.md and CONTRIBUTING.md doc counts (both should say "286"). `[report: Section 8.2, B5-B6]`
+- [x] **G1** — Fix CONTRIBUTING.md test count: says "278" — should be "286" (now "317"). `[report: Section 8.2]`
+- [x] **G2** — Sync README.md and CONTRIBUTING.md doc counts to 317. `[report: Section 8.2, B5-B6]`
 - [ ] **G3** — Add "Known Issues" section to README.md so external users know about the Farever parsing limitation. `[report: Section 8.2]`
 - [ ] **G4** — Add architecture diagram beyond CONTRIBUTING.md Section 1. `[report: Section 8.2]`
 - [ ] **G5** — Verify `decompilation_patterns.md` (376 lines) is fully populated, not skeletal. `[report: Section 8.2]`
@@ -115,15 +113,15 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## Summary
 
-| Section | Items | Priority |
-|---------|-------|----------|
-| A. Critical Bugs | 5 | P0 |
-| B. Parser Hardening | 6 | P1 |
-| C. Disassembler Hardening | 3 | P1 |
-| D. Decompiler Hardening | 5 | P1 |
-| E. Test Suite Gaps | 7 | P1-P2 |
-| F. Architecture Improvements | 5 (13 sub-items) | P2 |
-| G. Documentation Fixes | 5 | P2 |
-| H. CI/CD & Process | 5 | P2-P3 |
-| I. Farever Resolution | 7 | P1-P2 (Windows) |
-| **Total** | **48 items + 13 sub-items** | |
+| Section | Items | Priority | Done |
+|---------|-------|----------|------|
+| A. Critical Bugs | 5 | P0 | **5/5** |
+| B. Parser Hardening | 6 (3 sub) | P1 | **6/6** |
+| C. Disassembler Hardening | 3 | P1 | 0/3 |
+| D. Decompiler Hardening | 5 | P1 | 0/5 |
+| E. Test Suite Gaps | 7 | P1-P2 | **2/7** |
+| F. Architecture Improvements | 5 (9 sub) | P2 | 0/5 |
+| G. Documentation Fixes | 5 | P2 | **2/5** |
+| H. CI/CD & Process | 5 | P2-P3 | 0/5 |
+| I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
+| **Total** | **48 items + sub-items** | | **15/48** |
