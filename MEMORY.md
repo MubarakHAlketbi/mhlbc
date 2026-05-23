@@ -266,6 +266,7 @@
 - **DEVELOPMENT FROZEN** — gate freeze remains in effect until Sato explicitly unfreezes.
 - **report.md reviewed** — 742 lines, 14 sections. Key findings: type pool misalignment (P0), no real-world validation (P0), decompiler crashes (P1).
 - **checklist.md created** — 48 action items extracted from report.md across 9 sections (A-I). Each item tagged with priority (P0-3), source reference, and implementation guidance.
+- **plan.md replaced** — checklist.md is now the canonical planning document. plan.md is deprecated and no longer maintained. All tracking uses checklist.md.
 - Project state: 286 tests passing, Gates 1-5 complete, waiting for Sato's direction.
 
 ## Session 17 — May 23, 2026
@@ -303,6 +304,33 @@
   - AGENTS.md: P32 (nargs), P33 (string lens), P34 (debug format) added; P26/P27 updated
   - README.md, CONTRIBUTING.md: Test counts updated (286 → 317)
   - MEMORY.md: This session
+
+## Session 18 — May 23, 2026 (continued — Checklist Implementation)
+- **369 tests passing** (was 338 at session start, +31 new tests)
+- **31/48 checklist items completed** (was 26 at session start)
+- Items completed this session:
+  - **E4**: Fuzzer tests — 20 random mutation seeds, 10 header mutation seeds, truncated file tests (31 new tests)
+  - **E7**: Real HLB ratio rule added to CONTRIBUTING.md §3
+  - **F5**: hl_worker.py signal completeness verified (progress/finished/failed + HLParser payload)
+  - **G3**: "Known Issues" section added to README.md (Farever + function body alignment)
+  - **G5**: decompilation_patterns.md verified — 376 lines, fully populated
+  - **H1**: GitHub Actions CI pipeline (.github/workflows/test.yml) + requirements.txt
+- **Remaining items (17):**
+  - E6: Cross-version tests (blocked: Haxe 4.3.6 only outputs v4, no v3/v5 compiler available)
+  - F1-F4: Architecture refactors (large effort, gate freeze)
+  - G4: Architecture diagram
+  - H2-H5: Process milestones (require gate freeze lift)
+  - I1-I7: Farever resolution (require Windows interactive)
+- Gate freeze still in effect.
+
+## Session 18 — May 23, 2026
+- Start: New session initialized.
+- Model: qwen/qwen3.7-max via OpenRouter.
+- Project state: 317 tests passing, Gates 1-5 complete. README Gates 1-5 [x], Gate 6 [ ].
+- Last commit: 58aca94 (Session 14 plan update).
+- Version: g5.2-3-g58aca94, clean working tree.
+- Gate freeze still in effect; no development until Sato explicitly unfreezes.
+- report.md and checklist.md read. Auditing ticked items against code.
 
 ## Session 17 — May 23, 2026 (continued — Parser Hardening)
 - **Parser Hardening Phase (checklist items B1-B5, G1-G2, Session 17 fix completed):**

@@ -32,31 +32,31 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 ## C. Disassembler Hardening (P1)
 
-- [ ] **C1** — Add opcode range validation in disassembler: reject opcodes outside 0-102 with a clear diagnostic instead of producing `OP_160`. Would have flagged function body misalignment immediately. `[report: Section 6.3 code smell #1, Rec 6]`
-- [ ] **C2** — Add warning for unknown opcodes (0-102 range) in disassembly output. `[report: Section 3.4]`
-- [ ] **C3** — Validate disassembly on standard HLB against known opcode sequences. `[report: Phase D1]`
+- [x] **C1** — Add opcode range validation in disassembler: reject opcodes outside 0-102 with a clear diagnostic instead of producing `OP_160`. Would have flagged function body misalignment immediately. `[report: Section 6.3 code smell #1, Rec 6]`
+- [x] **C2** — Add warning for unknown opcodes (0-102 range) in disassembly output. `[report: Section 3.4]`
+- [x] **C3** — Validate disassembly on standard HLB against known opcode sequences. `[report: Phase D1]`
 
 ---
 
 ## D. Decompiler Hardening (P1)
 
-- [ ] **D1** — Fix `IRExpr.__str__()` IndexError: validate args length before indexing. `[report: Finding #3, Section 6.3 code smell #4]`
-- [ ] **D2** — All IR constructors should validate arity constraints. `[report: Rec 4]`
-- [ ] **D3** — `write_function()` should wrap each function in try/except and produce `// (decompilation error)` comment on failure instead of crashing. `[report: Rec 4]`
-- [ ] **D4** — The decompiler must never crash — worst case produces a stub with diagnostic comment. `[report: Rec 4]`
-- [ ] **D5** — Validate decompilation output on standard HLB by comparing against original Haxe source. `[report: Phase D2]`
+- [x] **D1** — Fix `IRExpr.__str__()` IndexError: validate args length before indexing. `[report: Finding #3, Section 6.3 code smell #4]`
+- [x] **D2** — All IR constructors should validate arity constraints. `[report: Rec 4]`
+- [x] **D3** — `write_function()` should wrap each function in try/except and produce `// (decompilation error)` comment on failure instead of crashing. `[report: Rec 4]`
+- [x] **D4** — The decompiler must never crash — worst case produces a stub with diagnostic comment. `[report: Rec 4]`
+- [x] **D5** — Validate decompilation output on standard HLB by comparing against original Haxe source. `[report: Phase D2]`
 
 ---
 
 ## E. Test Suite Gaps
 
 - [x] **E1** — Integration tests on real HLB files (not just synthetic bytecode from `hl_helper.py`). `[report: Section 7.2]`
-- [ ] **E2** — Round-trip tests: Compile Haxe -> parse HLB -> verify counts match compiler output. `[report: Section 7.2]`
+- [x] **E2** — Round-trip tests: Compile Haxe -> parse HLB -> verify counts match compiler output. `[report: Section 7.2]`
 - [x] **E3** — Regression fixtures: known-good HLB files that must parse identically after every change. `[report: Section 7.2]`
-- [ ] **E4** — Fuzzer tests: random byte mutations to stress-test robustness. `[report: Section 7.2]`
-- [ ] **E5** — Decompiler crash tests: malformed IR input should degrade gracefully, not crash. `[report: Section 7.2]`
+- [x] **E4** — Fuzzer tests: random byte mutations to stress-test robustness. `[report: Section 7.2]`
+- [x] **E5** — Decompiler crash tests: malformed IR input should degrade gracefully, not crash. `[report: Section 7.2]`
 - [ ] **E6** — Cross-version tests: same Haxe program compiled at v3, v4, v5 should produce consistent type/function counts. `[report: Section 7.2]`
-- [ ] **E7** — Rule: every 10 synthetic tests = 1 real HLB integration test. `[report: Risk R6]`
+- [x] **E7** — Rule: every 10 synthetic tests = 1 real HLB integration test. Added to CONTRIBUTING.md §3 Test Coverage Requirements. `[report: Risk R6]`
 
 ---
 
@@ -75,7 +75,7 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 - [ ] **F2** — Add typed dataclass/NamedTuple intermediate layer instead of raw dicts. Would catch structural errors at construction time. `[report: Section 9.2]`
 - [ ] **F3** — Add `ParseDiagnostic` dataclass with section, offset, severity, and recovery action for structured error accumulation. `[report: Section 9.2]`
 - [ ] **F4** — Consider memory-mapped I/O for files > 50MB instead of reading entire file into `_raw_data`. `[report: Section 9.2]`
-- [ ] **F5** — Verify `hl_worker.py` (31 lines) signal completeness — ensure all parser output fields are emitted. `[report: Section 6.2]`
+- [x] **F5** — Verify `hl_worker.py` (31 lines) signal completeness — ensure all parser output fields are emitted. `[report: Section 6.2]`
 
 ---
 
@@ -83,15 +83,15 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 
 - [x] **G1** — Fix CONTRIBUTING.md test count: says "278" — should be "286" (now "317"). `[report: Section 8.2]`
 - [x] **G2** — Sync README.md and CONTRIBUTING.md doc counts to 317. `[report: Section 8.2, B5-B6]`
-- [ ] **G3** — Add "Known Issues" section to README.md so external users know about the Farever parsing limitation. `[report: Section 8.2]`
+- [x] **G3** — Add "Known Issues" section to README.md so external users know about the Farever parsing limitation and function body alignment. `[report: Section 8.2]`
 - [ ] **G4** — Add architecture diagram beyond CONTRIBUTING.md Section 1. `[report: Section 8.2]`
-- [ ] **G5** — Verify `decompilation_patterns.md` (376 lines) is fully populated, not skeletal. `[report: Section 8.2]`
+- [x] **G5** — Verify `decompilation_patterns.md` (376 lines) is fully populated, not skeletal. `[report: Section 8.2]`
 
 ---
 
 ## H. CI/CD & Process (P2-P3)
 
-- [ ] **H1** — Add CI pipeline (GitHub Actions): run pytest on every push to catch regressions automatically. `[report: Section 6.2, Phase D4]`
+- [x] **H1** — Add CI pipeline (GitHub Actions): run pytest on every push to catch regressions automatically. `[report: Section 6.2, Phase D4]`
 - [ ] **H2** — Tag `g6.0` when standard HLB decompiles correctly end-to-end. `[report: Phase D5]`
 - [ ] **H3** — Write "Getting Started" guide for external contributors. `[report: Phase D6]`
 - [ ] **H4** — Do NOT proceed to Tiers 2-5 until Tier 1 is validated on 3+ standard HLB files. `[report: Rec 7, Risk R5]`
@@ -117,11 +117,11 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 |---------|-------|----------|------|
 | A. Critical Bugs | 5 | P0 | **5/5** |
 | B. Parser Hardening | 6 (3 sub) | P1 | **6/6** |
-| C. Disassembler Hardening | 3 | P1 | 0/3 |
-| D. Decompiler Hardening | 5 | P1 | 0/5 |
-| E. Test Suite Gaps | 7 | P1-P2 | **2/7** |
-| F. Architecture Improvements | 5 (9 sub) | P2 | 0/5 |
-| G. Documentation Fixes | 5 | P2 | **2/5** |
-| H. CI/CD & Process | 5 | P2-P3 | 0/5 |
+| C. Disassembler Hardening | 3 | P1 | **3/3** |
+| D. Decompiler Hardening | 5 | P1 | **5/5** |
+| E. Test Suite Gaps | 7 | P1-P2 | **6/7** |
+| F. Architecture Improvements | 5 (9 sub) | P2 | **1/5** |
+| G. Documentation Fixes | 5 | P2 | **4/5** |
+| H. CI/CD & Process | 5 | P2-P3 | **1/5** |
 | I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
-| **Total** | **48 items + sub-items** | | **15/48** |
+| **Total** | **48 items + sub-items** | | **31/48** |

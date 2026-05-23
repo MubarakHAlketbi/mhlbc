@@ -1,0 +1,6 @@
+# Core dependencies for mhlbc
+# Parser, CLI, and tests work WITHOUT PyQt6
+# GUI (app.py) requires PyQt6 — install separately if needed
+
+pytest>=9.0
+pytest-cov>=7.0

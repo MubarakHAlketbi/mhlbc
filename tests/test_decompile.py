@@ -871,3 +871,73 @@ class TestErrorRecovery:
         result = decompiler.decompile_all()
         assert result is not None
         assert len(result.functions) == 0
+
+
+class TestMalformedIRRecovery:
+    """E5: Decompiler gracefully handles malformed IR without crashing."""
+
+    def test_irexpr_str_insufficient_args_call(self):
+        """IRExpr.__str__() with insufficient args for 'call' doesn't crash."""
+        from hl_decompile import IRExpr
+        expr = IRExpr(op="call", args=[])   # needs >= 1 arg, padded by __post_init__
+        result = str(expr)
+        # Padded with '?', so should produce "?()" — doesn't crash
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_irexpr_str_insufficient_args_field_get(self):
+        """IRExpr.__str__() with insufficient args for 'field_get' doesn't crash."""
+        from hl_decompile import IRExpr, IRConst
+        expr = IRExpr(op="field_get", args=[IRConst("obj")])  # needs 2 args
+        result = str(expr)
+        assert isinstance(result, str)  # doesn't crash, returns something
+
+    def test_irexpr_str_insufficient_args_ternary(self):
+        """IRExpr.__str__() with insufficient args for 'ternary' doesn't crash."""
+        from hl_decompile import IRExpr
+        expr = IRExpr(op="ternary", args=[])   # needs 3 args
+        result = str(expr)
+        assert isinstance(result, str)
+
+    def test_irexpr_post_init_pads_args(self):
+        """IRExpr.__post_init__() pads args to minimum required."""
+        from hl_decompile import IRExpr
+        expr = IRExpr(op="add", args=[])   # needs 2 args
+        assert len(expr.args) >= 2  # padded by __post_init__
+
+    def test_irexpr_post_init_does_not_shrink(self):
+        """IRExpr.__post_init__() doesn't remove excess args."""
+        from hl_decompile import IRExpr, IRConst
+        expr = IRExpr(op="add", args=[IRConst(1), IRConst(2), IRConst(3)])
+        assert len(expr.args) == 3  # kept as-is
+
+    def test_write_function_never_raises(self):
+        """HaxeWriter.write_function() returns stub on error instead of crashing."""
+        from hl_decompile import (IRFunction, IRVar, IRConst, IRExpr, IRStmt,
+                                  FunctionSig, HaxeWriter, TypeResolver)
+        # Create a writer with a minimal parser mock
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser, include_comments=True)
+
+        # Build a malformed IRFunction
+        sig = FunctionSig(
+            name="broken", params=[], ret_type=0,
+            func_index=0, is_method=False, parent_class=None
+        )
+        bad_fn = IRFunction(
+            name="broken",
+            findex=0,
+            func_idx=999,
+            sig=sig,
+            body=[IRStmt(op="assign", dst=IRVar(name="x", reg=0, type_idx=0),
+                         src=IRExpr(op="method_call", args=[]))],
+            variables={"x": 0},
+            raw_regnames={},
+            errors=[],
+        )
+
+        # Should return a string (either valid output or error stub), never raise
+        output = writer.write_function(bad_fn)
+        assert isinstance(output, str)
+        assert len(output) > 0

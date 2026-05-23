@@ -238,6 +238,7 @@ class OpcodeDecoder:
 
     def __init__(self, logger: Optional[VerboseLogger] = None):
         self._logger = logger
+        self._unknown_count = 0
         self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (lambda tag, msg, level=INFO: None)
 
     @staticmethod
@@ -280,6 +281,7 @@ class OpcodeDecoder:
             Fewer than nops may be returned if data is truncated.
         """
         instructions: List[Instruction] = []
+        self._unknown_count = 0  # Reset per call (not cumulative across calls)
         pos = 0
         data_len = len(data)
 
@@ -293,14 +295,22 @@ class OpcodeDecoder:
             pos += 1
 
             if opcode >= len(_OPCODE_NARGS):
-                self._log("DISASM", f"  instr[{i}]: out-of-range opcode={opcode} at offset {instr_start}", level=WARN)
-                # Skip 0 args, treat as nop
+                self._log(
+                    "DISASM",
+                    f"  instr[{i}]: UNKNOWN opcode {opcode} (valid range 0-{len(_OPCODE_NARGS)-1}) "
+                    f"at byte offset {instr_start} — stream may be misaligned",
+                    level=WARN
+                )
+                # Record as unknown but do NOT attempt to decode args — treat as nop
                 instr = Instruction(
                     index=i, opcode=opcode,
-                    mnemonic=f"OP_{opcode}", args=[],
+                    mnemonic=f"OP_{opcode} (INVALID)",
+                    args=[],
                     byte_offset=instr_start, byte_size=pos - instr_start,
                 )
                 instructions.append(instr)
+                # Count for summary
+                self._unknown_count += 1
                 continue
 
             nargs = _OPCODE_NARGS[opcode]
@@ -418,7 +428,20 @@ class OpcodeDecoder:
 
             self._log("DISASM", f"  {instr}", level=TRACE)
 
+        if self._unknown_count > 0:
+            self._log(
+                "DISASM",
+                f"  ⚠ {self._unknown_count}/{nops} instructions had UNKNOWN opcodes "
+                f"(stream misalignment or non-standard bytecode)",
+                level=WARN
+            )
+
         return instructions
+
+    @property
+    def unknown_opcode_count(self) -> int:
+        """Number of instructions with opcodes outside valid range 0-102."""
+        return self._unknown_count
 
 
 # ============================================================================

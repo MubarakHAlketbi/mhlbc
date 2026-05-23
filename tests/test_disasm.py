@@ -103,7 +103,7 @@ class TestOpcodeDecoder:
         decoder = OpcodeDecoder()
         instrs = decoder.decode_instructions(opcodes, 1)
         assert len(instrs) == 1
-        assert instrs[0].mnemonic == "OP_200"
+        assert instrs[0].mnemonic == "OP_200 (INVALID)"
         assert instrs[0].opcode == 200
     
     def test_byte_offsets(self):
@@ -510,8 +510,7 @@ class TestFuzzedOpcodes:
         decoder = OpcodeDecoder()
         instrs = decoder.decode_instructions(bytes([200]), 1)
         assert len(instrs) == 1
-        assert instrs[0].mnemonic == "OP_200"
-
+        assert instrs[0].mnemonic == "OP_200 (INVALID)"
     def test_truncated_ocalln_count(self):
         """OCallN with truncated arg list after count byte."""
         opcodes = encode_op(29, 0, 1) + bytes([100]) + encode_op(2)  # claims 100 args, has 1

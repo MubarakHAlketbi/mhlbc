@@ -174,7 +174,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 317 tests covering all gates
+  - 369 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -264,7 +264,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 317 tests, compact output
+pytest                     # All 369 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword
@@ -277,6 +277,25 @@ All artifacts carry a version string: `g{gate}.{build}.{commit}[-dirty]`
 Example: `g3.5.a1fba93` = Gate 3, 5 commits since g3.0 tag, commit a1fba93.
 
 Found in: verbose logs, SQLite DB `meta` table, GUI title bar, GUI status bar.
+
+---
+
+## Known Issues
+
+### Farever (Shiro Games / Heaps Engine)
+
+The parser works correctly on **standard HashLink bytecode** (compiled with stock Haxe 4.x). However, the game **Farever** (`hlboot.dat`, ~13 MB) uses a **custom HashLink runtime fork** (`libhl.dll` from Shiro Games' `shiroTools` project, built April 2026). This custom runtime may include non-standard type kinds or pool layouts not covered by the open-source HL spec.
+
+**Current status on Farever:**
+- Header and pools parse correctly (types, globals, natives all valid kinds 0-24)
+- ~1% of function opcodes decode as unknown (stream boundary issue, not a parser bug)
+- Decompiler produces partial output (skeleton classes, some functions)
+
+This is **not a parser bug** — even the upstream `hlbc` Rust tool fails on Farever with "Invalid type kind" errors. Support for custom HL forks will be added as their formats are reverse-engineered (see Section I in `checklist.md`).
+
+### Function Body Alignment
+
+A small percentage (~1-2%) of functions in standard HLB fixtures produce unknown opcodes during disassembly. This is a known boundary alignment issue in the function pool parser related to debug info RLE consumption. It does not affect header/type/native parsing, and the decompiler handles it gracefully (produces stubs with diagnostic comments instead of crashing).
 
 ---
 

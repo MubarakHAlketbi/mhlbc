@@ -127,28 +127,50 @@ class IRExpr(IRValue):
     args: List[IRValue]
     type_idx: int = -1
 
+    # Minimum args per op type (for __post_init__ validation)
+    _MIN_ARGS = {
+        "call": 1, "method_call": 2, "field_get": 2, "field_set": 3,
+        "array_get": 2, "array_set": 3, "new": 1, "cast": 2, "ternary": 3,
+        "neg": 1, "not": 1, "incr": 1, "decr": 1,
+        "add": 2, "sub": 2, "mul": 2, "div": 2, "mod": 2,
+        "shl": 2, "shr": 2, "ushr": 2, "and": 2, "or": 2, "xor": 2,
+        "eq": 2, "ne": 2, "lt": 2, "gt": 2, "le": 2, "ge": 2,
+    }
+
+    def __post_init__(self):
+        min_args = self._MIN_ARGS.get(self.op, 0)
+        if len(self.args) < min_args:
+            # Pad with sentinel values so __str__ never indexes out of range
+            # This is a defensive measure — should not happen in correct pipelines
+            while len(self.args) < min_args:
+                self.args.append(IRConst(value="?", type_idx=-1))
+
     def __str__(self) -> str:
-        if self.op == "call":
+        # Guard against malformed IR with insufficient args (defensive — never crash)
+        n = len(self.args)
+        if self.op == "call" and n >= 1:
             return f"{self.args[0]}({', '.join(str(a) for a in self.args[1:])})"
-        if self.op == "method_call":
+        if self.op == "method_call" and n >= 2:
             return f"{self.args[0]}.{self.args[1]}({', '.join(str(a) for a in self.args[2:])})"
-        if self.op == "field_get":
+        if self.op == "field_get" and n >= 2:
             return f"{self.args[0]}.{self.args[1]}"
-        if self.op == "field_set":
+        if self.op == "field_set" and n >= 3:
             return f"{self.args[0]}.{self.args[1]} = {self.args[2]}"
-        if self.op == "array_get":
+        if self.op == "array_get" and n >= 2:
             return f"{self.args[0]}[{self.args[1]}]"
-        if self.op == "array_set":
+        if self.op == "array_set" and n >= 3:
             return f"{self.args[0]}[{self.args[1]}] = {self.args[2]}"
-        if self.op == "new":
+        if self.op == "new" and n >= 1:
             return f"new {self.args[0]}()"
-        if self.op == "cast":
+        if self.op == "cast" and n >= 2:
             return f"cast({self.args[0]}, {self.args[1]})"
-        if self.op == "ternary":
+        if self.op == "ternary" and n >= 3:
             return f"{self.args[0]} ? {self.args[1]} : {self.args[2]}"
-        if len(self.args) == 1:
+        if n == 0:
+            return f"/* malformed: {self.op}() */"
+        if n == 1:
             return f"{self.op}{self.args[0]}"
-        if len(self.args) == 2:
+        if n == 2:
             return f"{self.args[0]} {self.op} {self.args[1]}"
         return f"{self.op}({', '.join(str(a) for a in self.args)})"
 
@@ -1678,7 +1700,25 @@ class HaxeWriter:
 
     def write_function(self, ir_func: IRFunction,
                        class_context: Optional[str] = None) -> str:
-        """Format a decompiled function as Haxe source code."""
+        """Format a decompiled function as Haxe source code.
+
+        Never raises: on error, returns a stub with diagnostic comment.
+        """
+        try:
+            return self._write_function_impl(ir_func, class_context)
+        except Exception as e:
+            # D4: Decompiler must never crash
+            fn_name = ir_func.sig.name if ir_func.sig else f"func[{ir_func.func_idx}]"
+            return (
+                f"// (decompilation error: {e})\n"
+                f"function {fn_name}(): Void {{\n"
+                f"    // function body unavailable\n"
+                f"}}"
+            )
+
+    def _write_function_impl(self, ir_func: IRFunction,
+                             class_context: Optional[str] = None) -> str:
+        """Internal implementation of write_function (may raise)."""
         lines: List[str] = []
         self._indent = 0
 

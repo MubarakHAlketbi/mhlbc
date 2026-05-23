@@ -36,7 +36,7 @@ hl_decompiler/
 └── tests/
     ├── hl_helper.py           # Test helpers: build bytecode programmatically
     ├── test_varint.py         # VarInt encoding/decoding tests
-   ├── test_parser.py         # Full pipeline tests (317+ tests)
+   ├── test_parser.py         # Full pipeline tests (369+ tests)
     ├── test_logger.py         # VerboseLogger write/flush/close tests
     ├── test_disasm.py         # Opcode decode, CFG builder, CLI disasm tests
     └── test_decompile.py      # Decompilation engine tests (Gate 5)
@@ -171,6 +171,7 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 - **Name Resolution**: Proto-based naming, binding-based naming, entrypoint="init", priority rules
 - **Integration**: Full execute() cycle with progress callback across v3/v4/v5
 - **Logger**: File creation, message writing, flush behavior, edge cases
+- **Real HLB ratio rule**: For every 10 synthetic tests added, at least 1 real HLB integration test must also be added. Use fixtures in `tests/fixtures/hl/`. This prevents the test suite from drifting away from real-world accuracy.
 
 ---
 
