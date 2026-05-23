@@ -87,7 +87,7 @@ def test_type_kinds_valid(fname):
     p = HLParser(os.path.join(FIXTURES_DIR, fname))
     p.execute(io_obj(raw))
     for i, t in enumerate(p.types):
-        if not (0 <= t["kind"] <= 24):
+        if not (0 <= t.kind <= 24):
             pytest.fail(f"type[{i}]: invalid kind {t['kind']}")
 
 
@@ -131,13 +131,13 @@ def test_natives_valid(fname):
     p = HLParser(os.path.join(FIXTURES_DIR, fname))
     p.execute(io_obj(raw))
     for i, n in enumerate(p.natives):
-        assert 0 <= n["lib"] < p.nstrings, f"native[{i}]: lib idx {n['lib']} out of range"
-        assert 0 <= n["name"] < p.nstrings, f"native[{i}]: name idx {n['name']} out of range"
+        assert 0 <= n.lib < p.nstrings, f"native[{i}]: lib idx {n['lib']} out of range"
+        assert 0 <= n.name < p.nstrings, f"native[{i}]: name idx {n['name']} out of range"
         # Lib should be a known HL native library (not random text)
-        lib = p.strings[n["lib"]]
+        lib = p.strings[n.lib]
         assert len(lib) > 0 and len(lib) < 100, f"native[{i}]: lib string suspicious"
         # findex should be valid (0 or positive for bound natives)
-        assert n["findex"] >= -1, f"native[{i}]: invalid findex {n['findex']}"
+        assert n.findex >= -1, f"native[{i}]: invalid findex {n['findex']}"
 
 
 @pytest.mark.parametrize("fname", list(FIXTURE_META.keys()))
@@ -148,9 +148,9 @@ def test_functions_parse(fname):
     p = HLParser(os.path.join(FIXTURES_DIR, fname))
     p.execute(io_obj(raw))
     # Most functions should have names (from proto resolution)
-    named = sum(1 for f in p.functions if f.get("name") is not None)
+    named = sum(1 for f in p.functions if f.name is not None)
     # Functions with valid nregs/nops
-    valid_funcs = sum(1 for f in p.functions if f.get("nregs", 0) > 0 and f.get("nops", 0) > 0)
+    valid_funcs = sum(1 for f in p.functions if f.nregs > 0 and f.nops > 0)
     assert named > meta["nfunctions"] * 0.2, f"Only {named}/{meta['nfunctions']} functions named"
     assert valid_funcs > meta["nfunctions"] * 0.5, f"Only {valid_funcs}/{meta['nfunctions']} functions with valid body"
 
@@ -308,7 +308,7 @@ def test_roundtrip_header_counts():
         assert "length" in p.strings[:5]
         # Verify all type kinds are valid (0-24)
         for i, t in enumerate(p.types):
-            assert 0 <= t["kind"] <= 24, f"type[{i}]: invalid kind {t['kind']}"
+            assert 0 <= t.kind <= 24, f"type[{i}]: invalid kind {t['kind']}"
 
 
 # ============================================================================
@@ -333,14 +333,14 @@ def test_disasm_no_unknown_opcodes(fname):
     unknown_total = 0
     total_ops = 0
     for i, fn in enumerate(p.functions):
-        if fn.get("malformed") or fn.get("nops", 0) <= 0:
+        if fn.malformed or fn.nops <= 0:
             continue
-        start = fn.get("opcode_start")
-        end = fn.get("opcode_end")
+        start = fn.opcode_start
+        end = fn.opcode_end
         if start is None or end is None or start >= end:
             continue
         opdata = p._raw_data[start:end]
-        nops = fn["nops"]
+        nops = fn.nops
         total_ops += nops
         instrs = decoder.decode_instructions(opdata, nops)
         unknown_total += decoder._unknown_count
@@ -363,8 +363,8 @@ def test_disasm_registers_reasonable(fname):
     p.execute(io_obj(raw))
 
     for i, fn in enumerate(p.functions):
-        nregs = fn.get("nregs", 0)
-        if fn.get("malformed") or nregs <= 0:
+        nregs = fn.nregs
+        if fn.malformed or nregs <= 0:
             continue
         assert nregs < 500, f"{fname} func[{i}]: nregs={nregs} exceeds sane limit"
 

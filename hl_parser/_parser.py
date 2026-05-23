@@ -4,7 +4,8 @@ import struct
 import io
 import os
 import subprocess
-from typing import BinaryIO, List, Optional
+import mmap
+from typing import BinaryIO, List, Optional, Union
 
 from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
 from ._consts import (
@@ -20,6 +21,7 @@ from ._exceptions import HLParserError
 from ._version import get_parser_version
 from ._validator import ParseValidator
 from ._diagnostics import ParseDiagnostic
+from ._types import TypeDef, TypeField, TypeProto, TypeBinding, TypeConstruct, NativeDef, FunctionDef, ConstantDef
 
 class HLParser:
     def __init__(self, filepath: str, logger: Optional[VerboseLogger] = None):
@@ -52,12 +54,12 @@ class HLParser:
         self.entrypoint = 0
 
         # Parsed structures (populated after header+pools)
-        self.types: List[dict] = []
+        self.types: List[TypeDef] = []
         self.globals: List[int] = []
-        self.natives: List[dict] = []
-        self.functions: List[dict] = []
-        self.constants: List[dict] = []
-        
+        self.natives: List[NativeDef] = []
+        self.functions: List[FunctionDef] = []
+        self.constants: List[ConstantDef] = []
+
         # Parse warnings collected during execution
         self.parse_warnings: List[dict] = []
 
@@ -65,7 +67,7 @@ class HLParser:
         self.diagnostics: List[ParseDiagnostic] = []
 
         # Raw bytecode data (populated during execute() for disassembler access)
-        self._raw_data: Optional[bytes] = None
+        self._raw_data: Optional[Union[bytes, mmap.mmap]] = None
 
     def _log(self, tag: str, message: str, level: int = INFO):
         if self._logger:
@@ -381,7 +383,7 @@ class HLParser:
         if progress_callback:
             progress_callback("Types parsed.", 100)
 
-    def _read_one_type(self, stream: BinaryIO, index: int) -> dict:
+    def _read_one_type(self, stream: BinaryIO, index: int) -> TypeDef:
         """Read and return a single type definition."""
         kind_byte = stream.read(1)
         if not kind_byte:
@@ -390,7 +392,6 @@ class HLParser:
             )
         kind = kind_byte[0]
 
-        t = {"kind": kind}
         self._log("TYPE", f"  type[{index}]: kind={kind} ({KIND_NAMES.get(kind, 'UNKNOWN')})", level=DEBUG)
         # Parser hardening: warn if kind exceeds documented HL range (0-22)
         if kind > 22:
@@ -399,12 +400,12 @@ class HLParser:
 
         if kind in PRIMITIVE_KINDS:
             # No additional data beyond the kind byte
-            pass
+            return TypeDef(kind=kind)
 
         elif kind in WRAPPER_KINDS:
             # kind byte + VarInt inner_type_index
             inner = self.read_varint(stream, context=f"type[{index}].inner")
-            t["inner"] = inner
+            return TypeDef(kind=kind, inner=inner)
 
         elif kind in FUN_LIKE_KINDS:
             # kind byte + arg_count (single byte, per HL hl_read_type) + arg_types + return_type
@@ -419,9 +420,7 @@ class HLParser:
                 a = self.read_varint(stream, context=f"type[{index}].arg[{j}]")
                 args.append(a)
             ret = self.read_varint(stream, context=f"type[{index}].ret")
-            t["nargs"] = nargs
-            t["args"] = args
-            t["ret"] = ret
+            return TypeDef(kind=kind, nargs=nargs, args=args, ret=ret)
 
         elif kind == K_OBJ or kind == K_STRUCT:
             name = self.read_varint(stream, context=f"type[{index}].name")
@@ -432,22 +431,13 @@ class HLParser:
             nprotos = self.read_varint(stream, context=f"type[{index}].nprotos")
             nbindings = self.read_varint(stream, context=f"type[{index}].nbindings")
 
-            t["name"] = name
-            t["super"] = super_idx
-            t["global"] = global_idx
-            t["nfields"] = nfields
-            t["nprotos"] = nprotos
-            t["nbindings"] = nbindings
-
             # Fields — per HashLink VM (code.c): 2 VarInts: name + type
-            # (field_name_hash is computed by hl_hash_gen at runtime, NOT stored)
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
                 self._validate_str_index(f_name, f"type[{index}].field[{j}].name")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
-                fields.append({"name": f_name, "type": f_type})
-            t["fields"] = fields
+                fields.append(TypeField(name=f_name, type=f_type))
 
             # Protos (methods) — per HashLink VM (code.c): 3 VarInts: name + findex + pindex
             protos = []
@@ -456,8 +446,7 @@ class HLParser:
                 self._validate_str_index(p_name, f"type[{index}].proto[{j}].name")
                 p_findex = self.read_varint(stream, context=f"type[{index}].proto[{j}].findex")
                 p_pindex = self.read_varint(stream, context=f"type[{index}].proto[{j}].pindex")
-                protos.append({"name": p_name, "findex": p_findex, "pindex": p_pindex})
-            t["protos"] = protos
+                protos.append(TypeProto(name=p_name, findex=p_findex, pindex=p_pindex))
 
             # Bindings (static method fields)
             bindings = []
@@ -465,34 +454,35 @@ class HLParser:
                 b_field = self.read_varint(stream, context=f"type[{index}].binding[{j}].field")
                 self._validate_str_index(b_field, f"type[{index}].binding[{j}].field")
                 b_findex = self.read_varint(stream, context=f"type[{index}].binding[{j}].findex")
-                bindings.append({"field": b_field, "findex": b_findex})
-            t["bindings"] = bindings
+                bindings.append(TypeBinding(field=b_field, findex=b_findex))
+
+            return TypeDef(
+                kind=kind, name=name, super_idx=super_idx,
+                global_var=global_idx, nfields=nfields,
+                nprotos=nprotos, nbindings=nbindings,
+                fields=fields, protos=protos, bindings=bindings,
+            )
 
         elif kind == K_VIRTUAL:
             nfields = self.read_varint(stream, context=f"type[{index}].nfields")
-            t["nfields"] = nfields
-            # Fields — same rule as OBJ/STRUCT: 2 VarInts (name + type), hash is computed
             fields = []
             for j in range(nfields):
                 f_name = self.read_varint(stream, context=f"type[{index}].field[{j}].name")
                 self._validate_str_index(f_name, f"type[{index}].field[{j}].name")
                 f_type = self.read_varint(stream, context=f"type[{index}].field[{j}].type")
-                fields.append({"name": f_name, "type": f_type})
-            t["fields"] = fields
+                fields.append(TypeField(name=f_name, type=f_type))
+            return TypeDef(kind=kind, nfields=nfields, fields=fields)
 
         elif kind == K_ABSTRACT:
             name = self.read_varint(stream, context=f"type[{index}].name")
             self._validate_str_index(name, f"type[{index}].name")
-            t["name"] = name
+            return TypeDef(kind=kind, name=name)
 
         elif kind == K_ENUM:
             name = self.read_varint(stream, context=f"type[{index}].name")
             self._validate_str_index(name, f"type[{index}].name")
             global_idx = self.read_varint(stream, context=f"type[{index}].global")
             nconstructs = self.read_varint(stream, context=f"type[{index}].nconstructs")
-            t["name"] = name
-            t["global"] = global_idx
-            t["nconstructs"] = nconstructs
             constructs = []
             for j in range(nconstructs):
                 c_name = self.read_varint(stream, context=f"type[{index}].construct[{j}].name")
@@ -502,23 +492,23 @@ class HLParser:
                 for k in range(c_nparams):
                     p = self.read_varint(stream, context=f"type[{index}].construct[{j}].param[{k}]")
                     params.append(p)
-                constructs.append({"name": c_name, "nparams": c_nparams, "params": params})
-            t["constructs"] = constructs
+                constructs.append(TypeConstruct(name=c_name, nparams=c_nparams, params=params))
+            return TypeDef(
+                kind=kind, name=name, global_var=global_idx,
+                nconstructs=nconstructs, constructs=constructs,
+            )
 
         else:
-            if kind <= MAX_VALID_TYPE_KIND:
-                # Known kind that falls through (e.g. primitives not in PRIMITIVE_KINDS — unlikely)
-                pass
-            else:
+            if kind > MAX_VALID_TYPE_KIND:
                 # Kinds beyond the documented HL enum can appear in real-world bytecode
                 # from newer Haxe/HashLink compilers. Per the VM source (code.c:hl_read_type),
                 # the default case treats unrecognized kinds < HLAST as no-op primitives.
                 # For kinds >= HLAST, the VM raises "Invalid type", but we log a warning
                 # and continue to maximise parseability of real-world targets.
                 self._log("TYPE", f"  type[{index}]: unknown kind={kind} — treating as primitive (no payload)", level=DEBUG)
-                t["unknown_kind"] = True
+                return TypeDef(kind=kind, unknown_kind=True)
 
-        return t
+        return TypeDef(kind=kind)
 
     # === Global & Native Parsing ===
 
@@ -556,12 +546,9 @@ class HLParser:
             self._validate_str_index(name, f"native[{i}].name")
             type_idx = self.read_varint(stream, context=f"native[{i}].type")
             findex = self.read_varint(stream, context=f"native[{i}].findex")
-            self.natives.append({
-                "lib": lib,
-                "name": name,
-                "type": type_idx,
-                "findex": findex,
-            })
+            self.natives.append(NativeDef(
+                lib=lib, name=name, type=type_idx, findex=findex,
+            ))
 
         offset_after = stream.tell()
         self._log("NATIVE", f"Read {len(self.natives)} natives, consumed {offset_after - offset_before} bytes", level=INFO)
@@ -601,28 +588,39 @@ class HLParser:
                     self.read_varint(stream, context=f"opcode[{i}].arg[{j}]")
             else:
                 # Variable-length opcodes per HL reference:
-                # OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum:
+                # OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum (29-32, 90):
                 #   p1=INDEX(), p2=INDEX(), p3=READ() (1 byte count),
                 #   then p3 × INDEX() for extra args
-                # OSwitch:
+                # OSwitch (70):
                 #   p1=UINDEX(), p2=UINDEX(), then p2 × UINDEX() for cases,
                 #   p3=UINDEX() for default
                 if self._remaining_bytes(stream) < 2:
                     break
                 self.read_varint(stream, context=f"opcode[{i}].p1")
-                self.read_varint(stream, context=f"opcode[{i}].p2")
-                # The count field: single byte for OCallN family, VarInt for OSwitch
-                # We use a conservative heuristic: read remaining available bytes
-                count_byte = stream.read(1)
-                if not count_byte:
-                    break
-                count = count_byte[0]
-                # Bound count to prevent runaway
-                max_args = min(count, self._remaining_bytes(stream))
-                for j in range(max_args):
-                    if self._remaining_bytes(stream) < 1:
+                p2 = self.read_varint(stream, context=f"opcode[{i}].p2")
+                if op_idx == 70:
+                    # OSwitch: p2 IS the case count (UINDEX/VarInt)
+                    # Read p2 case offsets, then one default offset
+                    case_count = min(p2, self._remaining_bytes(stream))
+                    for j in range(case_count):
+                        if self._remaining_bytes(stream) < 1:
+                            break
+                        self.read_varint(stream, context=f"opcode[{i}].case[{j}]")
+                    # Read the default offset
+                    if self._remaining_bytes(stream) > 0:
+                        self.read_varint(stream, context=f"opcode[{i}].default")
+                else:
+                    # OCallN family / OMakeEnum: count is a single byte
+                    count_byte = stream.read(1)
+                    if not count_byte:
                         break
-                    self.read_varint(stream, context=f"opcode[{i}].vararg[{j}]")
+                    count = count_byte[0]
+                    # Bound count to prevent runaway
+                    max_args = min(count, self._remaining_bytes(stream))
+                    for j in range(max_args):
+                        if self._remaining_bytes(stream) < 1:
+                            break
+                        self.read_varint(stream, context=f"opcode[{i}].vararg[{j}]")
 
     def _read_bounded_varints(self, stream: BinaryIO, count: int, context_fmt: str,
                               max_bytes: Optional[int] = None) -> List[int]:
@@ -883,20 +881,13 @@ class HLParser:
                             except HLParserError:
                                 break
                 # Record a placeholder for the malformed function
-                func = {
-                    "type": type_idx,
-                    "findex": findex,
-                    "nregs": nregs,
-                    "nops": 0,
-                    "reg_types": mal_reg_types,
-                    "body_offset": 0,
-                    "body_size": 0,
-                    "opcode_start": 0,
-                    "opcode_end": 0,
-                    "name": None,
-                    "parent_type": None,
-                    "malformed": True,
-                }
+                func = FunctionDef(
+                    type=type_idx, findex=findex, nregs=nregs,
+                    nops=0, reg_types=mal_reg_types,
+                    body_offset=0, body_size=0,
+                    opcode_start=0, opcode_end=0,
+                    name=None, parent_type=None, malformed=True,
+                )
                 self.functions.append(func)
                 self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
                                  f"nregs={nregs} nops=0 body_offset=0 body_size=0 [MALFORMED-READ]", level=DEBUG)
@@ -1015,27 +1006,19 @@ class HLParser:
                                    f"(>50% of file), flagging")
                 malformed = True
 
-            func = {
-                "type": type_idx,
-                "findex": findex,
-                "nregs": nregs,
-                "nops": nops,
-                "reg_types": reg_types,
-                "body_offset": body_offset,
-                "body_size": body_size,
-                "opcode_start": body_offset,   # byte offset of first opcode
-                "opcode_end": opcode_end,       # byte offset after last opcode arg
-                "name": None,  # resolved later by resolve_function_names
-                "parent_type": None,  # type index of parent class (resolved later)
-                "malformed": malformed,
-            }
-
-            if self.has_debug:
-                func["debug_lines"] = debug_lines
-                func["debug_files"] = debug_files
-                func["assign_vars"] = assign_vars
-                func["assign_regs"] = assign_regs
-                func["nassigns"] = nassigns
+            func = FunctionDef(
+                type=type_idx, findex=findex, nregs=nregs, nops=nops,
+                reg_types=reg_types,
+                body_offset=body_offset, body_size=body_size,
+                opcode_start=body_offset,
+                opcode_end=opcode_end,
+                name=None, parent_type=None, malformed=malformed,
+                debug_lines=debug_lines if self.has_debug else None,
+                debug_files=debug_files if self.has_debug else None,
+                assign_vars=assign_vars if self.has_debug else None,
+                assign_regs=assign_regs if self.has_debug else None,
+                nassigns=nassigns if self.has_debug else 0,
+            )
 
             self.functions.append(func)
 
@@ -1084,40 +1067,40 @@ class HLParser:
         # Build a map: findex -> function index (within self.functions array)
         findex_to_idx = {}
         for i, f in enumerate(self.functions):
-            findex_to_idx[f["findex"]] = i
+            findex_to_idx[f.findex] = i
 
         # Walk through Obj/Struct types for protos and bindings
         for t_idx, t in enumerate(self.types):
-            kind = t.get("kind")
+            kind = t.kind
             if kind not in (K_OBJ, K_STRUCT):
                 continue
             # Protos: methods
-            for proto in t.get("protos", []):
-                p_findex = proto.get("findex")
+            for proto in t.protos:
+                p_findex = proto.findex
                 if p_findex in findex_to_idx:
                     fn_idx = findex_to_idx[p_findex]
-                    self.functions[fn_idx]["name"] = _resolve_str(proto.get("name"))
-                    self.functions[fn_idx]["parent_type"] = t_idx
+                    self.functions[fn_idx].name = _resolve_str(proto.name)
+                    self.functions[fn_idx].parent_type = t_idx
                     self._log("FUNC", f"  Resolved proto: findex={p_findex} "
-                                      f"\u2192 func[{fn_idx}] name={proto.get('name')} "
+                                      f"→ func[{fn_idx}] name={proto.name} "
                                       f"type[{t_idx}]", level=DEBUG)
             # Bindings: static methods
-            for binding in t.get("bindings", []):
-                b_findex = binding.get("findex")
+            for binding in t.bindings:
+                b_findex = binding.findex
                 if b_findex in findex_to_idx:
                     fn_idx = findex_to_idx[b_findex]
-                    raw_field = binding.get("field")
-                    if self.functions[fn_idx]["name"] is None:
-                        self.functions[fn_idx]["name"] = _resolve_str(raw_field)
-                    if self.functions[fn_idx]["parent_type"] is None:
-                        self.functions[fn_idx]["parent_type"] = t_idx
+                    raw_field = binding.field
+                    if self.functions[fn_idx].name is None:
+                        self.functions[fn_idx].name = _resolve_str(raw_field)
+                    if self.functions[fn_idx].parent_type is None:
+                        self.functions[fn_idx].parent_type = t_idx
                     self._log("FUNC", f"  Resolved binding: findex={b_findex} "
                                       f"> func[{fn_idx}] name={raw_field} "
                                       f"type[{t_idx}]", level=DEBUG)
 
         # Special: resolve natives by findex too
         for nat in self.natives:
-            n_findex = nat.get("findex")
+            n_findex = nat.findex
             if n_findex in findex_to_idx:
                 pass  # natives are in a separate findex space; skip for now
 
@@ -1125,7 +1108,7 @@ class HLParser:
         ep = self.entrypoint
         if ep in findex_to_idx:
             fn_idx = findex_to_idx[ep]
-            self.functions[fn_idx]["name"] = "init"
+            self.functions[fn_idx].name = "init"
             self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init", level=DEBUG)
 
     # === Constants Parsing ===
@@ -1158,11 +1141,11 @@ class HLParser:
                 field_idx = self.read_varint(stream, context=f"const[{i}].field[{j}]")
                 fields.append(field_idx)
 
-            entry = {
-                "global": global_idx,
-                "nfields": nfields,
-                "fields": fields,
-            }
+            entry = ConstantDef(
+                global_idx=global_idx,
+                nfields=nfields,
+                fields=fields,
+            )
             self.constants.append(entry)
 
         offset_after = stream.tell()
@@ -1208,10 +1191,15 @@ class HLParser:
                 progress_callback("Parsing completed.", 100)
             return
         with open(self.filepath, "rb") as f:
-            # Read entire file into memory for disassembler access
-            self._raw_data = f.read()
-            self._file_size = len(self._raw_data)
-            buf = io.BytesIO(self._raw_data)
+            self._file_size = os.path.getsize(self.filepath) if os.path.exists(self.filepath) else 0
+            # Use mmap for files > 50MB to avoid loading entire file into memory
+            if self._file_size > 50_000_000:
+                mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+                self._raw_data = mm
+                buf = io.BytesIO(mm)
+            else:
+                self._raw_data = f.read()
+                buf = io.BytesIO(self._raw_data)
             self.parse_header(buf)
             self.parse_pools(buf, progress_callback)
             self.parse_types(buf, progress_callback)

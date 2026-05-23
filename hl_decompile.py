@@ -1095,8 +1095,8 @@ class ExprBuilder:
         """Resolve a function index to a name."""
         try:
             for func in self.parser.functions:
-                if func.get("findex") == findex and func.get("name"):
-                    return func["name"]
+                if func.findex == findex and func.name:
+                    return func.name
         except Exception:
             pass
         return f"fun[{findex}]"
@@ -1322,31 +1322,31 @@ class FunctionSigBuilder:
             return FunctionSig(name=f"func[{func_idx}]", params=[], ret_type=K_VOID,
                                is_method=False, parent_class=None)
 
-        name = func.get("name", f"func[{func_idx}]") or f"func[{func_idx}]"
-        parent_type = func.get("parent_type")
+        name = func.name or f"func[{func_idx}]"
+        parent_type = func.parent_type
         parent_name = None
         is_method = False
 
         # Check if parent class exists
         if parent_type is not None and parent_type < len(self.parser.types):
             pt = self.parser.types[parent_type]
-            pt_name = pt.get("name")
+            pt_name = pt.name
             if pt_name is not None and pt_name < len(self.parser.strings):
                 parent_name = self.parser.strings[pt_name]
                 is_method = True
 
         # Get function type signature
-        func_type = func.get("type", 0)
+        func_type = func.type
         ret_type = K_VOID
         param_types: List[int] = []
         has_this = False
 
         if func_type > 0 and func_type < len(self.parser.types):
             ft = self.parser.types[func_type]
-            ft_kind = ft.get("kind")
+            ft_kind = ft.kind
             if ft_kind in (K_FUN, K_METHOD):
-                param_types = ft.get("args", [])
-                ret_type = ft.get("ret", K_VOID)
+                param_types = ft.args
+                ret_type = ft.ret if ft.ret is not None else K_VOID
             if ft_kind == K_METHOD or is_method:
                 has_this = True
 
@@ -1394,7 +1394,7 @@ class TypeResolver:
             return f"type[{type_idx}]"
 
         t = self.parser.types[type_idx]
-        kind = t.get("kind", -1)
+        kind = t.kind
 
         result = self._resolve_kind(kind, t, type_idx)
         self._cache[type_idx] = result
@@ -1406,24 +1406,24 @@ class TypeResolver:
         # Object/Struct types — check before primitive fallback since they
         # have names that should be resolved from the string pool
         if kind == K_OBJ or kind == K_STRUCT:
-            name_idx = t.get("name")
+            name_idx = t.name
             if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
                 return self.parser.strings[name_idx]
             return f"Class{type_idx}"
 
         # Enum types
         if kind == K_ENUM:
-            name_idx = t.get("name")
+            name_idx = t.name
             if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
                 return self.parser.strings[name_idx]
             return f"Enum{type_idx}"
 
-        # Abstract types
+# Abstract types
         if kind == K_ABSTRACT:
-            name_idx = t.get("name")
+            name_idx = t.name
             if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
                 return self.parser.strings[name_idx]
-            return t.get("name", f"Abstract{type_idx}")
+            return t.name if t.name is not None else f"Abstract{type_idx}"
 
         # Primitive types (no payload beyond kind byte)
         name = HLOOP_NAMES.get(kind)
@@ -1432,7 +1432,7 @@ class TypeResolver:
 
         # Wrapper types (HREF, HNULL, HPACKED)
         if kind in (K_REF, K_NULL, K_PACKED):
-            inner = t.get("inner", -1)
+            inner = t.inner if t.inner is not None else -1
             inner_str = self.resolve(inner)
             if kind == K_REF:
                 return f"hl.Ref<{inner_str}>"
@@ -1443,8 +1443,8 @@ class TypeResolver:
 
         # Fun/Method types
         if kind in (K_FUN, K_METHOD):
-            args_list = t.get("args", [])
-            ret = t.get("ret", K_VOID)
+            args_list = t.args
+            ret = t.ret if t.ret is not None else K_VOID
             arg_strs = [self.resolve(a) for a in args_list]
             ret_str = self.resolve(ret)
             return f"({', '.join(arg_strs)}) -> {ret_str}"
@@ -1482,7 +1482,7 @@ class ClassBuilder:
         assigned_funcs: Set[int] = set()
 
         for t_idx, t in enumerate(self.parser.types):
-            kind = t.get("kind")
+            kind = t.kind
             if kind == K_OBJ or kind == K_STRUCT:
                 cls = self._build_class(t_idx, t)
                 if cls is not None:
@@ -1499,24 +1499,24 @@ class ClassBuilder:
         orphans: List[int] = []
         for i, fn in enumerate(self.parser.functions):
             if i not in assigned_funcs:
-                if not fn.get("malformed") and fn.get("nops", 0) > 0:
+                if not fn.malformed and fn.nops > 0:
                     orphans.append(i)
 
         return classes, enums, orphans
 
     def _build_class(self, t_idx: int, t: dict) -> Optional[ClassDef]:
         """Build a ClassDef from a type dict."""
-        name_idx = t.get("name", -1)
+        name_idx = t.name if t.name is not None else -1
         if name_idx < 0 or name_idx >= len(self.parser.strings):
             return None
         name = self.parser.strings[name_idx]
 
         # Super class
-        super_idx = t.get("super", 0)
+        super_idx = t.super_idx if t.super_idx is not None else 0
         super_name = None
         if super_idx > 0 and super_idx < len(self.parser.types):
             super_t = self.parser.types[super_idx]
-            s_name_idx = super_t.get("name")
+            s_name_idx = super_t.name
             if s_name_idx is not None and s_name_idx < len(self.parser.strings):
                 super_name = self.parser.strings[s_name_idx]
 
@@ -1525,9 +1525,9 @@ class ClassBuilder:
 
         # Method signatures from protos
         methods: List[FunctionSig] = []
-        for proto in t.get("protos", []):
-            p_findex = proto.get("findex")
-            p_name_idx = proto.get("name")
+        for proto in t.protos:
+            p_findex = proto.findex
+            p_name_idx = proto.name
 
             # Try to find the function index for this proto
             fn_sig = self._sig_from_proto(p_findex, p_name_idx, t_idx)
@@ -1542,9 +1542,9 @@ class ClassBuilder:
 
         # Static methods from bindings
         static_methods: List[FunctionSig] = []
-        for binding in t.get("bindings", []):
-            b_findex = binding.get("findex")
-            b_field = binding.get("field")
+        for binding in t.bindings:
+            b_findex = binding.findex
+            b_field = binding.field
             if b_findex is not None:
                 static_sig = self._sig_from_findex(b_findex)
                 if static_sig is not None:
@@ -1573,18 +1573,18 @@ class ClassBuilder:
             chain.append(current)
             visited.add(current)
             t = self.parser.types[current]
-            kind = t.get("kind")
+            kind = t.kind
             if kind not in (K_OBJ, K_STRUCT):
                 break
-            current = t.get("super", 0)
+            current = t.super_idx if t.super_idx is not None else 0
 
         chain.reverse()  # root first
 
         for ct_idx in chain:
             ct = self.parser.types[ct_idx]
-            for f in ct.get("fields", []):
-                f_name_idx = f.get("name")
-                f_type_idx = f.get("type", K_DYN)
+            for f in ct.fields:
+                f_name_idx = f.name
+                f_type_idx = f.type
                 if f_name_idx is not None and f_name_idx < len(self.parser.strings):
                     f_name = self.parser.strings[f_name_idx]
                 else:
@@ -1599,7 +1599,7 @@ class ClassBuilder:
         parent_name = ""
         if parent_t_idx < len(self.parser.types):
             pt = self.parser.types[parent_t_idx]
-            pn = pt.get("name")
+            pn = pt.name
             if pn is not None and pn < len(self.parser.strings):
                 parent_name = self.parser.strings[pn]
 
@@ -1609,15 +1609,15 @@ class ClassBuilder:
 
         # Find the actual function for signature details
         for i, fn in enumerate(self.parser.functions):
-            if fn.get("findex") == findex:
-                ft = fn.get("type", 0)
+            if fn.findex == findex:
+                ft = fn.type
                 ret_type = K_VOID
                 params: List[Tuple[str, int]] = []
                 if 0 < ft < len(self.parser.types):
                     ftt = self.parser.types[ft]
-                    if ftt.get("kind") in (K_FUN, K_METHOD):
-                        args_list = ftt.get("args", [])
-                        ret_type = ftt.get("ret", K_VOID)
+                    if ftt.kind in (K_FUN, K_METHOD):
+                        args_list = ftt.args
+                        ret_type = ftt.ret if ftt.ret is not None else K_VOID
                         # Skip 'this' for methods
                         start = 1 if len(args_list) > 0 else 0
                         for j in range(start, len(args_list)):
@@ -1638,16 +1638,16 @@ class ClassBuilder:
     def _sig_from_findex(self, findex: int) -> Optional[FunctionSig]:
         """Build a FunctionSig from a raw findex lookup."""
         for i, fn in enumerate(self.parser.functions):
-            if fn.get("findex") == findex:
-                fn_name = fn.get("name", f"fun[{findex}]") or f"fun[{findex}]"
-                ft = fn.get("type", 0)
+            if fn.findex == findex:
+                fn_name = fn.name or f"fun[{findex}]"
+                ft = fn.type
                 ret_type = K_VOID
                 params: List[Tuple[str, int]] = []
                 if 0 < ft < len(self.parser.types):
                     ftt = self.parser.types[ft]
-                    if ftt.get("kind") in (K_FUN, K_METHOD):
-                        args_list = ftt.get("args", [])
-                        ret_type = ftt.get("ret", K_VOID)
+                    if ftt.kind in (K_FUN, K_METHOD):
+                        args_list = ftt.args
+                        ret_type = ftt.ret if ftt.ret is not None else K_VOID
                         for j in range(len(args_list)):
                             params.append((f"p{j}", args_list[j]))
 
@@ -1662,20 +1662,20 @@ class ClassBuilder:
                 )
         return None
 
-    def _build_enum(self, t_idx: int, t: dict) -> Optional[EnumDef]:
+    def _build_enum(self, t_idx: int, t: 'TypeDef') -> Optional[EnumDef]:
         """Build an EnumDef from a type dict."""
-        name_idx = t.get("name", -1)
+        name_idx = t.name if t.name is not None else -1
         if name_idx < 0 or name_idx >= len(self.parser.strings):
             return None
         name = self.parser.strings[name_idx]
 
         constructs: List[Tuple[str, List[int]]] = []
-        for c in t.get("constructs", []):
-            c_name_idx = c.get("name")
+        for c in t.constructs:
+            c_name_idx = c.name
             c_name = "?"
             if c_name_idx is not None and c_name_idx < len(self.parser.strings):
                 c_name = self.parser.strings[c_name_idx]
-            constructs.append((c_name, c.get("params", [])))
+            constructs.append((c_name, c.params))
 
         return EnumDef(name=name, type_idx=t_idx, constructs=constructs)
 
@@ -2066,12 +2066,12 @@ class Decompiler:
         # Step 2: Decompile each function
         for i in range(nfuncs):
             fn = self.parser.functions[i]
-            if fn.get("malformed") or fn.get("nops", 0) <= 0:
+            if fn.malformed or fn.nops <= 0:
                 continue
 
             if progress_callback:
                 pct = 5 + int((i / max(nfuncs, 1)) * 90)
-                fn_name = fn.get("name", f"func[{i}]") or f"func[{i}]"
+                fn_name = fn.name or f"func[{i}]"
                 progress_callback(f"Decompiling {fn_name}...", pct)
 
             try:
@@ -2099,7 +2099,7 @@ class Decompiler:
         if func_idx < 0 or func_idx >= len(self.parser.functions):
             return None
         fn = self.parser.functions[func_idx]
-        if fn.get("malformed") or fn.get("nops", 0) <= 0:
+        if fn.malformed or fn.nops <= 0:
             return None
         try:
             return self._decompile_function(func_idx)
@@ -2114,16 +2114,16 @@ class Decompiler:
         # Get instructions from disassembler
         instructions = self.disasm.disassemble_function(func_idx)
         instr_count = len(instructions)
-        nops = func.get("nops", 0)
-        nregs = func.get("nregs", 0)
-        reg_types = func.get("reg_types", [])
+        nops = func.nops
+        nregs = func.nregs
+        reg_types = func.reg_types
 
         if not instructions:
             # Return an empty IR function
             sig = FunctionSigBuilder(self.parser).build(func_idx)
             return IRFunction(
                 name=sig.name,
-                findex=func.get("findex", -1),
+                findex=func.findex,
                 func_idx=func_idx,
                 sig=sig,
                 body=[],
@@ -2137,8 +2137,8 @@ class Decompiler:
         uses = RegisterLiveness.compute_uses(instructions, nregs)
 
         # Step 2: Variable mapping
-        assign_vars = func.get("assign_vars", [])
-        assign_regs = func.get("assign_regs", [])
+        assign_vars = func.assign_vars
+        assign_regs = func.assign_regs
         var_mapper = VariableMapper(reg_types, assign_vars, assign_regs)
         reg_names = var_mapper.map(defs, uses)
 
@@ -2173,12 +2173,12 @@ class Decompiler:
         sig = sig_builder.build(func_idx)
 
         # Override name from the function data
-        fn_name = func.get("name", None) or sig.name
+        fn_name = func.name or sig.name
 
         # Build the IR function
         ir_fn = IRFunction(
             name=fn_name,
-            findex=func.get("findex", -1),
+            findex=func.findex,
             func_idx=func_idx,
             sig=sig,
             body=structured_stmts,

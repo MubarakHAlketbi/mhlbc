@@ -69,9 +69,18 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
   - `_exceptions.py` — HLParserError
   - `_validator.py` — ParseValidator
   - `_diagnostics.py` — ParseDiagnostic dataclass (NEW)
-- [ ] **F2** — Add typed dataclass/NamedTuple intermediate layer instead of raw dicts. Would catch structural errors at construction time. `[report: Section 9.2]`
+- [x] **F2** — Add typed dataclass/NamedTuple intermediate layer instead of raw dicts. Would catch structural errors at construction time. `[report: Section 9.2]`
+  - `hl_parser/_types.py`: TypeDef, TypeField, TypeProto, TypeBinding, TypeConstruct, NativeDef, FunctionDef, ConstantDef
+  - All constructors (TypeDef, NativeDef, FunctionDef, ConstantDef) use typed dataclasses
+  - All consumers (cli.py, app.py, hl_disasm.py, hl_decompile.py, _validator.py) use attribute access
+  - All tests updated for attribute access
+  - **418 tests passing** (pre-existing 4 fixture failures unrelated)
 - [x] **F3** — Add `ParseDiagnostic` dataclass with section, offset, severity, message, recovery fields. Integrated into parser: `_diagnostic()` method, `diagnostics: List[ParseDiagnostic]` attribute, backward-compat via `_warn()` updates. `[report: Section 9.2]`
-- [ ] **F4** — Consider memory-mapped I/O for files > 50MB instead of reading entire file into `_raw_data`. `[report: Section 9.2]`
+- [x] **F4** — Consider memory-mapped I/O for files > 50MB instead of reading entire file into `_raw_data`. `[report: Section 9.2]`
+  - Uses `mmap.mmap` for files > 50MB in `execute()` file-open path
+  - Falls back to `f.read()` for smaller files or when stream is passed in
+  - `_raw_data` typed as `Optional[Union[bytes, mmap.mmap]]`
+  - mmap supports slicing (`_raw_data[op_start:op_end]`) like bytes
 - [x] **F5** — Verify `hl_worker.py` (31 lines) signal completeness — ensure all parser output fields are emitted. `[report: Section 6.2]`
 
 ---
@@ -117,8 +126,8 @@ Extracted from `report.md` (Session 15 audit) and consolidated in Session 16 —
 || C. Disassembler Hardening | 3 | P1 | **3/3** |
 || D. Decompiler Hardening | 5 | P1 | **5/5** |
 || E. Test Suite Gaps | 7 | P1-P2 | **7/7** |
-|| F. Architecture Improvements | 5 (9 sub) | P2 | **3/5** |
+||| F. Architecture Improvements | 5 (9 sub) | P2 | **5/5** |
 || G. Documentation Fixes | 5 | P2 | **5/5** |
 || H. CI/CD & Process | 5 | P2-P3 | **3/5** |
 || I. Farever Resolution | 7 | P1-P2 (Windows) | 0/7 |
-|| **Total** | **48 items + sub-items** | | **36/48** |
+||| **Total** | **48 items + sub-items** | | **38/48** |

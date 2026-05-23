@@ -294,7 +294,7 @@ class TestDisassembler:
         p = HLParser('<test>')
         p.execute(stream_from_bytes(hlb))
         # Force malformed
-        p.functions[0]["malformed"] = True
+        p.functions[0].malformed = True
         
         d = Disassembler(p)
         instrs = d.disassemble_function(0)

@@ -1,4 +1,5 @@
-"""HashLink Bytecode Parser — Modular Package.
+"""
+HashLink Bytecode Parser — Modular Package.
 
 Re-exports all public API from the monolithic hl_parser.py for backward compatibility.
 """
@@ -17,6 +18,10 @@ from ._exceptions import HLParserError
 from ._parser import HLParser
 from ._validator import ParseValidator
 from ._diagnostics import ParseDiagnostic
+from ._types import (
+    TypeDef, TypeField, TypeProto, TypeBinding, TypeConstruct,
+    NativeDef, FunctionDef, ConstantDef,
+)
 
 __all__ = [
     "HLParser", "HLParserError", "ParseValidator", "ParseDiagnostic",
@@ -29,4 +34,6 @@ __all__ = [
     "PRIMITIVE_KINDS", "WRAPPER_KINDS", "FUN_LIKE_KINDS",
     "MAX_VALID_TYPE_KIND",
     "RESYNC_MAX_SCAN", "FUNC_HEADER_MIN_BYTES", "FUNC_BODY_MAX_FRACTION",
+    "TypeDef", "TypeField", "TypeProto", "TypeBinding", "TypeConstruct",
+    "NativeDef", "FunctionDef", "ConstantDef",
 ]

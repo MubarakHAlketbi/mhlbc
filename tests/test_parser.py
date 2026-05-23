@@ -3,7 +3,7 @@ import io
 import os
 import struct
 import pytest
-from hl_parser import HLParser, HLParserError, KIND_NAMES
+from hl_parser import HLParser, HLParserError, KIND_NAMES, TypeDef, TypeField, TypeProto, TypeBinding, TypeConstruct, NativeDef, FunctionDef, ConstantDef
 from tests.hl_helper import (
     encode_varint, build_header, build_ints_pool, build_floats_pool,
     build_strings_pool, build_bytes_pool, build_minimal_bytecode,
@@ -412,9 +412,7 @@ class TestPrimitiveTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(data))
         assert len(parser.types) == 1
-        assert parser.types[0]["kind"] == kind
-        # Verify only the expected keys are present
-        assert set(parser.types[0].keys()) == {"kind"}
+        assert parser.types[0].kind == kind
 
     def test_multiple_primitives(self, parser):
         kinds = [K_VOID, K_I32, K_BOOL, K_DYN, K_ARRAY]
@@ -424,7 +422,7 @@ class TestPrimitiveTypes:
         parser.parse_types(stream_from_bytes(data))
         assert len(parser.types) == 5
         for i, k in enumerate(kinds):
-            assert parser.types[i]["kind"] == k
+            assert parser.types[i].kind == k
 
     def test_zero_types_does_nothing(self, parser):
         """ntypes=0 means no types are read."""
@@ -446,8 +444,8 @@ class TestWrapperTypes:
         bc = build_type_wrapper(kind, inner_type_idx=42)
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
-        assert parser.types[0]["kind"] == kind
-        assert parser.types[0]["inner"] == 42
+        assert parser.types[0].kind == kind
+        assert parser.types[0].inner == 42
 
     def test_wrapped_chain(self, parser):
         """Null<Ref<I32>> → three wrapper types in sequence."""
@@ -460,11 +458,11 @@ class TestWrapperTypes:
         data = build_type_constructors_pool([t0, t1, t2])
         parser.ntypes = 3
         parser.parse_types(stream_from_bytes(data))
-        assert parser.types[0]["kind"] == K_I32
-        assert parser.types[1]["kind"] == K_REF
-        assert parser.types[1]["inner"] == 0
-        assert parser.types[2]["kind"] == K_NULL
-        assert parser.types[2]["inner"] == 1
+        assert parser.types[0].kind == K_I32
+        assert parser.types[1].kind == K_REF
+        assert parser.types[1].inner == 0
+        assert parser.types[2].kind == K_NULL
+        assert parser.types[2].inner == 1
 
     def test_truncated_after_kind(self, parser):
         """Wrapper type with kind byte but no inner VarInt."""
@@ -481,10 +479,10 @@ class TestFunLikeTypes:
         bc = build_type_funlike(kind, arg_type_indices=[], ret_type_idx=K_VOID)
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
-        assert parser.types[0]["kind"] == kind
-        assert parser.types[0]["nargs"] == 0
-        assert parser.types[0]["args"] == []
-        assert parser.types[0]["ret"] == K_VOID
+        assert parser.types[0].kind == kind
+        assert parser.types[0].nargs == 0
+        assert parser.types[0].args == []
+        assert parser.types[0].ret == K_VOID
 
     @pytest.mark.parametrize("kind", [K_FUN, K_METHOD])
     def test_with_args(self, parser, kind):
@@ -492,10 +490,10 @@ class TestFunLikeTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == kind
-        assert t["nargs"] == 2
-        assert t["args"] == [3, 7]
-        assert t["ret"] == 3
+        assert t.kind == kind
+        assert t.nargs == 2
+        assert t.args == [3, 7]
+        assert t.ret == 3
 
     def test_fun_with_many_args(self, parser):
         args = list(range(10, 20))
@@ -503,8 +501,8 @@ class TestFunLikeTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["nargs"] == 10
-        assert t["args"] == args
+        assert t.nargs == 10
+        assert t.args == args
 
 
 class TestObjTypes:
@@ -521,14 +519,14 @@ class TestObjTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == kind
-        assert t["name"] == 0
-        assert t["super"] == 0
-        assert t["global"] == 0
-        assert t["nfields"] == 0
-        assert t["fields"] == []
-        assert t["protos"] == []
-        assert t["bindings"] == []
+        assert t.kind == kind
+        assert t.name == 0
+        assert t.super_idx == 0
+        assert t.global_var == 0
+        assert t.nfields == 0
+        assert t.fields == []
+        assert t.protos == []
+        assert t.bindings == []
 
     def test_obj_with_fields(self, parser):
         """OBJ with 2 fields, 1 proto, 1 binding."""
@@ -549,15 +547,15 @@ class TestObjTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_OBJ
-        assert t["name"] == 5
-        assert t["super"] == 0
-        assert t["global"] == 1
-        assert t["nfields"] == 2
-        assert t["fields"][0] == {"name": 10, "type": 3}
-        assert t["fields"][1] == {"name": 11, "type": 7}
-        assert t["protos"][0] == {"name": 20, "findex": 0, "pindex": 0}
-        assert t["bindings"][0] == {"field": 0, "findex": 1}
+        assert t.kind == K_OBJ
+        assert t.name == 5
+        assert t.super_idx == 0
+        assert t.global_var == 1
+        assert t.nfields == 2
+        assert t.fields[0] == TypeField(name=10, type=3)
+        assert t.fields[1] == TypeField(name=11, type=7)
+        assert t.protos[0] == TypeProto(name=20, findex=0, pindex=0)
+        assert t.bindings[0] == TypeBinding(field=0, findex=1)
 
     def test_struct_same_as_obj(self, parser):
         """STRUCT has identical serialization to OBJ."""
@@ -571,8 +569,8 @@ class TestObjTypes:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_STRUCT
-        assert t["name"] == 3
+        assert t.kind == K_STRUCT
+        assert t.name == 3
 
 
 class TestVirtualType:
@@ -583,9 +581,9 @@ class TestVirtualType:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_VIRTUAL
-        assert t["nfields"] == 0
-        assert t["fields"] == []
+        assert t.kind == K_VIRTUAL
+        assert t.nfields == 0
+        assert t.fields == []
 
     def test_with_fields(self, parser):
         bc = build_type_virtual([
@@ -595,10 +593,10 @@ class TestVirtualType:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_VIRTUAL
-        assert t["nfields"] == 2
-        assert t["fields"][0] == {"name": 0, "type": K_I32}
-        assert t["fields"][1] == {"name": 1, "type": K_BOOL}
+        assert t.kind == K_VIRTUAL
+        assert t.nfields == 2
+        assert t.fields[0] == TypeField(name=0, type=K_I32)
+        assert t.fields[1] == TypeField(name=1, type=K_BOOL)
 
 
 class TestAbstractType:
@@ -609,8 +607,8 @@ class TestAbstractType:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_ABSTRACT
-        assert t["name"] == 42
+        assert t.kind == K_ABSTRACT
+        assert t.name == 42
 
 
 class TestEnumType:
@@ -621,11 +619,11 @@ class TestEnumType:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_ENUM
-        assert t["name"] == 5
-        assert t["global"] == 1
-        assert t["nconstructs"] == 0
-        assert t["constructs"] == []
+        assert t.kind == K_ENUM
+        assert t.name == 5
+        assert t.global_var == 1
+        assert t.nconstructs == 0
+        assert t.constructs == []
 
     def test_with_constructors(self, parser):
         bc = build_type_enum(
@@ -639,11 +637,11 @@ class TestEnumType:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bc))
         t = parser.types[0]
-        assert t["kind"] == K_ENUM
-        assert t["nconstructs"] == 3
-        assert t["constructs"][0] == {"name": 0, "nparams": 2, "params": [K_I32, K_BOOL]}
-        assert t["constructs"][1] == {"name": 1, "nparams": 1, "params": [K_F64]}
-        assert t["constructs"][2] == {"name": 2, "nparams": 0, "params": []}
+        assert t.kind == K_ENUM
+        assert t.nconstructs == 3
+        assert t.constructs[0] == TypeConstruct(name=0, nparams=2, params=[K_I32, K_BOOL])
+        assert t.constructs[1] == TypeConstruct(name=1, nparams=1, params=[K_F64])
+        assert t.constructs[2] == TypeConstruct(name=2, nparams=0, params=[])
 
 
 class TestUnknownTypeKind:
@@ -654,15 +652,15 @@ class TestUnknownTypeKind:
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bytes([255])))
         assert len(parser.types) == 1
-        assert parser.types[0]["kind"] == 255
-        assert parser.types[0].get("unknown_kind") is True
+        assert parser.types[0].kind == 255
+        assert parser.types[0].unknown_kind is True
 
     def test_sentinel_last(self, parser):
         """K_HLAST(24) is a known primitive — parsed without error."""
         parser.ntypes = 1
         parser.parse_types(stream_from_bytes(bytes([24])))
         assert len(parser.types) == 1
-        assert parser.types[0]["kind"] == 24
+        assert parser.types[0].kind == 24
 
 
 # =============================================================================
@@ -713,9 +711,9 @@ class TestNativesParsing:
         parser.nnatives = len(natives)
         parser.parse_natives(stream_from_bytes(data))
         assert len(parser.natives) == 3
-        assert parser.natives[0] == {"lib": 0, "name": 1, "type": K_FUN, "findex": 0}
-        assert parser.natives[1] == {"lib": 0, "name": 2, "type": K_FUN, "findex": 1}
-        assert parser.natives[2] == {"lib": 1, "name": 3, "type": K_FUN, "findex": 2}
+        assert parser.natives[0] == NativeDef(lib=0, name=1, type=K_FUN, findex=0)
+        assert parser.natives[1] == NativeDef(lib=0, name=2, type=K_FUN, findex=1)
+        assert parser.natives[2] == NativeDef(lib=1, name=3, type=K_FUN, findex=2)
 
     def test_truncated_stream(self, parser):
         """Partial native entry (only lib, truncated before name)."""
@@ -769,20 +767,20 @@ class TestFullIntegration:
 
         # Verify types
         assert len(p.types) == 4
-        assert p.types[0]["kind"] == K_I32
-        assert p.types[1]["kind"] == K_BOOL
-        assert p.types[2]["kind"] == K_OBJ
-        assert p.types[2]["fields"][0]["name"] == 1
-        assert p.types[3]["kind"] == K_REF
-        assert p.types[3]["inner"] == 2
+        assert p.types[0].kind == K_I32
+        assert p.types[1].kind == K_BOOL
+        assert p.types[2].kind == K_OBJ
+        assert p.types[2].fields[0].name == 1
+        assert p.types[3].kind == K_REF
+        assert p.types[3].inner == 2
 
         # Verify globals
         assert p.globals == [K_I32, K_BOOL, 2]
 
         # Verify natives
         assert len(p.natives) == 2
-        assert p.natives[0] == {"lib": 0, "name": 0, "type": K_FUN, "findex": 0}
-        assert p.natives[1] == {"lib": 0, "name": 1, "type": K_FUN, "findex": 1}
+        assert p.natives[0] == NativeDef(lib=0, name=0, type=K_FUN, findex=0)
+        assert p.natives[1] == NativeDef(lib=0, name=1, type=K_FUN, findex=1)
 
         # Verify previous sections still correct
         assert p.version == 5
@@ -802,9 +800,9 @@ class TestFullIntegration:
             p = HLParser("/dev/null")
             p.execute(stream_from_bytes(bc))
             assert p.version == ver
-            assert p.types[0]["kind"] == K_F64
+            assert p.types[0].kind == K_F64
             assert p.globals == [0]
-            assert p.natives[0]["findex"] == 0
+            assert p.natives[0].findex == 0
 
     def test_type_stream_position_correct(self):
         """Verify no bytes lost/skipped between pools and types."""
@@ -832,7 +830,7 @@ class TestFullIntegration:
         assert len(bc) == type_end  # consumed exactly to end
         assert p.ints == [77]
         assert p.strings == ["marker"]
-        assert p.types[0]["kind"] == K_I32
+        assert p.types[0].kind == K_I32
 
 
 # =============================================================================
@@ -857,12 +855,12 @@ class TestFunctionParsing:
         parser.parse_functions(stream_from_bytes(entry))
         assert len(parser.functions) == 1
         f = parser.functions[0]
-        assert f["type"] == 0
-        assert f["findex"] == 42
-        assert f["nregs"] == 0
-        assert f["nops"] == 0
-        assert f["reg_types"] == []
-        assert f["name"] is None
+        assert f.type == 0
+        assert f.findex == 42
+        assert f.nregs == 0
+        assert f.nops == 0
+        assert f.reg_types == []
+        assert f.name is None
 
     def test_function_with_regs(self, parser):
         """Function with 3 registers (types 3, 7, 0), no opcodes."""
@@ -870,11 +868,11 @@ class TestFunctionParsing:
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
         f = parser.functions[0]
-        assert f["type"] == 1
-        assert f["findex"] == 5
-        assert f["nregs"] == 3
-        assert f["reg_types"] == [3, 7, 0]
-        assert f["nops"] == 0
+        assert f.type == 1
+        assert f.findex == 5
+        assert f.nregs == 3
+        assert f.reg_types == [3, 7, 0]
+        assert f.nops == 0
 
     def test_function_with_opcodes(self, parser):
         """Function with registers and opcodes."""
@@ -884,10 +882,10 @@ class TestFunctionParsing:
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
         f = parser.functions[0]
-        assert f["type"] == 0
-        assert f["nregs"] == 2
-        assert f["reg_types"] == regs
-        assert f["nops"] == 4
+        assert f.type == 0
+        assert f.nregs == 2
+        assert f.reg_types == regs
+        assert f.nops == 4
 
     def test_multiple_functions(self, parser):
         """Multiple functions in sequence."""
@@ -901,15 +899,15 @@ class TestFunctionParsing:
         parser.nfunctions = 3
         parser.parse_functions(stream_from_bytes(data))
         assert len(parser.functions) == 3
-        assert parser.functions[0]["findex"] == 0
-        assert parser.functions[1]["findex"] == 1
-        assert parser.functions[2]["findex"] == 2
-        assert parser.functions[0]["nregs"] == 1
-        assert parser.functions[1]["nregs"] == 2
-        assert parser.functions[2]["nregs"] == 0
-        assert parser.functions[0]["nops"] == 2
-        assert parser.functions[1]["nops"] == 2
-        assert parser.functions[2]["nops"] == 1
+        assert parser.functions[0].findex == 0
+        assert parser.functions[1].findex == 1
+        assert parser.functions[2].findex == 2
+        assert parser.functions[0].nregs == 1
+        assert parser.functions[1].nregs == 2
+        assert parser.functions[2].nregs == 0
+        assert parser.functions[0].nops == 2
+        assert parser.functions[1].nops == 2
+        assert parser.functions[2].nops == 1
 
     def test_function_with_variable_arg_opcode(self, parser):
         """Variable-arg opcodes (OCallN = 29) are skipped correctly."""
@@ -919,8 +917,8 @@ class TestFunctionParsing:
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
         f = parser.functions[0]
-        assert f["nops"] == 2
-        assert f["nregs"] == 2
+        assert f.nops == 2
+        assert f.nregs == 2
 
     def test_truncated_function_raises(self, parser):
         """Incomplete function header is caught gracefully with a warning."""
@@ -942,7 +940,7 @@ class TestFunctionParsing:
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(data))
         assert len(parser.functions) == 1  # malformed placeholder recorded
-        assert parser.functions[0]["malformed"]
+        assert parser.functions[0].malformed
         assert any("negative nops" in w["message"] for w in parser.parse_warnings)
 
     def test_negative_nregs_clamped(self, parser):
@@ -955,8 +953,8 @@ class TestFunctionParsing:
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(data))
         assert len(parser.functions) == 1
-        assert parser.functions[0]["nregs"] == 0    # clamped
-        assert parser.functions[0]["malformed"] == True
+        assert parser.functions[0].nregs == 0    # clamped
+        assert parser.functions[0].malformed == True
         assert any("negative nregs" in w["message"] for w in parser.parse_warnings)
 
     def test_negative_nops_resync(self, parser):
@@ -975,18 +973,18 @@ class TestFunctionParsing:
         parser.parse_functions(stream)
         # Should have parsed both functions
         assert len(parser.functions) >= 2
-        assert parser.functions[0]["malformed"]
-        assert not parser.functions[1]["malformed"]
-        assert parser.functions[1]["type"] == 1
-        assert parser.functions[1]["findex"] == 1
+        assert parser.functions[0].malformed
+        assert not parser.functions[1].malformed
+        assert parser.functions[1].type == 1
+        assert parser.functions[1].findex == 1
 
     def test_malformed_field_present(self, parser):
         """Every function dict has a malformed field."""
         entry = build_function_entry(type_idx=0, findex=0, reg_types=[3], opcodes=[68])
         parser.nfunctions = 1
         parser.parse_functions(stream_from_bytes(entry))
-        assert "malformed" in parser.functions[0]
-        assert parser.functions[0]["malformed"] == False
+        assert hasattr(parser.functions[0], "malformed")
+        assert parser.functions[0].malformed == False
 
     def test_parse_warnings_collected(self, parser):
         """parse_warnings list is populated on non-fatal issues."""
@@ -1015,16 +1013,16 @@ class TestFunctionParsing:
         p = HLParser("/dev/null")
         p.execute(stream_from_bytes(bc))
         assert len(p.functions) == 2
-        assert p.functions[0]["type"] == 0
-        assert p.functions[0]["findex"] == 0
-        assert p.functions[0]["nregs"] == 2
-        assert p.functions[0]["reg_types"] == [3, 7]
-        assert p.functions[0]["nops"] == 2
-        assert p.functions[1]["type"] == 1
-        assert p.functions[1]["findex"] == 1
-        assert p.functions[1]["nregs"] == 1
-        assert p.functions[1]["reg_types"] == [7]
-        assert p.functions[1]["nops"] == 2
+        assert p.functions[0].type == 0
+        assert p.functions[0].findex == 0
+        assert p.functions[0].nregs == 2
+        assert p.functions[0].reg_types == [3, 7]
+        assert p.functions[0].nops == 2
+        assert p.functions[1].type == 1
+        assert p.functions[1].findex == 1
+        assert p.functions[1].nregs == 1
+        assert p.functions[1].reg_types == [7]
+        assert p.functions[1].nops == 2
         # Verify earlier sections intact
         assert p.ints == [42]
         assert p.strings == ["test"]
@@ -1060,8 +1058,8 @@ class TestFunctionNameResolution:
         parser.parse_functions(stream_from_bytes(fn_data))
 
         assert len(parser.functions) == 1
-        assert parser.functions[0]["name"] == "toString"  # name index 5 -> resolved to string
-        assert parser.functions[0]["parent_type"] == 1
+        assert parser.functions[0].name == "toString"  # name index 5 -> resolved to string
+        assert parser.functions[0].parent_type == 1
 
     def test_function_name_from_binding(self, parser):
         """Function gets name from class binding (static method)."""
@@ -1083,8 +1081,8 @@ class TestFunctionNameResolution:
         parser.entrypoint = 0
         parser.parse_functions(stream_from_bytes(fn_data))
 
-        assert parser.functions[0]["name"] == "10"  # field index 10 resolved to str
-        assert parser.functions[0]["parent_type"] == 1
+        assert parser.functions[0].name == "10"  # field index 10 resolved to str
+        assert parser.functions[0].parent_type == 1
 
     def test_entrypoint_is_named_init(self, parser):
         """Entrypoint function gets name 'init'."""
@@ -1097,7 +1095,7 @@ class TestFunctionNameResolution:
         parser.entrypoint = 1  # second function is entrypoint
         parser.parse_functions(stream_from_bytes(fn_data))
 
-        assert parser.functions[1]["name"] == "init"
+        assert parser.functions[1].name == "init"
 
     def test_proto_takes_priority_over_binding(self, parser):
         """Proto name takes priority if both proto and binding target same findex."""
@@ -1122,7 +1120,7 @@ class TestFunctionNameResolution:
         parser.parse_functions(stream_from_bytes(fn_data))
 
         # Proto sets name=5, then binding sees name is already set, skips
-        assert parser.functions[0]["name"] == "toString"  # proto won (resolved string)
+        assert parser.functions[0].name == "toString"  # proto won (resolved string)
 
     def test_function_without_proto_or_binding_remains_unnamed(self, parser):
         """No proto or binding → name stays None."""
@@ -1147,7 +1145,6 @@ class TestConstantsParsing:
 
     def test_single_constant(self):
         """Single constant with 3 field indices."""
-        from hl_parser import HLParser
         from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
         bc = build_minimal_bytecode(
             version=4,
@@ -1156,13 +1153,12 @@ class TestConstantsParsing:
         p = HLParser("/dev/null")
         p.execute(stream_from_bytes(bc))
         assert len(p.constants) == 1
-        assert p.constants[0]["global"] == 0
-        assert p.constants[0]["nfields"] == 3
-        assert p.constants[0]["fields"] == [1, 2, 3]
+        assert p.constants[0].global_idx == 0
+        assert p.constants[0].nfields == 3
+        assert p.constants[0].fields == [1, 2, 3]
 
     def test_multiple_constants(self):
         """Multiple constants with varying field counts."""
-        from hl_parser import HLParser
         from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
         bc = build_minimal_bytecode(
             version=4,
@@ -1175,16 +1171,15 @@ class TestConstantsParsing:
         p = HLParser("/dev/null")
         p.execute(stream_from_bytes(bc))
         assert len(p.constants) == 3
-        assert p.constants[0]["global"] == 0
-        assert p.constants[0]["fields"] == [1, 2]
-        assert p.constants[1]["global"] == 5
-        assert p.constants[1]["fields"] == []
-        assert p.constants[2]["global"] == 10
-        assert p.constants[2]["fields"] == [20, 30, 40, 50]
+        assert p.constants[0].global_idx == 0
+        assert p.constants[0].fields == [1, 2]
+        assert p.constants[1].global_idx == 5
+        assert p.constants[1].fields == []
+        assert p.constants[2].global_idx == 10
+        assert p.constants[2].fields == [20, 30, 40, 50]
 
     def test_constants_v3_skipped(self):
         """Version 3 has no constants field — nconstants stays 0."""
-        from hl_parser import HLParser
         from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
         bc = build_minimal_bytecode(version=3)
         p = HLParser("/dev/null")
@@ -1194,7 +1189,6 @@ class TestConstantsParsing:
 
     def test_constants_in_full_v4_pipeline(self):
         """Constants parse correctly in a full v4 pipeline with all sections."""
-        from hl_parser import HLParser
         from tests.hl_helper import (
             build_minimal_bytecode, stream_from_bytes,
             build_type_primitive,
@@ -1212,8 +1206,8 @@ class TestConstantsParsing:
         p = HLParser("/dev/null")
         p.execute(stream_from_bytes(bc))
         assert len(p.constants) == 2
-        assert p.constants[0] == {"global": 0, "nfields": 2, "fields": [1, 2]}
-        assert p.constants[1] == {"global": 1, "nfields": 1, "fields": [3]}
+        assert p.constants[0] == ConstantDef(global_idx=0, nfields=2, fields=[1, 2])
+        assert p.constants[1] == ConstantDef(global_idx=1, nfields=1, fields=[3])
 
 
 # =============================================================================

@@ -236,6 +236,10 @@ if ndebugfiles > 0:
 ```
 *Fix: Read debug files between strings and types, not before strings. The old "corrupt debug" detection was a side-effect of the missing string lens (P33).*
 
+**P35 — OSwitch used byte count (OCallN-style) instead of VarInt count + default offset.**
+`_skip_opcodes` treated all vararg opcodes identically, reading a single byte count for OSwitch. The HL reference has OSwitch with p2=UINDEX (VarInt) as the case count, followed by p2 case offsets and p3=default offset. Every OSwitch consumed 1 wrong byte (reading an extra byte as "count" when p2 IS the count) and missed the default offset. With 252 OSwitches in Natives.hl, this accumulated ~250+ bytes of drift, corrupting all function bodies past ~func[10].
+*Fix: Branch `_skip_opcodes` on op_idx==70. Capture p2 VarInt value as case count, read that many case offsets, then read one default offset.*
+
 ### 3.2 Debugging & Log Analysis
 
 **P14 — Never grep/pip install raw log files while logalyzer is indexing.**

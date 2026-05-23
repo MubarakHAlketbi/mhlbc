@@ -29,7 +29,8 @@ from PyQt6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat
 from hl_worker import HLParseWorker
 from hl_parser import (
     HLParser, KIND_NAMES, K_OBJ, K_STRUCT, K_ENUM, K_VIRTUAL,
-    K_ABSTRACT, K_FUN, K_METHOD, PRIMITIVE_KINDS, get_parser_version
+    K_ABSTRACT, K_FUN, K_METHOD, PRIMITIVE_KINDS, get_parser_version,
+    TypeDef, NativeDef, FunctionDef,
 )
 from hl_logger import VerboseLogger, INFO
 from hl_disasm import Disassembler
@@ -257,35 +258,35 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
 # Type Formatter (headless, shared by model and CLI)
 # ============================================================================
 
-def format_type(parser, type_dict: dict, index: int) -> str:
+def format_type(parser, type_dict: TypeDef, index: int) -> str:
     """Return a compact single-line summary of a type dict."""
-    kind = type_dict["kind"]
+    kind = type_dict.kind
     kind_name = KIND_NAMES.get(kind, f"kind_{kind}")
     if kind in PRIMITIVE_KINDS:
         return f"[{index}]  {kind_name}"
     if kind in (14, 19, 22):
-        return f"[{index}]  {kind_name}<{type_dict.get('inner', '?')}>"
+        return f"[{index}]  {kind_name}<{type_dict.inner if type_dict.inner is not None else '?'}>"
     if kind in (10, 20):
-        args = type_dict.get("args", [])
-        ret = type_dict.get("ret", "?")
+        args = type_dict.args
+        ret = type_dict.ret if type_dict.ret is not None else "?"
         return f"[{index}]  {kind_name}({','.join(str(a) for a in args)}) -> {ret}"
     if kind in (11, 21):
-        name = type_dict.get("name", "?")
-        fields  = type_dict.get("fields",   [])
-        protos  = type_dict.get("protos",   [])
-        bindings = type_dict.get("bindings", [])
+        name = type_dict.name if type_dict.name is not None else "?"
+        fields  = type_dict.fields
+        protos  = type_dict.protos
+        bindings = type_dict.bindings
         return (f"[{index}]  {kind_name}"
                 f"  name={name}"
                 f"  fields={len(fields)}"
                 f"  protos={len(protos)}"
                 f"  bindings={len(bindings)}")
     if kind == 15:
-        return f"[{index}]  virtual  fields={len(type_dict.get('fields', []))}"
+        return f"[{index}]  virtual  fields={len(type_dict.fields)}"
     if kind == 17:
-        return f"[{index}]  abstract  name={type_dict.get('name', '?')}"
+        return f"[{index}]  abstract  name={type_dict.name if type_dict.name is not None else '?'}"
     if kind == 18:
-        name = type_dict.get("name", "?")
-        constructs = type_dict.get("constructs", [])
+        name = type_dict.name if type_dict.name is not None else "?"
+        constructs = type_dict.constructs
         return f"[{index}]  enum  name={name}  constructors={len(constructs)}"
     return f"[{index}]  {kind_name}"
 
@@ -344,7 +345,7 @@ class TypesListModel(QAbstractListModel):
         if role == Qt.ItemDataRole.DisplayRole:
             return format_type(self._parser, t, index.row())
         if role == Qt.ItemDataRole.ForegroundRole:
-            k = t["kind"]
+            k = t.kind
             if k in PRIMITIVE_KINDS:
                 return _QC["dim"]
             if k in _KIND_OBJ:
@@ -412,19 +413,19 @@ class NativesListModel(QAbstractListModel):
             return None
         n = self._data[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            lib_str  = str(n["lib"])
-            name_str = str(n["name"])
+            lib_str  = str(n.lib)
+            name_str = str(n.name)
             if self._parser and self._parser.strings:
-                if 0 <= n["lib"]  < len(self._parser.strings):
-                    lib_str  = self._parser.strings[n["lib"]]
-                if 0 <= n["name"] < len(self._parser.strings):
-                    name_str = self._parser.strings[n["name"]]
+                if 0 <= n.lib  < len(self._parser.strings):
+                    lib_str  = self._parser.strings[n.lib]
+                if 0 <= n.name < len(self._parser.strings):
+                    name_str = self._parser.strings[n.name]
             return (f"[{index.row()}]  lib={lib_str}"
                     f"  name={name_str}"
-                    f"  type={n['type']}"
-                    f"  findex={n['findex']}")
+                    f"  type={n.type}"
+                    f"  findex={n.findex}")
         if role == Qt.ItemDataRole.ForegroundRole:
-            return _LIB_COLORS[n["lib"] % 4]
+            return _LIB_COLORS[n.lib % 4]
         return None
 
     def update_data(self, parser):
@@ -457,9 +458,9 @@ class FunctionsListModel(QAbstractListModel):
             return f
         return None
 
-    def _resolve_name(self, f: dict):
+    def _resolve_name(self, f: FunctionDef):
         """Return the resolved string name for a function, or None."""
-        name = f.get("name")
+        name = f.name
         if name is None:
             return None
         if (isinstance(name, int) and self._parser and self._parser.strings
@@ -467,19 +468,19 @@ class FunctionsListModel(QAbstractListModel):
             return self._parser.strings[name]
         return str(name)
 
-    def _fmt(self, row: int, f: dict) -> str:
+    def _fmt(self, row: int, f: FunctionDef) -> str:
         name_str = self._resolve_name(f)
         name_part    = f"  name={name_str}" if name_str is not None else ""
-        parent_part  = (f"  type[{f['parent_type']}]"
-                        if f.get("parent_type") is not None else "")
-        mal_mark     = "  [!]" if f.get("malformed") else ""
-        return (f"[{row}]  findex={f['findex']}"
-                f"  regs={f['nregs']}"
-                f"  ops={f['nops']}"
+        parent_part  = (f"  type[{f.parent_type}]"
+                        if f.parent_type is not None else "")
+        mal_mark     = "  [!]" if f.malformed else ""
+        return (f"[{row}]  findex={f.findex}"
+                f"  regs={f.nregs}"
+                f"  ops={f.nops}"
                 f"{name_part}{parent_part}{mal_mark}")
 
-    def _color(self, f: dict) -> QColor:
-        if f.get("malformed"):
+    def _color(self, f: FunctionDef) -> QColor:
+        if f.malformed:
             return _QC["red"]
         name_str = self._resolve_name(f)
         if name_str is None:
@@ -515,7 +516,7 @@ class FunctionFilterProxy(QSortFilterProxyModel):
         if self._hide_malformed:
             idx = self.sourceModel().index(source_row, 0, source_parent)
             f = self.sourceModel().data(idx, Qt.ItemDataRole.UserRole)
-            if isinstance(f, dict) and f.get("malformed"):
+            if isinstance(f, FunctionDef) and f.malformed:
                 return False
         return super().filterAcceptsRow(source_row, source_parent)
 
@@ -1194,22 +1195,18 @@ class DecompilerApp(QMainWindow):
         func = self.parser.functions[func_idx]
 
         # Resolve name
-        name = func.get("name")
-        if (name is not None and isinstance(name, int)
-                and self.parser.strings
-                and 0 <= name < len(self.parser.strings)):
-            name = self.parser.strings[name]
+        name = func.name
         name = name or f"func[{func_idx}]"
 
         self._cfg_func_label.setText(
             f"[{func_idx}]  {name}"
-            f"    ops={func['nops']}  regs={func['nregs']}  findex={func['findex']}"
+            f"    ops={func.nops}  regs={func.nregs}  findex={func.findex}"
         )
 
-        if func.get("malformed"):
+        if func.malformed:
             self._cfg_text.setPlainText("(function is malformed -- cannot disassemble)")
             return
-        if func.get("nops", 0) <= 0:
+        if func.nops <= 0:
             self._cfg_text.setPlainText("(no opcodes)")
             return
 
@@ -1224,7 +1221,7 @@ class DecompilerApp(QMainWindow):
             lines = []
             lines.append(f"=== CFG for [{func_idx}] {name} ===")
             lines.append(
-                f"nops={func['nops']}  nregs={func['nregs']}  findex={func['findex']}"
+                f"nops={func.nops}  nregs={func.nregs}  findex={func.findex}"
             )
             if cfg:
                 lines.append(f"{len(cfg)} basic blocks")

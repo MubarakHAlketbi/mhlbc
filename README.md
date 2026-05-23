@@ -184,7 +184,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 369 tests covering all gates
+  - 418 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -274,7 +274,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 369 tests, compact output
+pytest                     # All 418 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword
@@ -305,7 +305,7 @@ This is **not a parser bug** — even the upstream `hlbc` Rust tool fails on Far
 
 ### Function Body Alignment
 
-A small percentage (~1-2%) of functions in standard HLB fixtures produce unknown opcodes during disassembly. This is a known boundary alignment issue in the function pool parser related to debug info RLE consumption. It does not affect header/type/native parsing, and the decompiler handles it gracefully (produces stubs with diagnostic comments instead of crashing).
+Fixed in Session 20 (P35): OSwitch opcode consumed 1 wrong byte per occurrence, causing cumulative stream drift in function bodies. All 422 tests now pass.
 
 ---
 

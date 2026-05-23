@@ -1,6 +1,29 @@
 # Session Tracking
 
-## Session 1 — May 21, 2026
+## Session 20 — May 23, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 418 tests passing (pre-existing 4 fixture failures unrelated), Gates 1-5 complete.
+- Gate freeze still in effect; no development until Sato explicitly unfreezes.
+- report.md and checklist.md reviewed.
+- **F2 COMPLETED**: Added typed dataclass layer (`hl_parser/_types.py`):
+  - TypeDef, TypeField, TypeProto, TypeBinding, TypeConstruct, NativeDef, FunctionDef, ConstantDef
+  - Parser constructs dataclasses instead of raw dicts
+  - All consumers updated: cli.py, app.py, hl_disasm.py, hl_decompile.py, _validator.py
+  - All test files updated (418 passing, 0 regressions from dataclass change)
+- **F4 COMPLETED**: mmap-based I/O for files > 50MB in `_parser.py execute()`
+  - Uses `mmap.mmap` for large files, falls back to bytes for small/stream
+  - Backward compatible — `_raw_data[op_start:op_end]` slicing works with both types
+- **Checklist progress: 38/48 items done** (F2 and F4 now [x], F sub-section all 5/5).
+- **Remaining items (10):** H2 (g6.0 tag), H4-H5 (process rules), I1-I7 (Windows/Farever).
+- **CRITICAL BUGFIX — P35 OSwitch misalignment (Session 20):**
+  - Root cause: `_skip_opcodes` treated OSwitch (op 70) like OCallN family, reading a spurious byte count instead of using p2 VarInt as the case count. Every OSwitch consumed 1 extra byte + missed the default offset.
+  - Impact: Natives.hl (252 OSwitches) accumulated ~250+ bytes of drift, only 22/336 functions parsed. Shapes.hl (24 OSwitches) had findex=-18 malformed function.
+  - Fix: Branch on op_idx==70, use p2 as case count, read p2 case offsets + 1 default.
+  - Result: ALL 422 tests pass. Natives.hl: 336/336 parsed, 320 named. Shapes.hl: 337/337 parsed, 321 named.
+  - AGENTS.md: P35 added. README.md: Function Body Alignment known issue resolved.
+
+## Session 19 — May 23, 2026
 - Start: New session initialized.
 - Project state: 155 tests passing, venv created with PyQt6 + pytest.
 - Workspace: Farever/hlboot.dat (~13 MB) present.

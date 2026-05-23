@@ -10,7 +10,11 @@ import os
 import sys
 import csv as _csv
 
-from hl_parser import HLParser, HLParserError, KIND_NAMES, K_OBJ, K_STRUCT, get_parser_version
+from hl_parser import (
+    HLParser, HLParserError, KIND_NAMES, K_OBJ, K_STRUCT,
+    get_parser_version,
+    TypeDef, NativeDef, FunctionDef,
+)
 from hl_logger import VerboseLogger, level_from_name, INFO, DEBUG, TRACE, ERROR
 from hl_disasm import Disassembler, format_disassembly
 from hl_decompile import Decompiler, HaxeWriter
@@ -29,47 +33,47 @@ def _resolve_string(parser: HLParser, idx: int) -> str:
     return str(idx)
 
 
-def _format_type_summary(parser: HLParser, type_dict: dict, index: int) -> str:
+def _format_type_summary(parser: HLParser, type_dict: TypeDef, index: int) -> str:
     """Format a type dict into a human-readable summary string.
     
     Mirrors app.py format_type() for CLI/GUI parity.
     """
-    kind = type_dict["kind"]
+    kind = type_dict.kind
     kind_name = KIND_NAMES.get(kind, f"kind_{kind}")
 
     if kind in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 16, 23, 24):
         return f"[{index}] {kind_name}"
 
     elif kind in (14, 19, 22):
-        inner = type_dict.get("inner", "?")
+        inner = type_dict.inner if type_dict.inner is not None else "?"
         return f"[{index}] {kind_name}<{inner}>"
 
     elif kind in (10, 20):
-        args = type_dict.get("args", [])
-        ret = type_dict.get("ret", "?")
+        args = type_dict.args
+        ret = type_dict.ret if type_dict.ret is not None else "?"
         return f"[{index}] {kind_name}({','.join(str(a) for a in args)}) -> {ret}"
 
     elif kind in (11, 21):
-        name = type_dict.get("name", "?")
-        name_str = _resolve_string(parser, name)
-        fields = type_dict.get("fields", [])
-        protos = type_dict.get("protos", [])
-        bindings = type_dict.get("bindings", [])
+        name = type_dict.name if type_dict.name is not None else "?"
+        name_str = _resolve_string(parser, type_dict.name) if type_dict.name is not None else "?"
+        fields = type_dict.fields
+        protos = type_dict.protos
+        bindings = type_dict.bindings
         return f"[{index}] {kind_name}(name={name_str}, fields={len(fields)}, protos={len(protos)}, bindings={len(bindings)})"
 
     elif kind == 15:
-        fields = type_dict.get("fields", [])
+        fields = type_dict.fields
         return f"[{index}] virtual(fields={len(fields)})"
 
     elif kind == 17:
-        name = type_dict.get("name", "?")
-        name_str = _resolve_string(parser, name)
+        name = type_dict.name if type_dict.name is not None else "?"
+        name_str = _resolve_string(parser, type_dict.name) if type_dict.name is not None else "?"
         return f"[{index}] abstract(name={name_str})"
 
     elif kind == 18:
-        name = type_dict.get("name", "?")
-        name_str = _resolve_string(parser, name)
-        constructs = type_dict.get("constructs", [])
+        name = type_dict.name if type_dict.name is not None else "?"
+        name_str = _resolve_string(parser, type_dict.name) if type_dict.name is not None else "?"
+        constructs = type_dict.constructs
         return f"[{index}] enum(name={name_str}, constructors={len(constructs)})"
 
     return f"[{index}] {kind_name}"
@@ -282,33 +286,33 @@ def cmd_types(args):
     parser = _parse_and_load(args.file, _make_logger(args))
     types_list = []
     for i, t in enumerate(parser.types):
-        kind = t["kind"]
+        kind = t.kind
         entry = {
             "index": i,
             "kind": kind,
             "kind_name": KIND_NAMES.get(kind, f"kind_{kind}"),
         }
         # Add kind-specific fields
-        if "inner" in t:
-            entry["inner"] = t["inner"]
-        if "name" in t:
-            entry["name_idx"] = t["name"]
-            entry["name"] = _resolve_string(parser, t["name"])
-        if "super" in t:
-            entry["super"] = t["super"]
-        if "nfields" in t:
-            entry["nfields"] = t["nfields"]
-        if "nprotos" in t:
-            entry["nprotos"] = t["nprotos"]
-        if "nbindings" in t:
-            entry["nbindings"] = t["nbindings"]
-        if "nconstructs" in t:
-            entry["nconstructs"] = t["nconstructs"]
-        if "nargs" in t:
-            entry["nargs"] = t["nargs"]
-            entry["args"] = t.get("args", [])
-            entry["ret"] = t.get("ret", None)
-        if "unknown_kind" in t:
+        if t.inner is not None:
+            entry["inner"] = t.inner
+        if t.name is not None:
+            entry["name_idx"] = t.name
+            entry["name"] = _resolve_string(parser, t.name)
+        if t.super_idx is not None:
+            entry["super"] = t.super_idx
+        if t.nfields > 0:
+            entry["nfields"] = t.nfields
+        if t.nprotos > 0:
+            entry["nprotos"] = t.nprotos
+        if t.nbindings > 0:
+            entry["nbindings"] = t.nbindings
+        if t.nconstructs > 0:
+            entry["nconstructs"] = t.nconstructs
+        if t.nargs > 0:
+            entry["nargs"] = t.nargs
+            entry["args"] = t.args
+            entry["ret"] = t.ret
+        if t.unknown_kind:
             entry["unknown_kind"] = True
         types_list.append(entry)
 
@@ -331,9 +335,9 @@ def cmd_globals(args):
         type_name = KIND_NAMES.get(type_idx, str(type_idx))
         if 0 <= type_idx < len(parser.types):
             t = parser.types[type_idx]
-            tk = t.get("kind")
-            if tk in (K_OBJ, K_STRUCT) and "name" in t:
-                type_name = _resolve_string(parser, t["name"])
+            tk = t.kind
+            if tk in (K_OBJ, K_STRUCT) and t.name is not None:
+                type_name = _resolve_string(parser, t.name)
         globals_list.append({
             "index": i,
             "type_index": type_idx,
@@ -354,20 +358,20 @@ def cmd_natives(args):
     parser = _parse_and_load(args.file, _make_logger(args))
     natives_list = []
     for i, n in enumerate(parser.natives):
-        lib_name = _resolve_string(parser, n["lib"])
-        func_name = _resolve_string(parser, n["name"])
+        lib_name = _resolve_string(parser, n.lib)
+        func_name = _resolve_string(parser, n.name)
         type_name = "?"
-        if 0 <= n["type"] < len(parser.types):
-            type_name = KIND_NAMES.get(parser.types[n["type"]].get("kind"), str(n["type"]))
+        if 0 <= n.type < len(parser.types):
+            type_name = KIND_NAMES.get(parser.types[n.type].kind, str(n.type))
         natives_list.append({
             "index": i,
-            "lib": n["lib"],
+            "lib": n.lib,
             "lib_name": lib_name,
-            "name": n["name"],
+            "name": n.name,
             "func_name": func_name,
-            "type_index": n["type"],
+            "type_index": n.type,
             "type_name": type_name,
-            "findex": n["findex"],
+            "findex": n.findex,
         })
 
     if args.json:
@@ -382,9 +386,9 @@ def cmd_natives(args):
                   f"findex={nd['findex']}")
 
 
-def _resolve_func_name(parser: HLParser, fn: dict) -> str:
+def _resolve_func_name(parser: HLParser, fn: FunctionDef) -> str:
     """Resolve a function's name to a human-readable string."""
-    name = fn.get("name")
+    name = fn.name
     if name is not None:
         if isinstance(name, int):
             if 0 <= name < len(parser.strings):
@@ -394,30 +398,30 @@ def _resolve_func_name(parser: HLParser, fn: dict) -> str:
     return "?"
 
 
-def _resolve_func_type_name(parser: HLParser, fn: dict) -> str:
+def _resolve_func_type_name(parser: HLParser, fn: FunctionDef) -> str:
     """Resolve the function type index to a type name if possible."""
-    t_idx = fn.get("type")
+    t_idx = fn.type
     if t_idx is None:
         return "?"
     if 0 <= t_idx < len(parser.types):
         t = parser.types[t_idx]
-        kind = t.get("kind")
-        if kind in (K_OBJ, K_STRUCT) and "name" in t:
-            return _resolve_string(parser, t["name"])
+        kind = t.kind
+        if kind in (K_OBJ, K_STRUCT) and t.name is not None:
+            return _resolve_string(parser, t.name)
         kind_name = KIND_NAMES.get(kind, f"kind_{kind}")
         return f"type[{t_idx}] {kind_name}"
     return f"type[{t_idx}]"
 
 
-def _resolve_parent_type_name(parser: HLParser, fn: dict) -> str:
+def _resolve_parent_type_name(parser: HLParser, fn: FunctionDef) -> str:
     """Resolve the parent type index to a name."""
-    pt = fn.get("parent_type")
+    pt = fn.parent_type
     if pt is None:
         return ""
     if 0 <= pt < len(parser.types):
         t = parser.types[pt]
-        if "name" in t:
-            return _resolve_string(parser, t["name"])
+        if t.name is not None:
+            return _resolve_string(parser, t.name)
     return f"type[{pt}]"
 
 
@@ -427,21 +431,21 @@ def cmd_functions(args):
     for i, f in enumerate(parser.functions):
         entry = {
             "index": i,
-            "type": f["type"],
+            "type": f.type,
             "type_name": _resolve_func_type_name(parser, f),
-            "findex": f["findex"],
+            "findex": f.findex,
             "name": _resolve_func_name(parser, f),
-            "parent_type": f.get("parent_type"),
+            "parent_type": f.parent_type,
             "parent_type_name": _resolve_parent_type_name(parser, f),
-            "nregs": f["nregs"],
-            "nops": f["nops"],
-            "reg_type_count": len(f.get("reg_types", [])),
-            "body_offset": f.get("body_offset", 0),
-            "body_size": f.get("body_size", 0),
-            "malformed": f.get("malformed", False),
-            "has_debug": "debug_lines" in f,
-            "nassigns": f.get("nassigns", 0),
-            "is_entrypoint": f["findex"] == parser.entrypoint,
+            "nregs": f.nregs,
+            "nops": f.nops,
+            "reg_type_count": len(f.reg_types),
+            "body_offset": f.body_offset,
+            "body_size": f.body_size,
+            "malformed": f.malformed,
+            "has_debug": f.debug_lines is not None,
+            "nassigns": f.nassigns,
+            "is_entrypoint": f.findex == parser.entrypoint,
         }
         funcs_list.append(entry)
 
@@ -449,8 +453,8 @@ def cmd_functions(args):
     total_valid = sum(1 for ff in funcs_list if not ff["malformed"])
     total_malformed = sum(1 for ff in funcs_list if ff["malformed"])
     total_resolved = sum(1 for ff in funcs_list if ff["name"] != "?")
-    total_ops = sum(f["nops"] for f in parser.functions)
-    total_regs = sum(f["nregs"] for f in parser.functions)
+    total_ops = sum(f.nops for f in parser.functions)
+    total_regs = sum(f.nregs for f in parser.functions)
 
     if args.json:
         _output_as_json({"functions": funcs_list, "summary": {
@@ -511,7 +515,7 @@ def cmd_disasm(args):
             continue
         
         func = parser.functions[fi]
-        if func.get("malformed") or func.get("nops", 0) <= 0:
+        if func.malformed or func.nops <= 0:
             if args.function:  # only warn when user picked a specific function
                 print(f"func[{fi}] is malformed or has no opcodes, skipping")
             continue
@@ -537,15 +541,15 @@ def cmd_disasm(args):
                     d["jump_default"] = ii.jump_default
                 instr_data.append(d)
             _output_as_json({"function": {
-                "index": fi, "name": func.get("name") or "?", 
-                "findex": func["findex"], "nops": func["nops"],
+                "index": fi, "name": func.name or "?", 
+                "findex": func.findex, "nops": func.nops,
                 "instructions": instr_data,
             }})
         elif args.csv:
             rows = []
             for ii in instrs:
                 rows.append({
-                    "func_idx": fi, "func_name": func.get("name") or "?",
+                    "func_idx": fi, "func_name": func.name or "?",
                     "ip": ii.index, "opcode": ii.opcode, "mnemonic": ii.mnemonic,
                     "args": " ".join(str(a) for a in ii.args),
                     "byte_offset": ii.byte_offset, "source_line": ii.source_line,
@@ -556,8 +560,8 @@ def cmd_disasm(args):
             if not first:
                 print()
             first = False
-            print(f"=== func[{fi}] name='{func.get('name') or '?'}' "
-                  f"findex={func['findex']} nops={func['nops']} nregs={func['nregs']} ===")
+            print(f"=== func[{fi}] name='{func.name or '?'}' "
+                  f"findex={func.findex} nops={func.nops} nregs={func.nregs} ===")
             print(format_disassembly(instrs, parser))
         
         # CFG output

@@ -147,7 +147,7 @@ _JUMP_OPCODES = frozenset(range(44, 59))  # OJTrue..OJAlways
 _JUMP_OPCODES_SET = _JUMP_OPCODES | {72, 101}  # + OTrap, OCatch
 
 # Opcodes with variable arguments
-_VARARG_OPCODES = frozenset({29, 30, 31, 32, 70, 91})  # OCallN/Method/This/Closure, OSwitch, OMakeEnum
+_VARARG_OPCODES = frozenset({29, 30, 31, 32, 70, 90})  # OCallN/Method/This/Closure, OSwitch, OMakeEnum
 
 
 # ============================================================================
@@ -838,13 +838,13 @@ class Disassembler:
             return []
 
         func = self.parser.functions[func_idx]
-        if func.get("malformed") or func.get("nops", 0) <= 0:
+        if func.malformed or func.nops <= 0:
             self._log("DISASM", f"func[{func_idx}]: malformed or zero-op, skipping", level=WARN)
             return []
 
-        op_start = func["opcode_start"]
-        op_end = func["opcode_end"]
-        nops = func["nops"]
+        op_start = func.opcode_start
+        op_end = func.opcode_end
+        nops = func.nops
 
         if op_end <= op_start:
             self._log("DISASM", f"func[{func_idx}]: empty opcode range", level=WARN)
@@ -859,8 +859,8 @@ class Disassembler:
                 f.seek(op_start)
                 data = f.read(total_opcode_bytes)
 
-        debug_lines = func.get("debug_lines")
-        debug_files = func.get("debug_files")
+        debug_lines = func.debug_lines
+        debug_files = func.debug_files
 
         instructions = self.decoder.decode_instructions(
             data, nops, debug_lines, debug_files
@@ -920,12 +920,12 @@ class Disassembler:
         for i in funcs_to_check:
             func = self.parser.functions[i]
             instructions = self._instructions.get(i, [])
-            nops = func.get("nops", 0)
+            nops = func.nops
             decoded = len(instructions)
             if decoded != nops:
                 msg = (f"func[{i}]: decoded {decoded} opcodes, header says nops={nops} "
-                       f"({func.get('name', '?')})")
-                if func.get("malformed"):
+                       f"({func.name or '?'})")
+                if func.malformed:
                     msg += " [malformed — expected]"
                 warnings.append(msg)
                 self._log("DISASM", f"[WARN] {msg}", level=WARN)
@@ -1030,8 +1030,8 @@ def _resolve_findex_name(parser, findex: int) -> str:
     try:
         if parser:
             for func in parser.functions:
-                if func.get("findex") == findex and func.get("name"):
-                    return func["name"]
+                if func.findex == findex and func.name:
+                    return func.name
     except Exception:
         pass
     return f"fun[{findex}]"

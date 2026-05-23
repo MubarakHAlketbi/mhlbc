@@ -23,7 +23,8 @@ import tempfile
 
 import pytest
 
-from hl_parser import HLParser, HLParserError
+from hl_parser import TypeDef
+from hl_parser import HLParser, HLParserError, TypeDef
 from tests.hl_helper import (
     encode_varint, stream_from_bytes, build_header, build_ints_pool,
     build_floats_pool, build_strings_pool, build_minimal_bytecode,
@@ -474,8 +475,8 @@ class TestTypeResolver:
         """Type resolver maps kind constants to Haxe names."""
         # Build the test by creating types list
         class MockParser:
-            types = [{"kind": K_VOID}, {"kind": K_I32}, {"kind": K_F64},
-                     {"kind": K_BOOL}, {"kind": K_DYN}, {"kind": K_BYTES}]
+            types = [TypeDef(kind=K_VOID), TypeDef(kind=K_I32), TypeDef(kind=K_F64),
+                     TypeDef(kind=K_BOOL), TypeDef(kind=K_DYN), TypeDef(kind=K_BYTES)]
             strings = []
 
         tr = TypeResolver(MockParser())
@@ -489,7 +490,7 @@ class TestTypeResolver:
     def test_obj_type_name(self):
         """Obj type resolves to its string pool name."""
         class MockParser:
-            types = [{"kind": K_OBJ, "name": 0}]
+            types = [TypeDef(kind=K_OBJ, name=0)]
             strings = ["MyClass"]
 
         tr = TypeResolver(MockParser())
@@ -498,7 +499,7 @@ class TestTypeResolver:
     def test_wrapper_type(self):
         """Wrapped types produce prefixed names."""
         class MockParser:
-            types = [{"kind": K_NULL, "inner": 1}, {"kind": K_I32}]
+            types = [TypeDef(kind=K_NULL, inner=1), TypeDef(kind=K_I32)]
             strings = []
 
         tr = TypeResolver(MockParser())
@@ -576,7 +577,7 @@ class TestHaxeWriter:
         class MockParser:
             types = []
             for k in range(K_HLAST + 1):
-                types.append({"kind": k})
+                types.append(TypeDef(kind=k))
             strings = []
 
         tr = TypeResolver(MockParser())
@@ -599,7 +600,7 @@ class TestHaxeWriter:
         )
 
         class MockParser:
-            types = [{"kind": k} for k in range(K_HLAST + 1)]
+            types = [TypeDef(kind=k) for k in range(K_HLAST + 1)]
             strings = []
 
         tr = TypeResolver(MockParser())
@@ -613,7 +614,7 @@ class TestHaxeWriter:
         cls = ClassDef("MyClass", 0, None, [("x", K_I32)], [], [])
 
         class MockParser:
-            types = [{"kind": k} for k in range(K_HLAST + 1)]
+            types = [TypeDef(kind=k) for k in range(K_HLAST + 1)]
             strings = []
 
         tr = TypeResolver(MockParser())
