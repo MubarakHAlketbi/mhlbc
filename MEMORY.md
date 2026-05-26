@@ -402,6 +402,18 @@
   - README.md, CONTRIBUTING.md: Test count updates
   - MEMORY.md: This session
 
+## Session 23 — May 26, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 466 tests passing (+44 from session start), 3 skipped.
+- Sato's new checklist.md (Phases A-R) worked through:
+  - **A-E completed**: HaxeWriter braces fixed, VarInt parity (disassembler now wraps parser decoder), stmt mapping (build_body_by_instruction replaces stmt_idx), CFG docs downgraded to match reality, GUI background decompile worker
+  - **F-J completed**: CLI portability (no hardcoded paths, works from /tmp), docs consistency (103 opcodes, 25 types, Gate 6 honest), validation_matrix.md created, logging docs fixed, test_cli.py with exit-code tests
+  - **K-O completed/deferred**: README rewrite, AGENTS.md verified, test reality check (466 pass, all py_compile OK), Farever clarified as robustness target, Gate 6 deferred pending matrix validation
+  - **Files changed**: hl_decompile.py, hl_disasm.py, hl_worker.py, app.py, test_disasm.py, test_decompile.py, test_cli.py (NEW), hl_parser/_varint.py, docs/validation_matrix.md (NEW), docs/opcodes.md, docs/version_deltas.md, docs/function_format.md, README.md, CONTRIBUTING.md, MEMORY.md, checklist.md
+- g6.0 tag exists but Gate 6 remains marked `[ ]` pending validation matrix evidence.
+- checklist.md P.2 status table updated from "not started" to actual status for all phases.
+
 ## Session 22 — May 23/24, 2026
 - Start: Continuation of work toward g6.0.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

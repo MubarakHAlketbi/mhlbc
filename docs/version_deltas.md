@@ -131,7 +131,7 @@ The `HGUID` type kind (23) was added in later v5 revisions for GUID/UUID support
 - `OAsm` (100) — Inline assembly support for platform-specific code
 
 ### Throughout All Versions
-The core 102 opcodes (0-101) are present in all supported versions (v2-v5). Earlier format versions simply never emit newer opcodes, making the format forward-compatible for reading.
+The 103 opcode IDs (0-102) are present in all supported versions (v3-v5). Earlier format versions simply never emit newer opcodes, making the format forward-compatible for reading.
 
 ---
 

@@ -44,7 +44,7 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 
 ---
 
-## Complete Opcode Table (102 instructions)
+## Complete Opcode Table (103 opcode IDs: 0-102)
 
 ### 0-6: Data Movement & Constants
 
@@ -228,11 +228,11 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 | 100 | **OAsm** | `C(code), C(nargs), C(nregs)` | Inline assembly (platform-specific) |
 | 101 | **OCatch** | `J(handler_offset), X, X` | Marks catch block start |
 
-### 102: Sentinel
+### 102: Sentinel (OLast, not a real opcode)
 
-| # | Opcode | Description |
-|---|--------|-------------|
-| 102 | **OLast** | Sentinel value, not a real opcode. Marks end of enum for array sizing. |
+| ID | Opcode | Description |
+|----|--------|-------------|
+| 102 | **OLast** | Sentinel value, not a real opcode. Marks end of enum for array sizing. There are 103 opcode slots (IDs 0-102). |
 
 ---
 
@@ -328,7 +328,7 @@ OP_BEGIN
  OP(OBytes,R,G,X)
  OP(OString,R,G,X)
  OP(ONull,R,X,X)
- // ... (all 102 opcodes)
+ // ... (all 103 opcode IDs)
  OP(OLast,X,X,X)
 OP_END
 ```

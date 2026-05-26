@@ -686,6 +686,36 @@ class ExprBuilder:
 
         return stmts
 
+    def build_body_by_instruction(
+        self,
+        instructions: List[Instruction],
+        func_idx: int,
+    ) -> Dict[int, List[IRStmt]]:
+        """Build instruction-indexed IR statements from an instruction list.
+
+        Every instruction index exists as a key. Instructions that produce
+        no statement (e.g. ONop) map to []. Instructions that produce a
+        statement map to [stmt].
+
+        This replaces the unsafe positional stmt_idx mapping that shifts
+        when instructions return None.
+        """
+        self._func_idx = func_idx
+        func = self.parser.functions[func_idx] if func_idx < len(
+            self.parser.functions) else None
+
+        result: Dict[int, List[IRStmt]] = {}
+        for instr in instructions:
+            stmt = self._instr_to_stmt(instr, func)
+            stmts: List[IRStmt] = []
+            if stmt is not None:
+                if instr.source_line >= 0:
+                    stmt.line = instr.source_line
+                stmts.append(stmt)
+            result[instr.index] = stmts
+
+        return result
+
     def _instr_to_stmt(self, instr: Instruction,
                        func: Optional[dict]) -> Optional[IRStmt]:
         """Convert a single instruction to an IR statement (or None for no-ops)."""
@@ -1151,8 +1181,15 @@ class ExprBuilder:
 class ControlStructurer:
     """Transform flat CFG basic blocks into structured control flow.
 
-    Extends the gate-4 StructureAnalyzer labels by building nested
-    IR statement blocks for if/else, while, for, switch, try/catch.
+    WARNING — This is a **partial implementation**:
+    - If/else: handled for simple conditional jumps (if-then, if-then-else)
+    - Loops: NOT yet structured; back-edge blocks fall through as sequential
+    - Switch: NOT yet structured; OSwitch emits as a flat comment
+    - Try/catch: NOT yet structured; OTrap/OCatch/OEndTrap emit as flat comments
+
+    For complex control flow the structurer falls back to flat statement
+    emission with goto/label markers preserved as IRStmt(\"goto\") and
+    IRStmt(\"label\") so no information is lost.
     """
 
     def __init__(self, instructions: List[Instruction],
@@ -1222,19 +1259,15 @@ class ControlStructurer:
         last = instrs[-1]
         succs = blk.successors
 
-        # Get statements for this block's instructions
+        # Get statements for this block's instructions by looking up func_stmts
         block_stmts: List[IRStmt] = []
-        for i in instrs:
-            for stmt_list in func_stmts.values():
-                for s in stmt_list:
-                    # We need a cleaner mapping — skip for now, use the flat list
-                    pass
+        for instr in instrs:
+            s_list = func_stmts.get(instr.index, [])
+            block_stmts.extend(s_list)
 
         # For the entry block, just emit decompiled stmts for each instruction
         # and recurse into successors
-        for instr in instrs:
-            s_list = func_stmts.get(instr.index, [])
-            result.extend(s_list)
+        result.extend(block_stmts)
 
         if last and last.opcode == 58:  # OJAlways
             # Unconditional jump — follow if not back-edge
@@ -1839,15 +1872,15 @@ class HaxeWriter:
         if class_context and sig.is_method:
             # Method definition inside class
             if sig.name == "new":
-                lines.append(f"public function new({params_str})")
+                lines.append(f"public function new({params_str}) {{")
             else:
                 lines.append(
-                    f"public function {sig.name}({params_str}): {ret_str}")
+                    f"public function {sig.name}({params_str}): {ret_str} {{")
         else:
             # Standalone function
             prefix = "static function" if sig.is_method and class_context else "function"
             lines.append(
-                f"{prefix} {sig.name}({params_str}): {ret_str}")
+                f"{prefix} {sig.name}({params_str}): {ret_str} {{")
 
         # Body
         self._indent += 1
@@ -2241,20 +2274,9 @@ class Decompiler:
         var_mapper = VariableMapper(reg_types, assign_vars, assign_regs)
         reg_names = var_mapper.map(defs, uses)
 
-        # Step 3: Build expression statements
+        # Step 3: Build expression statements (instruction-indexed)
         expr_builder = ExprBuilder(self.parser, self.disasm, reg_names, self.logger)
-        stmts = expr_builder.build_body(instructions, func_idx)
-
-        # Map instruction indices to statements for CFG structuring
-        func_stmts: Dict[int, List[IRStmt]] = {}
-        for instr in instructions:
-            # Each instruction maps to its position in the stmts list
-            func_stmts[instr.index] = []
-        stmt_idx = 0
-        for instr in instructions:
-            if stmt_idx < len(stmts):
-                func_stmts[instr.index].append(stmts[stmt_idx])
-            stmt_idx += 1
+        func_stmts = expr_builder.build_body_by_instruction(instructions, func_idx)
 
         # Step 4: Control flow structuring
         cfg = self.disasm.get_cfg(func_idx)

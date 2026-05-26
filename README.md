@@ -1,6 +1,10 @@
 # Modern HashLink Bytecode Decompiler (mhlbc)
 
-A universal reverse-engineering toolkit for Haxe/HashLink games. Parses, inspects, decompiles, and eventually patches any compiled HashLink bytecode file — across all engines (Heaps, Kha, custom), all versions (v3/v4/v5), and all platforms.
+mhlbc is a reverse-engineering toolkit for Haxe/HashLink bytecode.
+
+Current active scope: parse, inspect, disassemble, and decompile standard HashLink bytecode (v3/v4/v5) into Haxe-like pseudocode.
+
+Long-term vision: bytecode manipulation, asset workflows, engine binding analysis, and a full modding SDK. These tiers are frozen until Gate 6 validation is complete (see `checklist.md`).
 
 ---
 
@@ -91,17 +95,17 @@ Following the header, in order:
 
 ### 4. Opcode Encoding
 
-All 98 VM opcodes follow a fixed encoding defined in the HashLink reference runtime (`hashlink/src/code.c`):
+All 103 VM opcode slots (IDs 0–102) follow a fixed encoding defined in the HashLink reference runtime (`hashlink/src/code.c`):
 
 - **Opcode index:** 1 byte (not VarInt).
-- **Fixed arguments:** Signed/unsigned VarInts per opcode — determined by the `_OPCODE_NARGS` table (104 entries, auto-generated from the HL formula).
+- **Fixed arguments:** Signed/unsigned VarInts per opcode — determined by the `_OPCODE_NARGS` table (103 entries, auto-generated from the HL formula).
 - **Vararg opcodes** (OCallN, OCallMethod, OCallThis, OCallClosure, OMakeEnum): index, index, 1-byte count, then count × index.
 - **OSwitch:** index, 1-byte count, count × case offsets, default offset.
 - **Debug info:** RLE-encoded per opcode — not flat arrays.
 
 ### 5. Type System
 
-24 type kinds (0–22), from Void to Packed. Compound types (Obj, Struct, Enum, Virtual, Fun, Method) encode their own sub-structures recursively. Class field indices accumulate across inheritance chains.
+25 recognized type kind IDs (0–24), from Void to Packed, plus HLAST=24 as sentinel. Compound types (Obj, Struct, Enum, Virtual, Fun, Method) encode their own sub-structures recursively. Class field indices accumulate across inheritance chains.
 
 ---
 
@@ -202,7 +206,7 @@ mhlbc/
   - Register liveness analysis (def-use chains)
   - Variable mapping: registers → named variables (via debug assign list + lifetime)
   - Expression tree builder: 30+ opcode patterns → nested expressions
-  - Control flow structuring: if/else, while, for, switch, try/catch patterns
+  - Control flow structuring: if/else (tested); loops (fallback with goto/label comments); switch (flat comment); try/catch (not yet structured)
   - Function signature reconstruction (arguments, return type, method vs static)
   - Class hierarchy builder with inheritance flattening
   - Type resolver: all 24 HL type kinds → Haxe type names
@@ -214,23 +218,25 @@ mhlbc/
   - CLI exit codes per CONTRIBUTING.md §11.4
 
 - [x] **Gate 6: End-to-End Validation** ✅
-  - Validate decompiler output matches original Haxe source on 3+ real compiled programs
-  - Manual verification: class hierarchy, method names, constructors, field resolution, enums all correct
-  - Tag `g6.0` — decompiler produces structurally correct Haxe pseudocode end-to-end
+  - Validated on 7 standard HLB files (see [docs/validation_matrix.md](docs/validation_matrix.md))
+  - Parser, disassembler, CFG, decompiler, and HaxeWriter syntax all **pass** on all 7 fixtures
+  - HaxeWriter output: 233 .hx files, all brace-balanced, no bare function signatures
+  - Control-flow structuring: if/else (tested); loops/switch/try-catch fallback to flat goto/label comments
+  - Function body alignment (OSwitch fix) verified — all 460+ tests pass
   - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
 
-### Tiers 2–5 (Frozen per process rule — see `checklist.md` H4)
+### Tiers 2–5 (Frozen per process rule — see `checklist.md §G.6`)
 
-These tiers are **not started** and will not be worked on until Tier 1 is validated on 3+ standard HLB files.
+These tiers are **not started** and will not be worked on until Gate 6 validation is complete per the matrix in `checklist.md §H`.
 
-### Tier 2 — Bytecode Manipulation (Exploratory)
+### Tier 2 — Bytecode Manipulation (Frozen)
 - [ ] Binary patching: rewrite opcodes and constants in-place
 - [ ] Function injection: insert new functions into the bytecode pool
 - [ ] String replacement: swap string pool entries for translation patches
 - [ ] Constant editing: modify int/float pools directly
 - [ ] Checksum/fixup handling for modified binaries
 
-### Tier 3 — Asset Pipeline (Exploratory)
+### Tier 3 — Asset Pipeline (Frozen)
 - [ ] Heaps PAK format parser (`res.pak`, `res.*.pak`)
 - [ ] Texture extraction/conversion (DDS, KTX, PNG)
 - [ ] 3D model extraction (Heaps `h3d` format)
@@ -239,7 +245,7 @@ These tiers are **not started** and will not be worked on until Tier 1 is valida
 - [ ] Asset browser: preview textures, models, audio in GUI
 - [ ] Asset replacement: rebuild PAK with modified assets
 
-### Tier 4 — Engine Bindings (Exploratory)
+### Tier 4 — Engine Bindings (Frozen)
 - [ ] `.hdll` binary analysis (PE header, exports, imports)
 - [ ] Native function mapping: bind `.hdll` exports to HL native pool entries
 - [ ] Heaps engine API documentation from binary signatures

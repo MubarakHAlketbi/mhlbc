@@ -8,9 +8,10 @@ import sys
 import pytest
 from hl_disasm import (
     OpcodeDecoder, CFGBuilder, JumpResolver, RegisterTracker,
-    Disassembler, Instruction, BasicBlock, format_disassembly
+    Disassembler, Instruction, BasicBlock, format_disassembly, _read_varint,
 )
 from hl_parser import HLParser, HLParserError
+from hl_parser._varint import read_varint as _parser_read_varint
 from tests.hl_helper import (
     encode_varint, stream_from_bytes, build_minimal_bytecode,
     build_header, build_ints_pool, build_floats_pool, build_strings_pool,
@@ -343,7 +344,7 @@ class TestCLIDisasm:
         
         cmd = [sys.executable, 'cli.py', 'disasm', filepath] + list(args)
         result = subprocess.run(cmd, capture_output=True, text=True,
-                               cwd='/home/mubarak/mhlbc')
+                               cwd=os.path.dirname(os.path.dirname(__file__)))
         
         if input_hlb:
             os.unlink(filepath)
@@ -517,3 +518,57 @@ class TestFuzzedOpcodes:
         decoder = OpcodeDecoder()
         instrs = decoder.decode_instructions(opcodes, 1)
         assert len(instrs) == 1  # Should still produce OCallN with partial args
+
+
+# ============================================================================
+# Phase B — Disassembler VarInt Parity
+# ============================================================================
+
+_VARINT_TEST_VALUES = [
+    0, 1, 31, 32, 63, 64, 127, 128, 255, 8191, 8192, 100000,
+    -1, -2, -31, -32, -63, -64, -127, -128, -255, -8191, -8192, -100000,
+]
+
+
+class TestDisassemblerVarIntParity:
+    """Phase B: disassembler VarInt decoding must match parser decoding."""
+
+    @pytest.mark.parametrize("value", _VARINT_TEST_VALUES)
+    def test_varint_parity(self, value):
+        """B.4.1: Disassembler _read_varint matches parser read_varint."""
+        data = encode_varint(value)
+        d_val, d_consumed = _read_varint(data, 0)
+        p_val = _parser_read_varint(io.BytesIO(data))
+        assert d_val == value, f"_read_varint({value}) = {d_val}"
+        assert p_val == value, f"parser_read_varint({value}) = {p_val}"
+        assert d_val == p_val, f"Parity mismatch: disasm={d_val} parser={p_val}"
+
+    def test_4byte_negative(self):
+        """B.4.2: 4-byte negative VarInt (-100000) decodes correctly."""
+        data = encode_varint(-100000)
+        val, consumed = _read_varint(data, 0)
+        assert val == -100000
+        assert consumed == 4
+
+    def test_backward_jump(self):
+        """B.4.3: Backward jump offset decodes as negative value in CFG."""
+        # Build a tiny function with a backward jump:
+        #   instr[0]: OAdd r0, r1, r2   (op 7, 3 args)
+        #   instr[1]: OJAlways -2        (op 58, 1 arg = relative offset back)
+        data = encode_op(7, 0, 1, 2) + encode_op(58, -2)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(data, 2)
+        assert len(instrs) == 2
+        # OAdd decoded
+        assert instrs[0].mnemonic == "OAdd"
+        assert instrs[0].args == [0, 1, 2]
+        # OJAlways with negative offset
+        assert instrs[1].mnemonic == "OJAlways"
+        assert instrs[1].args[0] == -2, \
+            f"Backward jump offset should be -2, got {instrs[1].args[0]}"
+        # CFG should detect back-edge
+        resolver = JumpResolver()
+        resolver.resolve(instrs)
+        assert instrs[1].jump_target is not None
+        assert instrs[1].jump_target < instrs[1].index, \
+            f"Backward jump target ({instrs[1].jump_target}) should be < {instrs[1].index}"

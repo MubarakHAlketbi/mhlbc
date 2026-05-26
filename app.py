@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor, QSyntaxHighlighter, QTextCharFormat
 
-from hl_worker import HLParseWorker
+from hl_worker import HLParseWorker, HLDecompileWorker
 from hl_parser import (
     HLParser, KIND_NAMES, K_OBJ, K_STRUCT, K_ENUM, K_VIRTUAL,
     K_ABSTRACT, K_FUN, K_METHOD, PRIMITIVE_KINDS, get_parser_version,
@@ -1128,8 +1128,54 @@ class DecompilerApp(QMainWindow):
         # Jump to overview on load
         self.tabs.setCurrentIndex(self.TAB_OVERVIEW)
 
-        # Trigger decompilation in background
-        self._do_decompile()
+        # Start background decompilation
+        self._decompile_text.setPlainText("Decompilation running in background...")
+        self._start_background_decompile()
+
+    def _start_background_decompile(self):
+        """Start decompilation in a background worker thread."""
+        if not self.parser:
+            return
+        # Cancel existing decompile worker if still running
+        if hasattr(self, '_decompile_worker') and self._decompile_worker:
+            self._decompile_worker.quit()
+            self._decompile_worker = None
+        self._decompile_worker = HLDecompileWorker(self.parser, logger=None)
+        self._decompile_worker.progress.connect(self._on_decompile_progress)
+        self._decompile_worker.finished.connect(self._on_decompile_success)
+        self._decompile_worker.failed.connect(self._on_decompile_failure)
+        self._decompile_worker.start()
+
+    def _on_decompile_progress(self, message: str, val: int):
+        self.status_bar.showMessage(f"Decompile: {message}", 0)
+
+    def _on_decompile_success(self, parser: HLParser, files: dict):
+        """Update the decompile tab with successfully decompiled output."""
+        self._decompile_worker = None
+        if not files:
+            self._decompile_text.setPlainText("// No decompilable functions found.")
+            self.tabs.setTabText(self.TAB_DECOMPILE, "Decompile (0)")
+            return
+        lines = []
+        for fname, fsrc in files.items():
+            lines.append(f"// --- {fname} ---")
+            lines.append(fsrc)
+        text = "\n\n".join(lines)
+        self._decompile_text.setPlainText(text)
+        n_files = len(files)
+        self.tabs.setTabText(
+            self.TAB_DECOMPILE,
+            f"Decompile ({n_files})"
+        )
+        self.status_bar.showMessage(f"Decompiled {n_files} files", 5000)
+
+    def _on_decompile_failure(self, error_message: str):
+        """Show error in decompile tab on failure."""
+        self._decompile_worker = None
+        self._decompile_text.setPlainText(
+            f"// Decompilation failed:\n// \n// {error_message}"
+        )
+        self.status_bar.showMessage("Decompilation failed", 5000)
 
     def on_parse_failure(self, error_message: str):
         self.btn_open.setEnabled(True)
@@ -1145,38 +1191,6 @@ class DecompilerApp(QMainWindow):
     # ------------------------------------------------------------------
     # CFG rendering
     # ------------------------------------------------------------------
-
-    def _do_decompile(self):
-        """Run decompilation and update the decompile tab."""
-        if not self.parser:
-            return
-        try:
-            disasm = Disassembler(self.parser)
-            decompiler = Decompiler(self.parser, disasm)
-            result = decompiler.decompile_all()
-            self._decompile_result = result
-            writer = HaxeWriter(decompiler.type_resolver, self.parser,
-                                 include_comments=True)
-            files = writer.write_output(result)
-            lines = []
-            for fname, fsrc in files.items():
-                lines.append(f"// --- {fname} ---")
-                lines.append(fsrc)
-            text = "\n\n".join(lines)
-            self._decompile_text.setPlainText(text)
-            n_funcs = len(result.functions)
-            n_errors = result.count_errors()
-            status = f"Decompiled: {n_funcs} functions"
-            if n_errors:
-                status += f", {n_errors} errors"
-            self.tabs.setTabText(
-                self.TAB_DECOMPILE,
-                f"Decompile ({n_funcs})"
-            )
-        except Exception as e:
-            self._decompile_text.setPlainText(
-                f"Decompilation failed:\\n\\n{e}"
-            )
 
     def _on_cfg_selection(self, selected, deselected):
         if not self.parser:

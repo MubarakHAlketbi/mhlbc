@@ -12,6 +12,9 @@ from typing import List, Optional, Dict, Tuple
 import struct
 
 from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
+from hl_parser._varint import read_varint as _parser_read_varint
+from hl_parser._exceptions import HLParserError
+import io
 
 
 # ============================================================================
@@ -201,28 +204,26 @@ class BasicBlock:
 
 
 # ============================================================================
-# VarInt Decoder (standalone — matches hl_parser.read_varint semantics)
+# VarInt Decoder (wraps hl_parser._varint.read_varint — single source of truth)
 # ============================================================================
 
 def _read_varint(data: bytes, pos: int) -> Tuple[int, int]:
     """Read a signed VarInt from bytes starting at pos.
 
+    Delegates to hl_parser._varint.read_varint() for consistent signed
+    1/2/4-byte decoding with correct sign-bit handling (bit 5 = 0x20
+    for both 2-byte and 4-byte forms).
+
     Returns (value, bytes_consumed).
     Raises IndexError on truncated data.
     """
-    b1 = data[pos]
-    if (b1 & 0x80) == 0:
-        return b1, 1
-    elif (b1 & 0x40) == 0:
-        b2 = data[pos + 1]
-        value = ((b1 & 0x1F) << 8) | b2
-        if b1 & 0x20:
-            value = -value
-        return value, 2
-    else:
-        b2, b3, b4 = data[pos + 1], data[pos + 2], data[pos + 3]
-        value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
-        return value, 4
+    stream = io.BytesIO(data[pos:])
+    start = stream.tell()
+    try:
+        value = _parser_read_varint(stream)
+    except HLParserError:
+        raise IndexError("truncated VarInt")
+    return value, stream.tell() - start
 
 
 # ============================================================================

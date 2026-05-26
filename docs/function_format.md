@@ -66,7 +66,7 @@ VarInt: opcode_count (nops)
 VarInt: register_type_index
 
 |--- Opcodes (nops times) ---
-|**single byte:** opcode_index (0-103)
+|**single byte:** opcode_index (0-102)
 opcode-dependent arguments (see opcodes.md)
 |Full opcode encoding per hl_read_opcode:
 |  1 byte: opcode index (hl_read_b, NOT a VarInt)

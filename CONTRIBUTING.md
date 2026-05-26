@@ -14,7 +14,7 @@ The codebase is strictly separated into three layers to prevent UI deadlocks and
 hl_decompiler/
 │
 ├── docs/                      # The Knowledge Base (Target-of-truth)
-│   ├── opcodes.md             # Registry of all 102 opcodes and arguments
+│   ├── opcodes.md             # Registry of all 103 opcodes (IDs 0-102) and arguments
 │   ├── type_system.md         # Serialization schemas for types (Obj, Virtual, Enum, etc.)
 │   ├── function_format.md     # Function, native, global, constant serialization
 │   ├── version_deltas.md      # HashLink bytecode version variations (v3, v4, v5+)
@@ -379,7 +379,7 @@ cli.py header file.hlb -vv
 cli.py types file.hlb --log-level warn
 ```
 
-**GUI:** A level dropdown replaces the old binary "Verbose" checkbox. Options: Off, Errors, Warnings, Info, Debug, Trace.
+**GUI:** The toolbar has a "Verbose" checkbox that enables detailed logging to `logs/`. The log path is shown in the status bar when verbose mode is active. Options: off (no logging) or on (writes to timestamped log files). When the app is launched with `--verbose` / `-v`, verbose mode is pre-enabled and locked.
 
 ### 9.4 Log Analysis Tooling
 
