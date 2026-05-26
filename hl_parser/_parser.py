@@ -884,6 +884,7 @@ class HLParser:
                     body_offset=0, body_size=0,
                     opcode_start=0, opcode_end=0,
                     name=None, parent_type=None, malformed=True,
+                    header_offset=func_start,
                 )
                 self.functions.append(func)
                 self._log("FUNC", f"  func[{func_i}]: type={type_idx} findex={findex} "
@@ -1015,6 +1016,7 @@ class HLParser:
                 assign_vars=assign_vars if self.has_debug else None,
                 assign_regs=assign_regs if self.has_debug else None,
                 nassigns=nassigns if self.has_debug else 0,
+                header_offset=func_start,
             )
 
             self.functions.append(func)

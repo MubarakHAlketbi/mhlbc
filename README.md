@@ -352,11 +352,11 @@ This is a **Track B** (Farever progress) known issue, not a general decompiler b
 
 **Current status on Farever (Track B):**
 - Header and pools parse correctly (types, globals, natives all valid kinds 0-24)
-- ~1% of function opcodes decode as unknown (stream boundary issue, not a parser bug)
-- Decompiler produces partial output (skeleton classes, some functions)
-- Re-analysis confirms the remaining issues are in **function pool layout** (not type system)
-- Classification: likely a mix of categories 3 (robustness) and 4 (shiroTools-specific quirk)
-- Farever does not block Gate 6 or general decompiler validation
+- **Farever Track B parser navigation is resolved as of commit `73182ba`.**
+- Clean Farever `hlboot.dat` parses **45,365/45,365 functions, 0 malformed, 0 unknown opcodes, and 22,124 constants**.
+- Remaining Farever work is **decompiler quality/readability, type/name recovery, and high-level reconstruction quality** — not parser navigation.
+- This is a **Track B** benchmark only. Gate 6 / Track A is defined by standard fixture correctness, not Farever.
+- Classification: Track B decompiler quality, not parser navigation.
 
 ### Function Body Alignment
 

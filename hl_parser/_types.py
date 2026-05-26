@@ -190,6 +190,9 @@ class FunctionDef:
     assign_regs: Optional[List[int]] = None
     nassigns: int = 0
 
+    # Header offset (byte position of the first VarInt of this function's entry)
+    header_offset: int = -1
+
     def to_dict(self) -> dict:
         d: dict = {
             "type": self.type,
