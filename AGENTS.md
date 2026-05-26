@@ -1,296 +1,398 @@
-## Role Definition: Systems & Compiler Engineer (LLM Developer Persona)
+This file only defines `mhlbc` domain knowledge, architecture boundaries, bytecode rules, and development guardrails.
 
-You are an expert compiler engineer, reverse engineer, and systems programmer specializing in virtual machine architecture and low-level parsing. Your target domain is the HashLink Virtual Machine bytecode format. You strictly implement high-performance, non-blocking, and memory-efficient tools.
+## 1. Mission
 
----
+`mhlbc` is a Python and PyQt6 toolkit for parsing, inspecting, disassembling, and decompiling Haxe/HashLink bytecode, especially `hlboot.dat` files.
 
-## 1. Domain Knowledge: HashLink Bytecode Specifications
+The active scope is the core decompiler:
 
-### A. Bitwise VarInt Decoding Rules
-You read sequential byte streams. Almost all integers in HashLink bytecode are variable-length values (`varint`). There are two VarInt decoders:
+- Parse HashLink bytecode across supported versions.
+- Decode constants, strings, bytes, debug files, types, globals, natives, functions, and opcodes.
+- Build disassembly, CFG, IR, AST, and Haxe-like output.
+- Preserve correctness, diagnostics, robustness, and test coverage.
 
-**INDEX** (`hl_read_index`, signed): Used for most integer fields. Bit 5 (0x20) is the sign bit for both 2-byte and 4-byte encodings.
-```python
-# Sequential stream evaluation.
-# b1 bit layout:
-#   1-byte:  bit 7 clear = 0xxxxxxx
-#   2-byte:  bit 7 set, bit 6 clear = 10xxxxxx
-#   4-byte:  bit 7 set, bit 6 set = 11xxxxxx
-#   Sign:    bit 5 (0x20) for both 2-byte and 4-byte
-#   Value:   remaining bits (0-4 for 4-byte, 0-5 for 2-byte)
-b1 = stream.read_byte()
-if (b1 & 0x80) == 0:
-    value = b1
-elif (b1 & 0x40) == 0:
-    b2 = stream.read_byte()
-    value = ((b1 & 0x1F) << 8) | b2
-    if b1 & 0x20: value = -value
-else:
-    b2, b3, b4 = stream.read_bytes(3)
-    value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
-    if b1 & 0x20: value = -value
+Do not work on bytecode patching, asset extraction, native engine bindings, or full modding SDK features unless the project owner explicitly unlocks that scope. Those are future tiers and must not distract from the core decompiler.
+
+## 2. Source of Truth
+
+Use this priority order when resolving conflicts:
+
+1. Current user instruction.
+2. Existing code.
+3. `docs/` specifications.
+4. `README.md`, `CONTRIBUTING.md`, and `checklist.md`.
+5. This `AGENTS.md`.
+
+If this file conflicts with verified code or docs, update this file after confirming the correct behavior.
+
+Do not invent HashLink format details. If a bytecode layout is unknown, inspect existing implementation, docs, test fixtures, reference HashLink source, or real binary evidence before changing code.
+
+## 3. Repository Boundaries
+
+Preserve the project layering:
+
+| Layer | Files | Rule |
+|---|---|---|
+| Parser | `hl_parser/` | Pure Python, headless, no PyQt imports, no UI branching. |
+| Analysis | `hl_disasm.py`, `hl_decompile.py` | Disassembly, CFG, IR, AST, Haxe-like reconstruction. |
+| CLI | `cli.py` | Scriptable entry point for parser and analysis features. |
+| GUI | `app.py`, `hl_worker.py` | UI rendering only; heavy parsing runs through worker thread. |
+| Tests | `tests/` | Unit, integration, regression, and fixture-backed validation. |
+| Docs | `docs/`, `README.md`, `CONTRIBUTING.md`, `checklist.md` | Specs, roadmap, process, and known issues. |
+
+Required architecture rules:
+
+- Parser must stay UI-agnostic.
+- GUI must not perform heavy parsing or analysis on the main thread.
+- Use `QThread` through `hl_worker.py` for long-running parse work.
+- Use `QAbstractListModel` and `QListView` virtualization for large lists.
+- Prefer backend first, then CLI, then GUI.
+- Keep opcode tables and helpers synchronized across parser, disassembler, and tests.
+
+## 4. Scope Authority
+
+Project scope is controlled by the current repository documents and the project owner, not by this file alone.
+
+Agents must use the following authority order:
+
+1. Direct owner instruction in the current task.
+2. `MEMORY.md` for current session context and recent decisions.
+3. `checklist.md` for active work items and pending priorities.
+4. `README.md` for project roadmap, gates, tiers, and public direction.
+5. `CONTRIBUTING.md` for engineering workflow, tests, architecture rules, and release rules.
+6. `docs/` for bytecode format details and technical specifications.
+
+`AGENTS.md` is a standing operating guide. It must not freeze the roadmap, override active instructions, or prohibit work that the owner explicitly requests.
+
+Before starting work, agents should classify the task as one of:
+
+- Core decompiler work.
+- Validation or diagnostic work.
+- Documentation or test work.
+- Research needed to unblock parser/decompiler correctness.
+- Roadmap expansion work.
+
+Roadmap expansion work is allowed when the owner explicitly asks for it or when the current repository documents mark it as active. Otherwise, agents should avoid silently expanding scope and should keep changes connected to the active task.
+
+Native/runtime reverse engineering is allowed when it supports bytecode parser, disassembler, or decompiler correctness. It should not be treated as product-feature work unless the owner explicitly makes it part of the task.
+
+## 5. HashLink Bytecode Rules
+
+### 5.1 VarInt and UINDEX
+
+HashLink uses variable-length integers throughout the bytecode stream.
+
+Signed INDEX rules:
+
+- If `(b1 & 0x80) == 0`, the value is `b1`.
+- Else if `(b1 & 0x40) == 0`, read `b2`; value is `((b1 & 0x1F) << 8) | b2`.
+- Else read `b2`, `b3`, `b4`; value is `((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4`.
+- In both multi-byte forms, bit 5 (`0x20`) is the sign bit. If set, negate the value.
+
+UINDEX uses the same byte encoding as INDEX but rejects negative decoded values. Use unsigned reads for inherently non-negative fields.
+
+Use UINDEX semantics for:
+
+- Pool counts.
+- `entrypoint`.
+- `findex`.
+- `nregs`.
+- `nops`.
+- `ndebugfiles`.
+- `OSwitch` case count and offsets.
+
+### 5.2 Header Version Branches
+
+Never read conditional header fields unconditionally.
+
+Header order:
+
+1. `magic`, 3 bytes, must be `HLB`.
+2. `version`, 1 byte.
+3. `flags`, VarInt.
+4. `nints`, VarInt.
+5. `nfloats`, VarInt.
+6. `nstrings`, VarInt.
+7. `nbytes`, VarInt, only when `version >= 5`.
+8. `ntypes`, VarInt.
+9. `nglobals`, VarInt.
+10. `nnatives`, VarInt.
+11. `nfunctions`, VarInt.
+12. `nconstants`, VarInt, only when `version >= 4`.
+13. `entrypoint`, VarInt.
+
+Wrong version branching causes stream desynchronization before pools are parsed.
+
+### 5.3 Pools
+
+Pool order after the header:
+
+1. Int pool: `nints * 4` little-endian bytes.
+2. Float pool: `nfloats * 8` little-endian bytes.
+3. String pool.
+4. Bytes pool for `version >= 5`.
+5. Debug files if valid debug section exists.
+6. Types.
+7. Globals.
+8. Natives.
+9. Functions.
+10. Constants for `version >= 4`.
+
+String pool format:
+
+1. 4-byte little-endian payload size.
+2. Raw null-terminated UTF-8 string payload.
+3. `nstrings` UINDEX length markers after the payload.
+
+Do not skip the trailing length markers. Missing them is a known cause of type-pool corruption.
+
+Bytes pool format for v5 and newer:
+
+1. 4-byte little-endian payload size.
+2. Raw bytes payload.
+3. `nbytes` UINDEX offsets into the payload.
+
+Debug file section:
+
+- `flags & 1` means debug may be present, not that it is definitely valid.
+- Debug file names use the same string-table pattern as the main string pool.
+- Sanity-check table sizes against remaining bytes.
+- If the debug table is impossible, recover without corrupting the stream.
+
+### 5.4 Type System
+
+Use the existing kind constants and current docs as the source of truth. Do not invent payload schemas for unknown kind values.
+
+Known high-risk rules:
+
+- `FUN` and `METHOD` argument count is a single raw byte, not a VarInt.
+- Function and method type arguments are type indices, followed by a return type index.
+- `Obj` prototype format is exactly `name`, `findex`, `pindex`.
+- Do not parse Obj protos as `name`, `type`, `findex`.
+- Class field indices accumulate through inheritance.
+- Validate type kind ranges and log suspicious values.
+- Unknown type kinds require diagnostics and bounded recovery, not silent acceptance.
+
+### 5.5 Function Pool
+
+Function header fields:
+
+- `type`: INDEX type reference.
+- `findex`: UINDEX.
+- `nregs`: UINDEX.
+- `nops`: UINDEX.
+- Register types: `nregs` type references.
+- Opcode stream: exactly `nops` decoded instructions.
+- Debug info: RLE encoded when valid debug info exists.
+
+There is no separate function byte-length field. `nops` is the only body size signal. If `nops` is impossible, recovery is heuristic and must be logged.
+
+Negative or enormous `nregs` or `nops` means one of these is likely true:
+
+- The stream was already misaligned.
+- The binary is non-standard.
+- The parser model is incomplete.
+
+Never silently skip the problem. Emit diagnostics, preserve offsets, and recover conservatively.
+
+### 5.6 Opcode Decoding
+
+Opcode index is a single raw byte, not a VarInt.
+
+Fixed-argument opcodes:
+
+- Decode the opcode byte first.
+- Use the opcode argument table for argument count and argument type.
+- Keep `_OPCODE_NARGS` aligned across parser, disassembler, and test helpers.
+- Do not add a dummy entry that shifts opcode indices.
+
+Standard vararg opcodes:
+
+- `OCallN` 29.
+- `OCallMethod` 30.
+- `OCallThis` 31.
+- `OCallClosure` 32.
+- `OMakeEnum` 90.
+
+Standard vararg layout:
+
+1. `p1`: INDEX.
+2. `p2`: INDEX.
+3. `argc`: single raw byte.
+4. `argc` INDEX arguments.
+
+`OSwitch` exception:
+
+- Opcode index is 70.
+- `p1`: INDEX register.
+- `p2`: UINDEX case count.
+- `p2` UINDEX case offsets.
+- Default offset: UINDEX.
+
+Do not decode `OSwitch` like the OCall vararg family.
+
+### 5.7 Debug Info RLE
+
+Function debug info is RLE encoded per opcode, not a flat array.
+
+Decode by walking control bytes until source locations for `nops` instructions are produced or the section is exhausted. Log malformed RLE and recover without shifting subsequent function reads incorrectly.
+
+### 5.8 Name Resolution
+
+Functions are anonymous until post-processing links them to type metadata.
+
+Name recovery sources:
+
+- Obj protos map method names to global `findex`.
+- Obj bindings map static field names to global `findex`.
+- Constructor detection may infer `new` from function type shape and owning class.
+- `$Class` and metadata wrapper types must not override real implementation names.
+
+When multiple possible names exist, prefer evidence from class ownership and binding context. Avoid generic stdlib wrapper names if they conflict with concrete class methods.
+
+## 6. Diagnostics and Logging
+
+Every parser or decoder change must preserve investigative visibility.
+
+Use existing logging infrastructure and levels:
+
+- TRACE: byte-level VarInt, opcode, and offset details.
+- DEBUG: structure boundaries, pool starts, function starts, recovery decisions.
+- INFO: parse milestones and high-level summary.
+- WARNING or diagnostic objects: suspicious but recoverable inconsistencies.
+- ERROR or exceptions: unrecoverable parse failure.
+
+Logging rules:
+
+- Log stream offsets before and after major sections.
+- Log every header field.
+- Log conditional branches such as v4/v5 fields and debug-section decisions.
+- Log malformed function recovery with enough offset context to reproduce.
+- Use `logalyzer.py` and its SQLite output for large logs instead of ad hoc grep.
+- Treat `--log-path` as a directory because logger sessions create nested paths.
+
+## 7. Testing Rules
+
+Run the narrowest meaningful test first, then broader suites when behavior changes cross module boundaries.
+
+Default commands:
+
+```bash
+pytest
+pytest -v
+pytest -x
+pytest -k "varint"
 ```
 
-**UINDEX** (`hl_read_uindex`, unsigned): Wraps INDEX and rejects negative values with an error. Used for fields that are inherently non-negative: `findex`, `nregs`, `nops`, `entrypoint`, all pool counts, `ndebugfiles`, `OSwitch` case offsets. The underlying byte encoding is identical to INDEX — only the validation differs. In Python, `read_uvarint()` calls `read_varint()` and raises `HLParserError` if the result is negative.
+Required test behavior:
 
-### B. Header Variations & Structural Offsets
-You prevent stream desynchronization by strictly branching your parser paths on the bytecode version byte (typically version 3, 4, or 5):
-* `magic`: 3 bytes (`"HLB"`).
-* `version`: 1 byte.
-* `flags`: VarInt. Debug status is evaluated as `has_debug = (flags & 1) != 0`.
-* `nints`, `nfloats`, `nstrings`: VarInts.
-* **`nbytes`**: VarInt. **Read only if version >= 5**.
-* `ntypes`, `nglobals`, `nnatives`, `nfunctions`: VarInts.
-* **`nconstants`**: VarInt. **Read only if version >= 4**.
-* `entrypoint`: VarInt.
+- Parser changes need parser tests.
+- VarInt changes need edge-case and round-trip tests.
+- Opcode changes need disassembler and parser body-skip tests.
+- Decompiler changes need IR, writer, and pipeline tests.
+- GUI changes must preserve non-blocking parse behavior and model-view virtualization.
+- Fixture format fixes need integration tests with compiled `.hl` fixtures.
 
-### C. Type System & Field Index Accumulation
-You resolve class-hierarchy field offsets cumulatively. Because field indexes in nested classes do not start at zero, you calculate offsets relative to the parent class:
-* For any object type `Obj`:
-  $$\text{FieldIndex}_{\text{global}} = \sum \text{Fields}_{\text{superclasses}} + \text{FieldIndex}_{\text{local}}$$
-* You parse Type Kinds: $0$ (Void) to $22$ (Packed).
-* You decode compound types (`Obj`, `Struct`, `Enum`, `Virtual`, `Fun`, `Method`) sequentially based on their kind-specific structures.
+When a synthetic helper changes, verify it still matches real compiler output. Synthetic bytecode is useful but cannot replace compiled HLB regression fixtures.
 
-### D. Function Ref Mapping (`findex`)
-You know functions are anonymous by default. You map the global function index space (`findex`) by combining two distinct namespaces:
-1. **Natives Pool:** Holds native C bindings (`nnatives`).
-2. **Functions Pool:** Holds program bytecode functions (`nfunctions`).
-* You resolve function names by parsing class method prototypes (`protos`) and static method field mappings (`bindings`) inside `Obj` types, linking their names to their corresponding `findex`.
+## 8. Development Workflow
 
-### E. Opcode Encoding (Corrected Per HL Reference)
-The `hl_read_opcode` function in `hashlink/src/code.c` defines the encoding:
-- **Opcode index:** single byte (`hl_read_b`), NOT a VarInt. This was a historical bug in earlier parser versions.
-- **Fixed args:** INDEX/UINDEX signed/unsigned VarInts depending on the opcode's arg type slot.
-- **Vararg ops (OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum):** p1=INDEX, p2=INDEX, p3=READ (single byte count), then p3 × INDEX values.
-- **OSwitch:** p1=UINDEX, p2=UINDEX, then p2 × UINDEX case offsets, p3=UINDEX default.
-- The `_OPCODE_NARGS` table (104 entries) is auto-generated from `hashlink/src/opcodes.h` via the HL formula: `(_b == AR ? _c : (_c == X ? (_b == X ? (_a == X ? 0 : 1) : 2) : 3))`.
+Use this flow for changes that affect bytecode interpretation:
 
-### F. Debug Info Encoding (RLE)
-The `hl_read_debug_infos` function in `hashlink/src/code.c` defines a compact RLE format:
-- Encodes (file_index, line) per opcode, NOT flat VarInt arrays.
-- Control byte `c` with bit flags:
-  - Bit 0 (0x01): file change — 2-byte encoding: `curfile = (c>>1) << 8 | next_byte`
-  - Bit 1 (0x02): run-length — `delta = c>>6`, `count = (c>>2)&15`, fill `count` entries, then `curline += delta`
-  - Bit 2 (0x04): single entry with delta: `curline += c>>3`, emit one (file, line)
-  - No bits: big delta — `curline = (c>>3) | (b2<<5) | (b3<<13)` (3 bytes total)
+1. Check existing docs and code for the exact structure.
+2. Locate the stream boundary and expected offset behavior.
+3. Add or update tests that reproduce the issue.
+4. Implement the smallest correct backend change.
+5. Expose through CLI if the feature is user-facing or scriptable.
+6. Update GUI only after backend and CLI behavior is stable.
+7. Update docs when a layout rule, pitfall, or architecture rule changes.
+8. Run relevant tests and report exact results.
 
-### G. Debug File String Table Format (hl_read_strings)
-The debug file section in the pools area uses `hl_read_strings` (same function as the main string pool), NOT VarInt indices:
+Documentation maintenance:
 
-```
-UINDEX: ndebugfiles (number of source files)
-INT32:  table_size (4-byte LE, total byte size of the string table payload)
-BYTES:  table_size bytes of raw string data containing:
-            UINDEX:  string_1_length
-            BYTES:   string_1_length bytes of UTF-8 data
-            BYTE:    0x00 (null terminator)
-            UINDEX:  string_2_length
-            ...
-```
+- Update `docs/` when bytecode knowledge changes.
+- Update `README.md` when roadmap, scope, command usage, or project status changes.
+- Update `CONTRIBUTING.md` when workflow, architecture, testing, or logging rules change.
+- Update `AGENTS.md` only for concise agent-relevant domain knowledge or pitfalls.
+- Do not turn `AGENTS.md` into a full specification dump if the detail belongs in `docs/`.
 
-CRITICAL: The 4-byte `table_size` must be sanity-checked against remaining stream data. Some production binaries (Farever) have the debug flag set but the string table size decodes to an impossible value (185MB in a 13MB file). If `table_size > remaining`, backtrack to before `ndebugfiles` and disable debug.
+Branch policy:
 
-**Our parser** stores parsed debug file names as `List[str]` (actual strings, not pool indices).
+- Work on `main` unless the project owner explicitly requests a branch.
+- Do not move or delete gate tags.
+- Use gate-style version tags when milestone tagging is requested.
 
-### H. Function Header Fields (UINDEX vs INDEX)
-The HL runtime (`hashlink/src/code.c`, `hl_read_function`) uses specific VarInt types for each function header field:
-- `type`: INDEX (via `hl_get_type(r)` which reads INDEX)
-- `findex`: UINDEX (unsigned)
-- `nregs`: UINDEX (unsigned)
-- `nops`: UINDEX (unsigned)
+## 9. Investigation Protocol
 
-**Crucially, `nregs` and `nops` are unsigned.** If our parser reads them as signed (INDEX) and gets a negative value (bit 5 set), the HL runtime would detect the same negative value via UINDEX and ERROR — it cannot load such a binary. When a production game binary has negative nregs/nops:
-1. Either the stream position is wrong before reaching the function (misaligned types/globals/natives)
-2. Or the runtime uses a modified/custom version of HL that handles these differently
-3. The parser should clamp negative values and resync, but acknowledge this is a best-effort recovery
+Never assume a working game binary is corrupt just because the parser fails.
 
----
+Before changing assumptions:
 
-## 2. Desktop UI Architecture & Thread Constraints
+1. Record exact byte offsets and decoded values.
+2. Compare against current docs and tests.
+3. Compare against reference HashLink source when available.
+4. Compile or inspect a minimal Haxe fixture that isolates the same structure.
+5. Check whether a stream desync happened earlier.
+6. Only then add recovery logic or update the format model.
 
-### A. Non-Blocking Event Loops (QThread Pattern)
-You never allow heavy data decoding to block the main event loop. You execute all sequential parsing tasks in a secondary execution context:
-* Subclass `QThread` (or equivalent execution thread abstraction).
-* Emits progression metadata safely across thread boundaries via thread-safe signals (`pyqtSignal(str, int)`).
-* Releases raw data pointers to the main thread only upon safe execution completion.
+Recovery logic must be bounded, logged, and tested. It must not hide parser bugs in standard HLB files.
 
-### B. UI Virtualization (Model-View Pattern)
-You avoid populating standard list widgets directly. Instead, you utilize a strict Model-View architecture for large datasets:
-* Subclass `QAbstractListModel`.
-* Overwrite `rowCount` to return the size of the underlying container.
-* Overwrite `data` to retrieve only the slice of elements requested for the current visible frame (Viewport).
-* Prevent O(N) memory allocations in the UI layer.
+## 10. Farever and shiroTools Notes
 
-### C. Abstract Syntax Tree (AST) Disassembly Engine
-To reconstruct instructions:
-* Decode the 98 VM opcodes, translating arguments (registers, pool indices, jumps).
-* Translate jump offsets relative to instruction count indexes, not byte offsets.
-* Reconstruct loops by matching back-edges (negative jumps target a `Label` opcode).
+Farever is a real-world robustness target, not the only correctness benchmark.
 
----
+Current known facts to preserve unless new evidence overrides them:
 
-## 3. Known Pitfalls & How To Avoid Them
+- Farever uses a custom Shiro Games `shiroTools` HashLink fork.
+- `libhl.dll` is primarily runtime support, not the bytecode reader.
+- Bytecode reader logic was found in `Farever.exe`.
+- Decompiled `hl_read_type` matched open-source HashLink in prior analysis.
+- Remaining Farever issues are more likely function-pool or function-body alignment issues than type-system extensions.
+- Standard HLB fixtures remain the primary correctness baseline.
 
-### 3.1 Bytecode Parsing
+When investigating Farever:
 
-**P1 — Opcode index is a single byte, not VarInt.**
-`hl_read_opcode` in `hashlink/src/code.c` uses `hl_read_b()` (1 byte), not `hl_read_index()` (VarInt). Reading a VarInt will consume extra bytes and desync the entire opcode stream.
-*Avoid: Use `stream.read(1)[0]`, not `read_varint()`.*
+- Do not generalize Farever recovery paths into standard parser behavior without fixture evidence.
+- Keep standard HLB parsing strict and verified.
+- Keep malformed production-binary recovery explicit and diagnosable.
 
-**P2 — Vararg count (OCallN family) is single byte, not VarInt.**
-The `p3` field for OCallN/OCallMethod/OCallThis/OCallClosure/OMakeEnum is a raw byte, not a VarInt. Using VarInt advances the stream by the wrong amount.
-*Avoid: Read 1 byte for the count, then that many INDEX-type args.*
+## 11. Performance and Memory
 
-**P3 — OSwitch counts are also single bytes.**
-`p2` (number of cases) is a single byte. So is the default offset `p3`.
-*Avoid: Read p2 as 1 byte, then p2 x UINDEX case offsets, then UINDEX default.*
+Large bytecode files can contain tens of thousands of strings, types, functions, and opcodes.
 
-**P4 — OSwitch opcode index is 70, not 71.**
-ONullCheck is 71. Using 71 for OSwitch causes corrupted switch decode.
-*Verify against `hashlink/src/opcodes.h` whenever adding opcode-specific logic.*
+Required behavior:
 
-**P5 — `_OPCODE_NARGS` must not have a dummy entry at index 0.**
-The table is 103 entries (indices 0-102), with opcode 0 at position 0. A leading dummy 0 shifts every lookup by 1.
-*Three files must stay synchronized: `hl_parser.py`, `hl_disasm.py`, `tests/hl_helper.py`. Verify by round-trip: `encode_op(0,0,1)+encode_op(1,0,0)+encode_op(67,0)` must produce 12 opcode bytes and decode to 3 instructions.*
+- Avoid O(N) UI widgets for large lists.
+- Avoid unnecessary full-copy transformations of large byte arrays.
+- Preserve compatibility with `bytes`, `bytearray`, and `mmap` where existing code supports them.
+- Keep parser structures plain and serializable where practical.
+- Prefer streaming or indexed access over eager expansion when possible.
 
-**P6 — Debug info is RLE-encoded, not flat VarInt arrays.**
-`hl_read_debug_infos` in `hashlink/src/code.c` uses a control-byte format with bit flags for file changes, run-length encoding, deltas, and big deltas. Flat VarInt arrays will desync.
-*Avoid: Implement the exact RLE decoder from HL source — 4 control-byte patterns.*
+## 12. Agent Pitfalls
 
-**P7 — VarInt sign bit is bit 5 (0x20) for both 2-byte and 4-byte encodings.**
-The value mask is 0x1F (5 bits, not 6) for both cases. 2-byte signed VarInts have 13 data bits (5+8); 4-byte has 29 (5+24). Bit 5 is always the sign.
-*Verify: `((b1 & 0x1F) << 24)` for 4-byte, NOT `((b1 & 0x1F) << 16)`. Both use the same sign bit and mask.*
+Do not do these:
 
-**P8 — `nbytes` field is v5+ only; `nconstants` is v4+ only.**
-Reading either unconditionally will desync the stream. Version branching must be strict.
-*Avoid: `if version >= 5: nbytes = read_varint()` / `if version >= 4: nconstants = read_varint()`.*
+- Do not import PyQt into `hl_parser/`.
+- Do not read opcode IDs as VarInts.
+- Do not read `FUN` or `METHOD` nargs as VarInt.
+- Do not skip string-pool trailing lengths.
+- Do not parse debug files as string-pool indices.
+- Do not parse Obj protos as `name`, `type`, `findex`.
+- Do not decode `OSwitch` as OCall-style vararg.
+- Do not treat `flags & 1` as proof of valid debug data.
+- Do not silently accept impossible `nregs`, `nops`, type kinds, or opcode IDs.
+- Do not let UI work block the Qt main thread.
+- Do not add LLM-based reconstruction to the parser or decompiler critical path.
+- Do not expand scope into later tiers without explicit owner instruction.
 
-**P9 — Bytes pool (v5+) uses an offset table, not sequential entries.**
-`nbytes` VarInts point into the bytes payload. They are NOT entry headers.
-*Avoid: Read the full payload, then read `nbytes` VarInt offsets into it.*
+## 13. Agent Success Criteria
 
-**P10 — HashLink bytecode has no function-length field other than `nops`.**
-There is no separate length or offset table for the function pool. `nops` IS the body size. When it's corrupt, recovery is heuristic and limited. The parser's robustness layer (`_remaining_bytes`, `_read_bounded_varints`, `_scan_for_next_function`) handles edge cases but cannot fix fundamental data loss.
+A good change should satisfy these checks:
 
-**P11 — Negative nops/nregs require guards, not silent skips.**
-`nops < 0` means the body size is unknown — skip body immediately and resync. `nregs < 0` means register types are unknown — clamp to 0.
-*Avoid: Always check `nops >= 0` before reading body; `nregs >= 0` before reading reg_types.*
-
-**P12 — Function header fields (nregs, nops, findex) are UINDEX (unsigned), not INDEX.** (Updated Session 13)
-The HL runtime `hl_read_function` uses `UINDEX()` for `findex`, `nregs`, and `nops`. Only `type` uses INDEX (via `hl_get_type`). When a value encodes with bit 5 set, INDEX returns negative while UINDEX errors. Since both use the same byte-level encoding, signed vs unsigned doesn't change stream position — only field interpretation.
-*Always check: is the field inherently non-negative? If yes, it's UINDEX. Use `read_uvarint()` in the parser for clarity even though the underlying bytes are the same.*
-
-**P12a — Signed vs unsigned VarInt for pool counts is an unverified assumption.** (Legacy)
-The project previously assumed pool counts could be signed. Verified against HL runtime: all pool counts are UINDEX. If a field like `nops` decodes as negative (signed), the HL runtime also gets that negative value and fails — the binary is non-standard or the stream is misaligned.
-*When a parse fails on a working game binary, either the stream is misaligned upstream or the runtime differs from open-source.*
-
-**P13 — HLB files transferred via text mode (e.g. git, pipe) are truncated at 0x1A bytes.**
-Binary mode transfer preserves the full file. Always verify with `md5sum` against the Steam origin.
-
-|**P26 — Debug file section uses hl_read_strings format, NOT VarInt indices.**
-|The debug file section stores source file names in the same format as the main string pool:
-|INT32 table_size + null-terminated strings (same as main string pool) + ndebugfiles UINDEX
-|length values AFTER the data block.
-|*Fix: Read `ndebugfiles` VarInt, then 4-byte LE size, then `size` bytes of null-terminated
-|strings, then `ndebugfiles` UINDEX length values from the stream.*|
-||
-|**P27 — Debug string table size must be sanity-checked against remaining stream data.**
-|With the string lens fix (P33), the debug section position is now correct and
-|should not be corrupt for standard HLB files. The sanity check on table_size
-|is still needed for edge cases.
-|*Avoid: The old backtrack logic (Session 13) was a workaround for misaligned stream
-|position caused by missing string lens reads. With P33 fixed, debug is now valid.*|
-|
-|**P28 — Obj proto format is 3 VarInts: name, findex, pindex — NOT name, type, findex.**
-|Confirmed against both the HL source (`hl_read_type` in `hashlink/src/code.c`) and the hlbc Rust implementation (`ObjProto { name, findex, pindex }`). The "type" field of a method is obtained via `findex → Function.t`, not stored inline in the proto. Parsing protos as (name, type, findex) where type is a full recursive type consumes too many bytes, misaligning all subsequent Obj types.
-|*Avoid: Read `name + findex + pindex` (3 VarInts), NOT `name + type + findex`.*
-|
-|**P29 — hlbc (Gui-Yom/hlbc) also fails on Farever bytecode.**
-|The Rust-based hlbc CLI (v0.5.0, 2022) errors with `"Malformed bytecode (Invalid type kind '22')"` when loading Farever's hlboot.dat — the same error our parser would hit if it reached that type kind. This confirms Farever uses non-standard type kinds beyond the official HL spec, even for other third-party tools.
-|*Avoid: hlbc is useful as ground truth for standard HLB comparison, but cannot break the Farever deadlock.*
-|
-|**P30 — Haxe 4.3.6 always sets flags=1 (has_debug bit) even without `-debug`.**
-|Compiling with and without `-debug` produces identical HL bytecode (same MD5), both with flags=1. The debug file section in the pools area may not actually be present despite the flag. The HL runtime detects this via a sanity check on the table_size field and skips the section.
-|*Avoid: Always sanity-check the debug section. `flags & 1` is not a guarantee that valid debug data follows.*
-|
-|**P31 — Shiro Games (Farever developer) maintains a custom HL runtime fork.**
-|The Farever game's `libhl.dll` is built from `E:\Projects\shiroTools\hashlink\src\`. Built April 9, 2026 with MSVC 14.29. String evidence shows `shiroTools` is Shiro Games' internal HL fork. The runtime's behavior (VarInt encoding, type kinds, debug handling) may differ from open-source HL.
-|*Avoid: When analysis suggests the binary format differs from open-source HL, the shiroTools fork may be the source of the difference — not parser bugs.*
-
-**P32 — FUN/METHOD nargs is a single byte, not a VarInt.**
-Confirmed against `hashlink/src/code.c` `hl_read_type`: `nargs = READ()` (single byte), NOT `INDEX()` (VarInt). For nargs values < 128 the byte encoding is the same, but for function types with >= 128 arguments the VarInt would consume an extra byte and desync the stream.
-*Fix: Read `stream.read(1)[0]`, not `read_varint()`. The test helper builder must use `bytes([len]`) not `encode_varint(len)`.
-
-**P33 — String pool has nstrings UINDEX length values AFTER the string data block.**
-Per HashLink reference `hl_read_strings` in `hashlink/src/code.c`, after the raw string data (null-terminated strings), there are `nstrings` UINDEX values encoding the byte length of each string. Our parser did not read these, causing the stream to be misaligned by `nstrings` bytes (typically ~374 bytes for small programs, ~65K for Farever). This was THE root cause of the 7-byte-offset bug and all type pool corruption.
-*Fix: Add `for i in range(nstrings): read_varint(stream)` after reading the string data block.*
-
-**P34 — Debug file section uses the SAME hl_read_strings format as the main string pool.**
-In Haxe 4.3.6 (v4 bytecode), the section order is: header → ints → floats → strings (with lens) → debug files → types → globals → natives → functions → constants. The debug files section format:
-```
-UINDEX ndebugfiles
-if ndebugfiles > 0:
-    INT32 table_size
-    BYTES table_size bytes of null-terminated strings
-    ndebugfiles × UINDEX string length values
-```
-*Fix: Read debug files between strings and types, not before strings. The old "corrupt debug" detection was a side-effect of the missing string lens (P33).*
-
-**P35 — OSwitch used byte count (OCallN-style) instead of VarInt count + default offset.**
-`_skip_opcodes` treated all vararg opcodes identically, reading a single byte count for OSwitch. The HL reference has OSwitch with p2=UINDEX (VarInt) as the case count, followed by p2 case offsets and p3=default offset. Every OSwitch consumed 1 wrong byte (reading an extra byte as "count" when p2 IS the count) and missed the default offset. With 252 OSwitches in Natives.hl, this accumulated ~250+ bytes of drift, corrupting all function bodies past ~func[10].
-*Fix: Branch `_skip_opcodes` on op_idx==70. Capture p2 VarInt value as case count, read that many case offsets, then read one default offset.*
-
-### 3.2 Debugging & Log Analysis
-
-**P14 — Never grep/pip install raw log files while logalyzer is indexing.**
-The indexed DB provides instant SQL queries, deduplication, section filters, and byte-offset arithmetic. Grep/Python on raw logs duplicates work and produces incomplete results.
-*Workflow: Index first (background with notify_on_complete), wait for it, then query the DB.*
-
-**P15 — `--log-path` specifies a directory, not a file.**
-The VerboseLogger creates a `{date}/{time}/` subdirectory inside the given path and writes timestamped chunk files. To find the actual log, list the session directory contents.
-*Avoid: Either omit `--log-path` (uses default `logs/`) or expect a date/time subdirectory with chunk files inside.*
-
-**P16 — Decompiler verbose logging produces zero output.**
-The `DECOMPILE` tag and `self._log()` calls exist in hl_decompile.py but the logger chain may be broken — the logger object may not be reaching the decompiler classes, or the code paths that log may never execute.
-*Fix: Inject a trace message at each decompiler class `__init__` to verify the logger connection.*
-
-**P17 — One log file, one DB. Chunks not supported.**
-A 600MB parse log creates a 1.7GB DB. There is no splitting, rotation, or multi-file indexing. For batch operations, wrap in an index directory walker.
-
-### 3.3 Architecture & Design
-
-**P18 — Heavy parsing blocks the main thread.**
-Never run `HLParser.execute()` on the Qt main thread. Always use QThread (hl_worker.py) for parsing and emit signals for progress/result.
-
-**P19 — QListWidget is O(N) memory for large datasets.**
-With 45,000+ items, QListWidget allocates every row. Use QAbstractListModel + QListView with `setUniformItemSizes(True)` for virtual scrolling.
-
-**P20 — Parser must be headless and UI-agnostic.**
-Never import PyQt in `hl_parser.py`. Never branch on `if gui:` / `if cli:`. The parser returns plain Python data structures consumed by both GUI and CLI.
-
-**P21 — CLI-first design: parser → CLI → GUI.**
-New features expose core logic through the headless parser first, then a CLI subcommand, then a GUI tab. This ensures scripts can use it from day one.
-
-**P22 — LLM never in critical path of parser or decompiler.**
-Hallucinations produce plausible-looking garbage. LLM is only safe as a post-processing readability pass (Gate 6), annotating deterministic output — never reconstructing it.
-
-### 3.4 Workflow & Process
-
-**P23 — Plans stay in chat, never in files.**
-The `writing-plans` skill convention of `.hermes/plans/` does not apply. Deliver all plans inline as markdown in the conversation.
-
-**P24 — Never assume a binary is corrupt. The parser's model may be incomplete.**
-If a production game runs on a binary, the data is valid. The parser's assumptions about layout (sequential bodies, signed fields, etc.) may be wrong. Use evidence:
-1. Hex dump raw bytes at the problem boundary
-2. Read the HL reference source (`hashlink/src/code.c`)
-3. Heuristic scan for valid headers across the suspect region
-4. Compile a test HLB with known content and compare
-
-**P25 — Version tags: tag at gate milestones, push with `--tags`.**
-Format: `g{gate}.{build}` (e.g. `g4.0`). Legacy `p*` tags are backward-compatible. Never delete or move gate tags — create a sub-number instead.
-
-**P36 — Bytecode reader is in Farever.exe, not libhl.dll.**
-The shiroTools fork compiles `hl_code_read` and `hl_read_type` into the game EXE, not the runtime DLL. `libhl.dll` only contains runtime operations (allocators, debug registers, file I/O, dynamic dispatch, object fields). When searching for bytecode parser functions in a HashLink game, check both the EXE and the DLL.
-
-**P37 — Headless Ghidra (analyzeHeadless) enables automated binary analysis.**
-Available at `/home/mubarak/re_tools/ghidra_12.0.4_PUBLIC/support/analyzeHeadless`. Works with Java 25. Python (PyGhidra) is NOT available — scripts must be Java. Use `-postScript` to run scripts after analysis. Key workflow: import target → analyze → run Java Ghidra script → save decompiled output.
+- It keeps stream alignment correct.
+- It is supported by docs, tests, reference source, or binary evidence.
+- It preserves parser, CLI, and GUI separation.
+- It adds diagnostics for suspicious input.
+- It handles malformed input without masking standard-format regressions.
+- It updates tests and docs when behavior changes.
+- It leaves future agents with clearer evidence than before.
