@@ -13,3 +13,4 @@ workspace/*/*.log/
 plan.md
 tools/
 plan.md.partial.tmp
+*.patch

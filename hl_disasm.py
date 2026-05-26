@@ -471,7 +471,7 @@ class JumpResolver:
             elif instr.opcode == 101:  # OCatch
                 if instr.args:
                     instr.jump_target = instr.index + 1 + instr.args[0]
-            elif instr.opcode == 71:  # OSwitch
+            elif instr.opcode == 70:  # OSwitch
                 if instr.jump_cases:
                     instr.jump_cases = [instr.index + 1 + off for off in instr.jump_cases]
                 if instr.jump_default is not None:
@@ -595,7 +595,7 @@ class CFGBuilder:
                 leaders.add(instr.index + 1)
             if instr.opcode == 72:  # OTrap — fall-through
                 leaders.add(instr.index + 1)
-            if instr.opcode == 71:  # OSwitch — fall-through
+            if instr.opcode == 70:  # OSwitch — fall-through
                 leaders.add(instr.index + 1)
 
         # Sort and deduplicate leaders
@@ -647,7 +647,7 @@ class CFGBuilder:
                     blk.successors.append(fall_blk)
                     blocks[fall_blk].predecessors.append(blk.id)
             # OSwitch → multiple
-            elif op == 71:
+            elif op == 70:
                 if last.jump_cases:
                     for t in last.jump_cases:
                         t_blk = ip_to_block.get(t)

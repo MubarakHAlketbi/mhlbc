@@ -453,6 +453,29 @@ class TestVariableArgDecode:
         assert instrs[0].jump_cases == [2, 4, 6]
         assert instrs[0].jump_default == 8
 
+    def test_oswitch_jump_resolution_and_cfg_edges(self):
+        """OSwitch is opcode 70; jump resolver and CFG must not confuse it with ONullCheck (71)."""
+        # instr[0] OSwitch r0 with case offsets +1/+3 and default +4.
+        # Followed by enough simple instructions to make all targets valid.
+        opcodes = (
+            encode_op(70, 0, 2)
+            + encode_op(1) + encode_op(3) + encode_op(4)
+            + encode_op(98) + encode_op(98) + encode_op(98)
+            + encode_op(98) + encode_op(98)
+        )
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 6)
+        JumpResolver.resolve(instrs)
+
+        assert instrs[0].opcode == 70
+        assert instrs[0].jump_cases == [2, 4]
+        assert instrs[0].jump_default == 5
+
+        cfg = CFGBuilder.build(instrs)
+        switch_block = cfg[0]
+        target_starts = {cfg[succ].start_ip for succ in switch_block.successors}
+        assert {1, 2, 4, 5}.issubset(target_starts)
+
     def test_omakeenum_decode(self):
         """OMakeEnum with 2 params should decode correctly."""
         opcodes = encode_op(90, 0, 1) + bytes([2]) + encode_op(5) + encode_op(6)

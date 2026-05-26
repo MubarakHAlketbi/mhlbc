@@ -877,29 +877,37 @@ class ExprBuilder:
 
         # --- Fields ---
         if op == 38:  # OField
+            if len(args) < 3:
+                return IRStmt("comment", comment=f"malformed OField args={args}")
             dst = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2], self._func_idx) if len(args) >= 3 else f"f{args[2]}"
+            field = self._resolve_field_name(args[2], self._func_idx)
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get", [obj, IRConst(field)]))
 
         if op == 39:  # OSetField
+            if len(args) < 3:
+                return IRStmt("comment", comment=f"malformed OSetField args={args}")
             src = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2], self._func_idx) if len(args) >= 3 else f"f{args[2]}"
+            field = self._resolve_field_name(args[2], self._func_idx)
             return IRStmt("expr",
                           src=IRExpr("field_set", [obj, IRConst(field), src]))
 
         if op == 40:  # OGetThis
+            if len(args) < 2:
+                return IRStmt("comment", comment=f"malformed OGetThis args={args}")
             dst = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1], self._func_idx) if len(args) >= 2 else f"f{args[1]}"
+            field_name = self._resolve_field_name(args[1], self._func_idx)
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get",
                                      [IRVar("this"), IRConst(field_name)]))
 
         if op == 41:  # OSetThis
+            if len(args) < 2:
+                return IRStmt("comment", comment=f"malformed OSetThis args={args}")
             src = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1], self._func_idx) if len(args) >= 2 else f"f{args[1]}"
+            field_name = self._resolve_field_name(args[1], self._func_idx)
             return IRStmt("expr",
                           src=IRExpr("field_set",
                                      [IRVar("this"), IRConst(field_name), src]))

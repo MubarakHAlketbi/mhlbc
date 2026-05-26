@@ -402,15 +402,18 @@
   - README.md, CONTRIBUTING.md: Test count updates
   - MEMORY.md: This session
 
-## Session 24 — May 27, 2026
+## Session 25 — May 27, 2026
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash:free via nous (Discord OmniDecomp thread).
-- Project state: 466 passed, 3 skipped (469 total), Gates 1-6 complete.
-- Version: g6.0-3-g08bd7a5-dirty (checklist.md deleted from working tree — all 17 checklist phases completed in Session 23).
-- Last commit: 08bd7a5 (docs: fix opcode count, type kind count, test count, Gate 6 status alignment).
-- Gate freeze (Tier 1): N/A — Gate 6 validated on 7/7 standard fixtures. Tier 1 baseline validation is complete; further Tier 1 improvements continue under standard Haxe/HL correctness and Farever Track B readiness.
+- Version: g6.0-5-gca401c6, clean working tree.
+- Project state: 469 tests collected (0 failures), Gates 1-6 complete.
+- Tier 1 baseline validated on 7/7 standard HLB fixtures per docs/validation_matrix.md.
+- Gate freeze (Tier 1): N/A — Gate 6 validated. Further Tier 1 improvements continue under standard Haxe/HL correctness and Farever Track B readiness.
 - Tier 2-5 frozen per README policy — no scope expansion unless explicitly requested by Sato.
-- checklist.md deleted (1913 lines removed from tracking) — all phases A-R complete.
+- Last commit: ca401c6 (docs: adjust MEMORY.md Tier 1 wording to 'baseline validation complete').
+- Farever Track B: ~1% function pool parsing via custom shiroTools runtime — not blocking anything.
+
+## Session 24 — May 27, 2026
 - **POLICY: Farever Target Policy** — Sato clarified project direction:
   - mhlbc is a **general Haxe/HashLink decompiler**, not a Farever-only tool.
   - Farever is the primary real-world target and benchmark, but must not drive hardcoded parser rules.
