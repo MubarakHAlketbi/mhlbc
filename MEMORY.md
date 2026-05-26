@@ -402,6 +402,24 @@
   - README.md, CONTRIBUTING.md: Test count updates
   - MEMORY.md: This session
 
+## Session 24 — May 27, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash:free via nous (Discord OmniDecomp thread).
+- Project state: 466 passed, 3 skipped (469 total), Gates 1-6 complete.
+- Version: g6.0-3-g08bd7a5-dirty (checklist.md deleted from working tree — all 17 checklist phases completed in Session 23).
+- Last commit: 08bd7a5 (docs: fix opcode count, type kind count, test count, Gate 6 status alignment).
+- Gate freeze (Tier 1): N/A — Gate 6 validated on 7/7 standard fixtures. Tier 1 core decompiler is complete.
+- Tier 2-5 frozen per README policy — no scope expansion unless explicitly requested by Sato.
+- checklist.md deleted (1913 lines removed from tracking) — all phases A-R complete.
+- **POLICY: Farever Target Policy** — Sato clarified project direction:
+  - mhlbc is a **general Haxe/HashLink decompiler**, not a Farever-only tool.
+  - Farever is the primary real-world target and benchmark, but must not drive hardcoded parser rules.
+  - **"Farever is the lighthouse, not the map"** — guides priority, but standard fixtures define correctness.
+  - 5-category classification system for Farever failures (general bug / missing pattern / robustness / shiroTools quirk / Tier 2 concern).
+  - Only categories 1-3 may change core decompiler. Category 4 must be isolated and documented.
+  - Two-track validation: **Track A** (standard HL correctness, defines Gate 6) vs **Track B** (Farever progress, separate benchmark).
+  - Files updated: README.md, AGENTS.md, docs/validation_matrix.md, MEMORY.md.
+
 ## Session 23 — May 26, 2026
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

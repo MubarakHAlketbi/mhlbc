@@ -337,9 +337,28 @@ Before changing assumptions:
 
 Recovery logic must be bounded, logged, and tested. It must not hide parser bugs in standard HLB files.
 
-## 10. Farever and shiroTools Notes
+## 10. Farever and shiroTools Policy
 
-Farever is a real-world robustness target, not the only correctness benchmark.
+### 10.1 Classification Before Action
+
+When Farever reveals a failure, classify it before changing code:
+
+1. **General HashLink format bug** — parser/decompiler wrong for all HL bytecode.
+2. **Missing standard compiler pattern** — valid Haxe output not yet handled.
+3. **Robustness/recovery issue** — malformed data, bounds checks, diagnostics.
+4. **Farever/shiroTools-specific quirk** — custom runtime behavior.
+5. **Future Tier 2 concern** — patching/modding, outside Tier 1 scope.
+
+Only categories 1-3 may change the core decompiler by default. Category 4 must be isolated behind explicit compatibility handling. Category 5 remains frozen.
+
+### 10.2 Two Validation Tracks
+
+**Track A** — General Haxe/HL correctness (standard fixtures, Gate 6 validation).
+**Track B** — Farever progress (separate benchmark, does not define Gate 6).
+
+### 10.3 Farever is the lighthouse, not the map
+
+Farever guides priorities, but standard HL fixtures define correctness.
 
 Current known facts to preserve unless new evidence overrides them:
 
@@ -347,7 +366,7 @@ Current known facts to preserve unless new evidence overrides them:
 - `libhl.dll` is primarily runtime support, not the bytecode reader.
 - Bytecode reader logic was found in `Farever.exe`.
 - Decompiled `hl_read_type` matched open-source HashLink in prior analysis.
-- Remaining Farever issues are more likely function-pool or function-body alignment issues than type-system extensions.
+- Remaining Farever issues are likely function-pool or function-body alignment issues, not type-system extensions.
 - Standard HLB fixtures remain the primary correctness baseline.
 
 When investigating Farever:
@@ -355,6 +374,7 @@ When investigating Farever:
 - Do not generalize Farever recovery paths into standard parser behavior without fixture evidence.
 - Keep standard HLB parsing strict and verified.
 - Keep malformed production-binary recovery explicit and diagnosable.
+- Classify every Farever-specific finding into one of the 5 categories above before touching core code.
 
 ## 11. Performance and Memory
 

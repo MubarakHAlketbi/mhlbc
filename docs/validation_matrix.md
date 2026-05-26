@@ -1,8 +1,9 @@
 # Validation Matrix
 
-Gate 6 validation evidence for the mhlbc decompiler. Each standard HLB fixture is tested across parser, disassembler, CFG, decompiler, and HaxeWriter syntax.
+## Two Validation Tracks
 
-## Fixture Status
+### Track A — General Haxe/HL Correctness
+Validates that mhlbc correctly parses, disassembles, and decompiles standard Haxe/HashLink programs. This defines **Gate 6** completion.
 
 | Fixture | Source Type | HL Version | Debug | Parser | Disasm | CFG | Decompile | HaxeWriter Syntax | Notes |
 |---------|-------------|------------|-------|--------|--------|-----|-----------|-------------------|-------|
@@ -13,7 +14,32 @@ Gate 6 validation evidence for the mhlbc decompiler. Each standard HLB fixture i
 | types.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
 | Natives.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 33 .hx files, brace-balanced |
 | Shapes.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 35 .hx files, brace-balanced |
-| Farever hlboot.dat | commercial robustness target | v4 | corrupt/debug mismatch | partial | partial | partial | partial | not gate evidence | Robustness target only |
+
+### Track B — Farever Progress
+Separate benchmark. Tracks how close we are to decompiling Farever enough to understand and repair it. This does **not** define Gate 6.
+
+| Fixture | Source Type | HL Version | Debug | Parser | Disasm | CFG | Decompile | HaxeWriter Syntax | Notes |
+|---------|-------------|------------|-------|--------|--------|-----|-----------|-------------------|-------|
+| Farever hlboot.dat | commercial robustness target | v4 | corrupt/debug mismatch | partial | partial | partial | partial | not gate evidence | Robustness target only — shiroTools custom runtime |
+
+### Track B Metrics
+
+Useful Farever progress indicators (updated each investigation session):
+
+| Metric | Status |
+|--------|--------|
+| Header parsed | yes |
+| Pools parsed | yes |
+| Types parsed | 43,844 / 43,844 |
+| Globals parsed | 28,399 / 28,399 |
+| Natives parsed | 723 / 723 |
+| Functions parsed (valid / malformed / total) | 190 / 4 / 45,365 |
+| Opcodes decoded (known / unknown) | partial |
+| Named functions | partial |
+| Classes emitted | partial |
+| Haxe files emitted | partial |
+| Critical game systems identified | not yet |
+| Patch/edit capability | not started — Tier 2 frozen |
 
 ## Validation Commands
 

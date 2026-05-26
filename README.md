@@ -1,6 +1,8 @@
 # Modern HashLink Bytecode Decompiler (mhlbc)
 
-mhlbc is a reverse-engineering toolkit for Haxe/HashLink bytecode.
+mhlbc is a general-purpose Haxe/HashLink bytecode decompiler.
+
+The immediate motivation is **Farever**, an abandoned Haxe/Heaps game whose source is lost. Farever is used as the primary real-world benchmark and preservation target, but the decompiler is not game-specific.
 
 Current active scope: parse, inspect, disassemble, and decompile standard HashLink bytecode (v3/v4/v5) into Haxe-like pseudocode.
 
@@ -18,6 +20,44 @@ The original `hlbc` tool suite attempted this but carried design flaws that made
 * **Build Complexity:** Native C++ build chains were fragile across platforms. Python 3 + PyQt6 gives us portability with minimal dependencies.
 
 **The decompiler targets the format, not the game.** Any standard Haxe/HashLink compilation — 2D platformer, 3D RPG, visual novel, or malware — produces the same bytecode structures. Parse one, you can parse them all.
+
+**Farever is the lighthouse, not the map.** It tells the project where it needs to go, but it should not rewrite the general HashLink format rules unless evidence proves the rule applies beyond Farever.
+
+---
+
+## Farever Target Policy
+
+mhlbc is a **general Haxe/HashLink bytecode decompiler**. Farever is the primary real-world target and regression benchmark because it is the abandoned game this project ultimately aims to help inspect, repair, and preserve.
+
+However, **Farever-specific behavior must not be hardcoded** into the parser, disassembler, decompiler, or writer.
+
+When Farever reveals a failure, classify it before changing code:
+
+1. **A general HashLink format bug** — the parser or decompiler is wrong for all HL bytecode.
+2. **A standard compiler pattern not yet handled** — valid Haxe output that the decompiler doesn't cover yet.
+3. **A robustness issue** around malformed, corrupted, or unusual bytecode — recovery, diagnostics, bounds checks.
+4. **A Farever/shiroTools-specific quirk** — custom runtime behavior that only affects this game.
+5. **A future Tier 2 patching/modding concern** — outside current Tier 1 scope.
+
+### Classification Rules
+
+- Only **categories 1–3** may change the core decompiler by default.
+- **Category 4** must be isolated behind explicit compatibility handling, diagnostics, or documented assumptions. Never silently generalize Farever-specific quirks.
+- **Category 5** remains frozen until Tier 2 is intentionally unlocked.
+
+Farever should guide **priority**, but standard Haxe/HashLink fixtures define **general correctness**.
+
+### Two Validation Tracks
+
+**Track A — General Haxe/HL correctness** (defines Gate 6):
+- Standard fixtures: `hello.hl`, `classes.hl`, `Enums.hl`, `Main.hl`, `Natives.hl`, `Shapes.hl`, `types.hl`
+- Does the decompiler correctly parse/disassemble/decompile normal Haxe/HashLink programs?
+- This protects the project from becoming Farever-only.
+
+**Track B — Farever progress** (separate benchmark):
+- How close are we to decompiling Farever enough to understand and repair it?
+- Metrics: header parsed, pools parsed, types/globals/natives/functions parsed, opcodes decoded, named functions, classes emitted, critical game systems identified.
+- This lets Farever remain the target without polluting Gate 6.
 
 ---
 
@@ -217,9 +257,10 @@ mhlbc/
   - 54 tests covering all pipeline stages
   - CLI exit codes per CONTRIBUTING.md §11.4
 
-- [x] **Gate 6: End-to-End Validation** ✅
-  - Validated on 7 standard HLB files (see [docs/validation_matrix.md](docs/validation_matrix.md))
+- [x] **Gate 6: End-to-End Validation on Standard Fixtures** ✅
+  - Validated on **Track A** (General Haxe/HL correctness): 7 standard HLB files (see [docs/validation_matrix.md](docs/validation_matrix.md))
   - Parser, disassembler, CFG, decompiler, and HaxeWriter syntax all **pass** on all 7 fixtures
+  - Farever readiness is tracked separately under **Track B** — Farever does not define Gate 6 completion
   - HaxeWriter output: 233 .hx files, all brace-balanced, no bare function signatures
   - Control-flow structuring: if/else (tested); loops/switch/try-catch fallback to flat goto/label comments
   - Function body alignment (OSwitch fix) verified — all 469 tests pass
@@ -300,20 +341,22 @@ Found in: verbose logs, SQLite DB `meta` table, GUI title bar, GUI status bar.
 
 ## Known Issues
 
-### Farever (Shiro Games / Heaps Engine)
+### Farever (Shiro Games / Heaps Engine) — Track B benchmark
 
-The parser works correctly on **standard HashLink bytecode** (compiled with stock Haxe 4.x). The game **Farever** (`hlboot.dat`, ~13 MB) uses a **custom HashLink runtime fork** (Shiro Games' `shiroTools`, built April 2026).
+This is a **Track B** (Farever progress) known issue, not a general decompiler bug. The parser works correctly on **standard HashLink bytecode** (Track A: compiled with stock Haxe 4.x). The game **Farever** (`hlboot.dat`, ~13 MB) uses a **custom HashLink runtime fork** (Shiro Games' `shiroTools`, built April 2026).
 
 **Ghidra analysis (Session 21):**
 - The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`
 - `hl_read_type` was decompiled and compared against open-source HL — **identical**. Same 10 switch cases, same error handling, same type kind values. **No extra type kinds exist.**
 - `libhl.dll` is the runtime only (allocators, debug, file I/O, objects, dynamic dispatch)
 
-**Current status on Farever:**
+**Current status on Farever (Track B):**
 - Header and pools parse correctly (types, globals, natives all valid kinds 0-24)
 - ~1% of function opcodes decode as unknown (stream boundary issue, not a parser bug)
 - Decompiler produces partial output (skeleton classes, some functions)
 - Re-analysis confirms the remaining issues are in **function pool layout** (not type system)
+- Classification: likely a mix of categories 3 (robustness) and 4 (shiroTools-specific quirk)
+- Farever does not block Gate 6 or general decompiler validation
 
 ### Function Body Alignment
 
