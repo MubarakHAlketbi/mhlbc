@@ -172,7 +172,7 @@ The `hl_helper.py` module provides functions to construct HL bytecode from Pytho
 - **Header parsing**: All version variants, all conditions (debug, no debug, empty pools)
 - **VarInt**: All size classes, signed values, round-trip, error handling
 - **Pools**: Each pool type, empty/single/many elements, truncated data
-- **Types**: All 24 type kinds, compound types (Obj fields/protos/bindings, Enum constructors), unknown kinds
+- **Types**: All 25 type kind IDs (0–24), compound types (Obj fields/protos/bindings, Enum constructors), unknown kinds
 - **Globals**: Empty, non-empty, truncated
 - **Natives**: Empty, non-empty with correct findex/lib/name/type fields
 - **Functions**: Function headers (type/findex/nregs/nops), register types, opcode skipping with _OPCODE_NARGS, multiple functions, truncated data

@@ -33,7 +33,7 @@ The core decompiler (Gates 1–6) is the foundation. Tier 1 is the sole focus; T
 | **Tier 4 — Engine Bindings** | `.hdll` native libraries | Reverse-engineer Heaps/Kha engine glue, understand native function interfaces |
 | **Tier 5 — Full Modding SDK** | Complete game directory | Integrated toolkit: bytecode editor + asset browser + engine hooking → rebuild modified game packages |
 
-Tiers 2–5 are frozen (see `checklist.md` H4). Tier 1 must be validated on 3+ standard HLB files before any Tier 2 work begins.
+Tiers 2–5 are frozen (see [docs/validation_matrix.md](docs/validation_matrix.md)). Tier 1 must be validated on 3+ standard HLB files before any Tier 2 work begins.
 
 ### What This Unlocks
 
@@ -114,8 +114,8 @@ All 103 VM opcode slots (IDs 0–102) follow a fixed encoding defined in the Has
 ```
 mhlbc/
 ├── docs/                          # Knowledge base (spec-of-truth)
-│   ├── opcodes.md                 # All 98 opcodes and argument layouts
-│   ├── type_system.md             # Type serialization (24 kinds)
+│   ├── opcodes.md                 # 103 opcode slots (0–102) with argument layouts
+│   ├── type_system.md             # Type serialization (25 kind IDs, 0–24)
 │   ├── function_format.md         # Function, native, global serialization
 │   ├── version_deltas.md          # v3/v4/v5 structural differences
 │   ├── header_format.md           # Header field reference
@@ -174,7 +174,7 @@ mhlbc/
   - Verbose byte-level logging infrastructure
 
 - [x] **Gate 2: Type System, Globals & Natives**
-  - 24 type kinds (Void through Packed)
+  - 25 type kind IDs (0–24, Void through HLAST)
   - Compound types: Obj (fields/protos/bindings), Struct, Enum, Virtual, Fun, Method
   - Global variable type references
   - Native function bindings (name, findex, lib, type)
@@ -182,13 +182,13 @@ mhlbc/
 
 - [x] **Gate 3: Function Parsing & Bytecode Indexing**
   - Function headers: type, findex, nregs, nops, register types
-  - `_OPCODE_NARGS` table (104 entries, auto-generated from HL formula)
+  - `_OPCODE_NARGS` table (103 entries, auto-generated from HL formula)
   - Opcode body skipping (all fixed + vararg opcodes)
   - RLE-encoded debug info decoding
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 422 tests covering all gates
+  - 469 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -209,7 +209,7 @@ mhlbc/
   - Control flow structuring: if/else (tested); loops (fallback with goto/label comments); switch (flat comment); try/catch (not yet structured)
   - Function signature reconstruction (arguments, return type, method vs static)
   - Class hierarchy builder with inheritance flattening
-  - Type resolver: all 24 HL type kinds → Haxe type names
+  - Type resolver: all 25 HL type kind IDs (0–24) → Haxe type names
   - Haxe-like pseudocode output with indentation, multi-file output
   - Decompile subcommand with `--function`, `--output-dir`, `--json`, `--comments`
   - Decompilation tab in GUI with dark theme
@@ -222,12 +222,12 @@ mhlbc/
   - Parser, disassembler, CFG, decompiler, and HaxeWriter syntax all **pass** on all 7 fixtures
   - HaxeWriter output: 233 .hx files, all brace-balanced, no bare function signatures
   - Control-flow structuring: if/else (tested); loops/switch/try-catch fallback to flat goto/label comments
-  - Function body alignment (OSwitch fix) verified — all 460+ tests pass
+  - Function body alignment (OSwitch fix) verified — all 469 tests pass
   - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
 
 ### Tiers 2–5 (Frozen per process rule — see `checklist.md §G.6`)
 
-These tiers are **not started** and will not be worked on until Gate 6 validation is complete per the matrix in `checklist.md §H`.
+These tiers are **not started** and will not be worked on until Gate 6 validation is complete per [docs/validation_matrix.md](docs/validation_matrix.md).
 
 ### Tier 2 — Bytecode Manipulation (Frozen)
 - [ ] Binary patching: rewrite opcodes and constants in-place
@@ -282,7 +282,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 422 tests, compact output
+pytest                     # All 469 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword
@@ -317,7 +317,7 @@ The parser works correctly on **standard HashLink bytecode** (compiled with stoc
 
 ### Function Body Alignment
 
-Fixed in Session 20 (P35): OSwitch opcode consumed 1 wrong byte per occurrence, causing cumulative stream drift in function bodies. All 422 tests now pass.
+Fixed in Session 20 (P35): OSwitch opcode consumed 1 wrong byte per occurrence, causing cumulative stream drift in function bodies. All 469 tests now pass.
 
 ---
 

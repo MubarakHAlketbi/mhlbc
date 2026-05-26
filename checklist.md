@@ -1797,7 +1797,7 @@ Remaining:
 | J — error semantics | done | `tests/test_cli.py` created with 6 exit-code tests |
 | K — README rewrite | done | Opening description separated current scope from vision; Gate 6 honest; freeze correct |
 | L — AGENTS.md | done | Already exists; CONTRIBUTING reference is valid |
-| M — test reality check | done | All files py_compile OK. 466 tests pass, 3 skipped |
+| M — test reality check | done | All files py_compile OK. 469 tests pass |
 | N — Farever clarification | done | README describes Farever as "robustness regression target" |
 | O — final Gate 6 criteria | done | 7/7 fixtures pass Parser/Disasm/CFG/Decompile/Syntax; README updated; validation matrix committed |
 | P — Hermes execution log | done | Work log filled with full Session 23 details |

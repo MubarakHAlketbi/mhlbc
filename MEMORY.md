@@ -409,10 +409,13 @@
 - Sato's new checklist.md (Phases A-R) worked through:
   - **A-E completed**: HaxeWriter braces fixed, VarInt parity (disassembler now wraps parser decoder), stmt mapping (build_body_by_instruction replaces stmt_idx), CFG docs downgraded to match reality, GUI background decompile worker
   - **F-J completed**: CLI portability (no hardcoded paths, works from /tmp), docs consistency (103 opcodes, 25 types, Gate 6 honest), validation_matrix.md created, logging docs fixed, test_cli.py with exit-code tests
-  - **K-O completed/deferred**: README rewrite, AGENTS.md verified, test reality check (466 pass, all py_compile OK), Farever clarified as robustness target, Gate 6 deferred pending matrix validation
+  - **K-O completed**: README rewrite, AGENTS.md verified, test reality check (469 pass, all py_compile OK), Farever clarified as robustness target, Gate 6 validated with matrix (7/7 fixtures)
   - **Files changed**: hl_decompile.py, hl_disasm.py, hl_worker.py, app.py, test_disasm.py, test_decompile.py, test_cli.py (NEW), hl_parser/_varint.py, docs/validation_matrix.md (NEW), docs/opcodes.md, docs/version_deltas.md, docs/function_format.md, README.md, CONTRIBUTING.md, MEMORY.md, checklist.md
-- g6.0 tag exists but Gate 6 remains marked `[ ]` pending validation matrix evidence.
+- Gate 6 validated: 7/7 standard fixtures pass all pipeline stages per docs/validation_matrix.md.
 - checklist.md P.2 status table updated from "not started" to actual status for all phases.
+- **All 17 phases of the checklist completed.** Single commit `de06f4e` pushed to origin/main.
+- **Session 23 continued** — Sato corrects session count (Discord thread is Session 23, not 24).
+- State: 469 tests, g6.0-2-gde06f4e-dirty, working tree clean except MEMORY.md.
 
 ## Session 22 — May 23/24, 2026
 - Start: Continuation of work toward g6.0.
