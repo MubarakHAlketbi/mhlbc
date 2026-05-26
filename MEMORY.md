@@ -413,6 +413,17 @@
 - **Farever Track B parser navigation resolved.** Ghidra confirmed the runtime function-pool model: sequential function entries, signed INDEX VarInt reader, nops as opcode count, no offset table, no padding/alignment. Parser clamp policy was corrected so high but valid nregs/nops values warn without changing stream consumption. Clean Farever now parses **45,365/45,365 functions, 0 malformed, 0 unknown opcodes, and 22,124 constants** from the actual parser offset.
 - Includes: report.md (Ghidra evidence), docs/farever_ghidra_hl_code_read.md (function map), scripts/farever_runtime_parity_report.py (dev diagnostic), scripts/farever_function_boundary_probe.py (boundary probe).
 - Prior work items within session: OSwitch opcode 71→70 fix (hl_disasm.py, hl_decompile.py), mhlbc_progress.patch applied.
+- **Final commits:**
+  - `73182ba` — checkpoint: Farever Track B parser navigation parity achieved (7 files, +1330/-23)
+  - `935f9ae` — docs: update Farever Track B status and clean parity diagnostics (4 files, +74/-163)
+- **Clamp policy fix details:**
+  - Removed hard _MAX_SANE_NREGS (500) / _MAX_SANE_NOPS (100000) clamps; replaced with warn-only
+  - func[45364]: nregs=4722→consumed, nops=109580→consumed, body_offset=12499044 (was 12489781)
+  - Malformed functions: 0 (was 1), Unknown opcodes: 0
+  - Constants: 22,124/22,124 parsed (was 319)
+  - 5 new regression tests: test_high_nregs_consumes_all_reg_types, test_high_nops_consumes_all_opcodes, test_negative_nops_still_clamped, test_negative_nregs_still_clamped, test_nops_clamped_by_eof
+  - FunctionDef now stores header_offset deterministically
+  - Parity report has 9 PASS assertions
 
 ## Session 24 — May 27, 2026
 - **POLICY: Farever Target Policy** — Sato clarified project direction:
