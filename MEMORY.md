@@ -408,7 +408,7 @@
 - Project state: 466 passed, 3 skipped (469 total), Gates 1-6 complete.
 - Version: g6.0-3-g08bd7a5-dirty (checklist.md deleted from working tree — all 17 checklist phases completed in Session 23).
 - Last commit: 08bd7a5 (docs: fix opcode count, type kind count, test count, Gate 6 status alignment).
-- Gate freeze (Tier 1): N/A — Gate 6 validated on 7/7 standard fixtures. Tier 1 core decompiler is complete.
+- Gate freeze (Tier 1): N/A — Gate 6 validated on 7/7 standard fixtures. Tier 1 baseline validation is complete; further Tier 1 improvements continue under standard Haxe/HL correctness and Farever Track B readiness.
 - Tier 2-5 frozen per README policy — no scope expansion unless explicitly requested by Sato.
 - checklist.md deleted (1913 lines removed from tracking) — all phases A-R complete.
 - **POLICY: Farever Target Policy** — Sato clarified project direction:
