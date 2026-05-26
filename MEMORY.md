@@ -406,12 +406,13 @@
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash:free via nous (Discord OmniDecomp thread).
 - Version: g6.0-5-gca401c6, clean working tree.
-- Project state: 469 tests collected (0 failures), Gates 1-6 complete.
+- Project state: 472 passed, 3 skipped, Gates 1-6 complete.
 - Tier 1 baseline validated on 7/7 standard HLB fixtures per docs/validation_matrix.md.
 - Gate freeze (Tier 1): N/A — Gate 6 validated. Further Tier 1 improvements continue under standard Haxe/HL correctness and Farever Track B readiness.
 - Tier 2-5 frozen per README policy — no scope expansion unless explicitly requested by Sato.
-- Last commit: ca401c6 (docs: adjust MEMORY.md Tier 1 wording to 'baseline validation complete').
-- Farever Track B: ~1% function pool parsing via custom shiroTools runtime — not blocking anything.
+- **Farever Track B parser navigation resolved.** Ghidra confirmed the runtime function-pool model: sequential function entries, signed INDEX VarInt reader, nops as opcode count, no offset table, no padding/alignment. Parser clamp policy was corrected so high but valid nregs/nops values warn without changing stream consumption. Clean Farever now parses **45,365/45,365 functions, 0 malformed, 0 unknown opcodes, and 22,124 constants** from the actual parser offset.
+- Includes: report.md (Ghidra evidence), docs/farever_ghidra_hl_code_read.md (function map), scripts/farever_runtime_parity_report.py (dev diagnostic), scripts/farever_function_boundary_probe.py (boundary probe).
+- Prior work items within session: OSwitch opcode 71→70 fix (hl_disasm.py, hl_decompile.py), mhlbc_progress.patch applied.
 
 ## Session 24 — May 27, 2026
 - **POLICY: Farever Target Policy** — Sato clarified project direction:

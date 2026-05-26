@@ -1278,3 +1278,80 @@ class TestFareverTarget:
         assert p.nnatives == 723
         assert p.nfunctions == 45365
         assert p.nconstants == 22124
+
+
+class TestHighRegOpsConsumption:
+    """Verify that high nregs/nops consume declared bytes, not clamped."""
+
+    def test_high_nregs_consumes_all_reg_types(self, parser):
+        """nregs=600 (>_MAX_SANE_NREGS=500) must consume all 600 reg type VarInts."""
+        parser.ntypes = 100
+        data = encode_varint(0) + encode_varint(0) + encode_varint(600)
+        data += encode_varint(2)  # nops=2
+        for _ in range(600):
+            data += encode_varint(0)
+        data += bytes([0]) + encode_varint(0) + encode_varint(0)  # OMov(0,0)
+        data += bytes([67]) + encode_varint(0)  # ORet(0)
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.functions) == 1
+        f = parser.functions[0]
+        assert f.nregs == 600, f"nregs should be 600, got {f.nregs}"
+        assert f.nops == 2
+        assert not f.malformed, "function should not be malformed"
+        # header: type=0(1 B) + findex=0(1 B) + nregs=600(2 B) + nops=2(1 B) = 5 B
+        # reg_types: 600 × 1 B = 600 B
+        assert f.body_offset == 605, f"body_offset should be 605, got {f.body_offset}"
+        assert any("nregs=600 exceeds sane threshold" in w["message"]
+                   for w in parser.parse_warnings)
+
+    def test_high_nops_consumes_all_opcodes(self, parser):
+        """nops=1001 must consume all declared opcodes."""
+        parser.ntypes = 100
+        nops_val = 1001
+        data = encode_varint(0) + encode_varint(0) + encode_varint(1)
+        data += encode_varint(nops_val)
+        data += encode_varint(0)  # 1 reg_type
+        for _ in range(nops_val):
+            data += bytes([67]) + encode_varint(0)  # ORet(0) = 2 bytes each
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert len(parser.functions) == 1
+        f = parser.functions[0]
+        assert f.nops == nops_val, f"nops should be {nops_val}, got {f.nops}"
+        assert not f.malformed
+        expected_body_size = nops_val * 2  # each ORet(0) = opcode_byte + varint_arg = 2 B
+        assert f.body_size == expected_body_size, \
+            f"body_size should be {expected_body_size}, got {f.body_size}"
+
+    def test_negative_nops_still_clamped(self, parser):
+        """Negative nops remains clamped to 0 (not a valid value)."""
+        data = encode_varint(0) + encode_varint(0) + encode_varint(0)
+        data += encode_varint(-1)
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert parser.functions[0].nops == 0
+        assert parser.functions[0].malformed
+        assert any("negative nops" in w["message"] for w in parser.parse_warnings)
+
+    def test_negative_nregs_still_clamped(self, parser):
+        """Negative nregs remains clamped to 0."""
+        data = encode_varint(0) + encode_varint(0) + encode_varint(-1)
+        data += encode_varint(2)
+        data += bytes([0, 0])
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        assert parser.functions[0].nregs == 0
+        assert parser.functions[0].malformed
+        assert any("negative nregs" in w["message"] for w in parser.parse_warnings)
+
+    def test_nops_clamped_by_eof(self, parser):
+        """nops exceeding remaining bytes is capped (truncated stream)."""
+        data = encode_varint(0) + encode_varint(0) + encode_varint(0)
+        data += encode_varint(500)
+        data += bytes([67] * 10)  # only 10 bytes, not 500
+        parser.nfunctions = 1
+        parser.parse_functions(stream_from_bytes(data))
+        f = parser.functions[0]
+        assert f.malformed
+        assert any("exceeds remaining" in w["message"] for w in parser.parse_warnings)

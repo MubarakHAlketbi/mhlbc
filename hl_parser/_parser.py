@@ -816,10 +816,6 @@ class HLParser:
             func_flags = []
             malformed = False
 
-            # Parser hardening: absolute upper bounds for nregs and nops
-            _MAX_SANE_NREGS = 500
-            _MAX_SANE_NOPS = 100000
-
             if nops < 0:
                 func_flags.append(f"negative nops={nops}, clamped to 0")
                 nops = 0
@@ -831,26 +827,27 @@ class HLParser:
 
             # Bound nregs by available data (each regtype >= 1 byte)
             remaining_before_reg = self._remaining_bytes(stream)
-            max_sane_nregs = remaining_before_reg  # absolute max
-            if nregs > _MAX_SANE_NREGS:
-                func_flags.append(f"nregs={nregs} exceeds sanity limit ({_MAX_SANE_NREGS}), clamped")
-                nregs = _MAX_SANE_NREGS
-                malformed = True
-            elif nregs > max_sane_nregs:
+            if nregs > remaining_before_reg:
                 func_flags.append(f"nregs={nregs} exceeds remaining ({remaining_before_reg}), "
-                                  f"capped to {max_sane_nregs}")
-                nregs = max_sane_nregs
+                                  f"capped to {remaining_before_reg}")
+                nregs = remaining_before_reg
                 malformed = True
 
-            # Bound nops by sanity limit (catch stream misalignment)
-            if nops > _MAX_SANE_NOPS:
-                func_flags.append(f"nops={nops} exceeds sanity limit ({_MAX_SANE_NOPS}), clamped")
-                nops = _MAX_SANE_NOPS
-                malformed = True
+            # Warn if nregs exceeds sanity threshold, but do NOT clamp consumption
+            _MAX_SANE_NREGS = 500
+            if nregs > _MAX_SANE_NREGS and not malformed:
+                func_flags.append(f"nregs={nregs} exceeds sane threshold ({_MAX_SANE_NREGS})")
+                # Not malformed — read all declared register types
 
-            if malformed:
-                for flag in func_flags:
-                    self._warn("FUNC", f"func[{func_i}]: {flag}")
+            # Warn if nops exceeds sanity threshold, but do NOT clamp consumption
+            _MAX_SANE_NOPS = 100000
+            if nops > _MAX_SANE_NOPS and not malformed:
+                func_flags.append(f"nops={nops} exceeds sane threshold ({_MAX_SANE_NOPS})")
+                # Not malformed — read all declared opcodes
+
+            # Log all function diagnostic flags (both malformed and threshold-only)
+            for flag in func_flags:
+                self._warn("FUNC", f"func[{func_i}]: {flag}")
 
             # ── When header has nops <= 0, read body data normally ──────
             # For functions with nops <= 0, there are no opcodes to skip and
