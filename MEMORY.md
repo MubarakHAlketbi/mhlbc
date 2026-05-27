@@ -13,6 +13,13 @@
 - **Tests:** 3 new while-loop tests (output contains while, body has real statements, braces balanced with if/else coexistence)
 - **Quality report:** Track A 7/7 passing, 0 errors; Track B 45,364 funcs, 2,290 while statements in 1,931 functions, 20,200 if statements in 19,374 functions
 - **Full test suite:** `pytest -x` → 474 passed, 3 skipped
+- **Metric cleanup:** `analyze_structured_flow()` added to report script — separates raw_goto_comments (preserved audit trail) from structured_if_count / structured_while_count (actual structured output). Legacy aliases retained for backward compat. `unstructured_goto_fallback` = `not_measured` with documented rationale.
+- **Commit hygiene fix:** Added `decompiler_quality_report/` to .gitignore, removed tracked generated artifacts via `git rm --cached`.
+- **Commits:**
+  - `e034d88` — g5.3: while-loop structuring + CFG bugfix
+  - `38955ce` — cleanup: .gitignore + untrack generated report artifacts
+  - `b068e11` — quality-report: metric separation (raw vs structured counts)
+- **Session closed.**
 
 ## Session 26 — May 27, 2026
 - Start: New session initialized.
