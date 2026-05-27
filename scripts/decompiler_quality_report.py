@@ -1265,23 +1265,21 @@ def main():
         )
 
         recommendation = {
-            "target": "Unknown-opcode feasibility pass -- identify and classify the 7 Track A unknown_opcode comments",
+            "target": "Register type inference -- reduce unresolved_register pattern (r10+) from ~4,540 occurrences",
             "rationale": (
-                f"Unknown opcodes are currently the lowest-count issue ({top_problems[4]['count']} occurrences) "
-                f"but could indicate function body misalignment or genuinely unhandled opcodes. "
-                f"The prior top target (field-name resolution via $Class wrapper matching) was implemented "
-                f"in Session 27, recovering ~24% of orphans and improving named_functions by +98. "
-                f"Next-highest impact: verify whether the 7 unknown opcodes in Track A are semantics "
-                f"already covered by opcode tables/docs, or genuine gaps requiring new handlers."
+                f"Register names r10+ are currently the most common readability issue ({top_problems[0]['count']} occurrences "
+                f"across Track A). The prior targets (while-loop structuring, field-name resolution via $Class wrapper "
+                f"matching, unknown-opcode feasibility) have been completed. ORethrow (op 69) was the sole unknown "
+                f"opcode -- all 7 instances across fixtures were the same instruction, now handled as 'throw rN;'. "
+                f"Next-highest impact: inferring register names from function type signatures and local variable "
+                f"declarations to reduce r10+ placeholders."
             ),
-            "expected_impact": "Low in count but important for parser correctness -- eliminates last unknown-opcode blind spot in Track A",
+            "expected_impact": "Medium -- would significantly improve readability of register-heavy function bodies",
             "notes": [
-                "Track A aggregate: 7 unknown opcode comments across all 7 fixtures",
-                "For each unknown, extract opcode index from the comment text",
-                "Check if opcode index is already known in _OPCODE_NARGS and opcode name tables",
-                "Cross-reference with doc/opcodes.md and reference HashLink source",
-                "Implement handler only if the opcode semantics are tiny and unambiguous (e.g., ONullCheck was deferred as comment-only; similarly suitable candidates)",
-                "Leave unknown opcodes as honest comments if semantics are unclear or require CFG changes",
+                "Track A aggregate: ~4,540 bare_register_ref patterns (mostly r10, r11, etc.)",
+                "Some registers are parameters with known types from FunctionSig params",
+                "Local temporaries (loop vars, intermediate results) may need CFG-based liveness analysis",
+                "Keep r0-r9 as-is (short-lived temporaries); only rename r10+ with evidence",
             ],
         }
     else:

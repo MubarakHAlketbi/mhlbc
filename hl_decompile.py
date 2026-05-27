@@ -762,6 +762,8 @@ class ExprBuilder:
             if args:
                 return IRStmt("throw", src=self._reg_var(args[0]))
             return IRStmt("throw")
+        if op == 69:  # ORethrow — re-throw exception value (same Haxe syntax)
+            return IRStmt("throw", src=self._reg_var(args[0]))
 
         # --- Data movement (assignments) ---
         if op == 0:  # OMov

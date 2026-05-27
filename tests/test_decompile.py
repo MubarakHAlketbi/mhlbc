@@ -1365,3 +1365,31 @@ class TestControlFlowStructuring:
             src = " ".join(str(s.op) for s in fn.body)
             # Currently emits as comment, not 'switch' stmt
             assert isinstance(fn.body, list)
+
+
+class TestORethrowHandler:
+    """ORethrow (op 69) should produce a throw statement, not UNKNOWN comment."""
+
+    def test_orethrow_emits_throw_not_unknown(self):
+        """ORethrow produces 'throw rN;' in decompiler output."""
+        type_i32 = build_type_primitive(K_I32)
+        type_void = build_type_primitive(K_VOID)
+        # ORethrow: opcode 69, nargs=1 (exception register)
+        # After ORethrow, add ORet (67, 0) to terminate
+        ops = build_opcode_sequence([69, 0, 67])
+        data = _build_minimal_with_types(
+            ntypes=2,
+            type_blobs=[type_void, type_i32],
+            functions=[(1, 0, [K_I32], ops)],
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+        ops_seen = [s.op for s in fn.body]
+        assert "throw" in ops_seen, (
+            f"ORethrow should emit IRStmt('throw', ...), got ops={ops_seen}")
+        # Verify UNKNOWN is NOT emitted
+        assert "comment" not in ops_seen or not any(
+            "UNKNOWN" in str(s) for s in fn.body), (
+            "ORethrow should NOT produce UNKNOWN comment")
