@@ -223,10 +223,26 @@ def analyze_class_level(
 def analyze_source_text(
     source_files: Dict[str, str]
 ) -> Dict[str, Any]:
-    """Scan HaxeWriter output for fallback patterns and syntax issues."""
+    """Scan HaxeWriter output for patterns and syntax issues.
+
+    Terminology notes:
+      - ``raw_goto_comments``: all preserved ``// goto @N`` comments emitted by
+        ExprBuilder for every jump instruction, including those inside structured
+        ``if (...)`` and ``while (...)`` blocks.  These are audit trails, not
+        failures.
+      - ``raw_label_comments``: all preserved ``// label @N`` markers.
+      - ``unstructured_goto_fallback`` (separate metric, see
+        ``analyze_structured_flow``): goto/label sequences that remain *outside*
+        any recognized structured region.  Not safely measurable from source
+        text alone — see that function for explanation.
+
+    Legacy names ``goto_fallback`` and ``label_marker`` are emitted under their
+    new names and also as aliases so downstream consumers (reports, dashboards)
+    that still reference the old keys do not break.
+    """
     patterns = {
-        "goto_fallback": r"// goto @",
-        "label_marker": r"// label @",
+        "raw_goto_comments": r"// goto @",
+        "raw_label_comments": r"// label @",
         "trap_handler": r"// trap handler",
         "catch_handler": r"// catch handler",
         "nullcheck": r"// nullcheck",
@@ -291,7 +307,9 @@ def analyze_source_text(
 
         per_file_counts[fname] = dict(file_counts)
 
-    return {
+    # Emit legacy aliases so downstream consumers that still reference the
+    # old names (goto_fallback, label_marker) don't break.
+    result = {
         "total_files": total_files,
         "total_lines": total_lines,
         "fallback_patterns": dict(total_fallback_counts.most_common()),
@@ -301,6 +319,45 @@ def analyze_source_text(
         "unbalanced_braces_files": unbalanced_braces,
         "unbalanced_parens_files": unbalanced_parens,
         "suspicious_syntax_count": suspicious_syntax,
+        # Legacy aliases (equal to new names)
+        "goto_fallback": total_fallback_counts.get("raw_goto_comments", 0),
+        "label_marker": total_fallback_counts.get("raw_label_comments", 0),
+    }
+    return result
+
+
+def analyze_structured_flow(
+    result: DecompileResult
+) -> Dict[str, Any]:
+    """Count structured control-flow IR statements from decompiled functions.
+
+    Returns:
+        structured_if_count      — total ``IRStmt(op="if")`` emitted
+        structured_while_count   — total ``IRStmt(op="while")`` emitted
+        unstructured_goto_fallback — not_measured (see rationale below)
+
+    Rationale for *not_measured*:
+    Every jump instruction produces an ``IRStmt("goto", comment="@N")`` in
+    ExprBuilder.  When the ControlStructurer wraps a block as ``if (...)`` or
+    ``while (...)``, those goto comments are *preserved inside* the structured
+    body as audit trails.  Distinguishing a goto comment that lives inside a
+    structured ``while (...)`` body from one that lives outside all structured
+    regions would require source-location tracking through the IR pipeline,
+    which does not currently exist.  Without that, any regex- or position-based
+    heuristic on the generated source text would be unreliable.
+    """
+    if_count = 0
+    while_count = 0
+    for ir_fn in result.functions.values():
+        for stmt in ir_fn.body:
+            if stmt.op == "if":
+                if_count += 1
+            elif stmt.op == "while":
+                while_count += 1
+    return {
+        "structured_if_count": if_count,
+        "structured_while_count": while_count,
+        "unstructured_goto_fallback": "not_measured",
     }
 
 
@@ -498,8 +555,8 @@ def analyze_farever_inventory(
 
         # Fallback density
         for pattern_name, pattern_re in {
-            "goto_fallback": r"// goto @",
-            "label_marker": r"// label @",
+            "raw_goto_comments": r"// goto @",
+            "raw_label_comments": r"// label @",
             "unresolved_field": r"\bf\d+\b",
             "dynamic_ref": r"\bDynamic\b",
             "nullcheck": r"// nullcheck",
@@ -551,7 +608,7 @@ def compute_top_problems(
     for fname, data in track_a_results.items():
         src_analysis = data.get("source_text_analysis", {})
         patterns = src_analysis.get("fallback_patterns", {})
-        total_goto += patterns.get("goto_fallback", 0)
+        total_goto += patterns.get("raw_goto_comments", 0)
         total_nullcheck += patterns.get("nullcheck", 0)
         total_unknown_opcode += patterns.get("unknown_opcode", 0)
 
@@ -569,7 +626,7 @@ def compute_top_problems(
     # Top 5 problems ranking
     problem_candidates = [
         ("Unstructured control flow (goto/label fallback)", total_goto,
-         "ControlStructurer only handles if/else; loops, switch, try/catch produce flat goto/label comments. "
+         "ControlStructurer handles if/else and simple while loops; switch, try/catch, and complex loops produce flat goto/label comments. "
          "This is the most common decompiler readability issue."),
         ("Null-check comments (ONullCheck -> '// nullcheck(...)')", total_nullcheck,
          "ONullCheck is emitted as a comment instead of structured throw-on-null. "
@@ -638,6 +695,7 @@ def run_track_a() -> Dict[str, Any]:
         src_metrics = analyze_source_text(sources)
         name_metrics = analyze_name_resolution(parser, result, sources)
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
+        flow_metrics = analyze_structured_flow(result)
 
         file_metrics = {
             "function_level": func_metrics,
@@ -645,6 +703,7 @@ def run_track_a() -> Dict[str, Any]:
             "source_text_analysis": src_metrics,
             "name_resolution": name_metrics,
             "fidelity": fidelity,
+            "structured_flow": flow_metrics,
             "output_files": len(sources),
             "output_file_names": sorted(sources.keys()),
         }
@@ -754,6 +813,10 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
         inventory["source_text_analysis"] = src_metrics
         inventory["output_files"] = sorted(sources.keys())
 
+    # Structured flow metrics
+    flow_metrics = analyze_structured_flow(result)
+    inventory["structured_flow"] = flow_metrics
+
     return inventory
 
 
@@ -777,8 +840,8 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     md_lines.append("## Track A — Standard Haxe/HL Fixtures")
     md_lines.append("")
     if track_a:
-        md_lines.append("| Fixture | Functions | Emitted | Skipped | Classes | Enums | Orphans | Errors | Empty Bodies | Goto/Label | Nullcheck | Fields(fN) |")
-        md_lines.append("|---------|-----------|---------|---------|---------|-------|---------|--------|-------------|------------|-----------|-------------|")
+        md_lines.append("| Fixture | Functions | Emitted | Skipped | Classes | Enums | Orphans | Errors | Empty Bodies | Raw goto | Raw label | Nullcheck | If Stmts | While Stmts | Fields(fN) |")
+        md_lines.append("|---------|-----------|---------|---------|---------|-------|---------|--------|-------------|----------|-----------|-----------|----------|-------------|-------------|")
 
         for fname in sorted(track_a["fixtures"].keys()):
             fd = track_a["fixtures"][fname]
@@ -786,6 +849,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             cl = fd["class_level"]
             st = fd["source_text_analysis"]
             patterns = st.get("fallback_patterns", {})
+            sf = fd.get("structured_flow", {})
             md_lines.append(
                 f"| {fname} "
                 f"| {fl['total_functions']} "
@@ -796,8 +860,11 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 f"| {cl['orphan_functions']} "
                 f"| {fl['total_errors']} "
                 f"| {st.get('empty_method_bodies', 0)} "
-                f"| {patterns.get('goto_fallback', 0)} "
+                f"| {patterns.get('raw_goto_comments', 0)} "
+                f"| {patterns.get('raw_label_comments', 0)} "
                 f"| {patterns.get('nullcheck', 0)} "
+                f"| {sf.get('structured_if_count', 0)} "
+                f"| {sf.get('structured_while_count', 0)} "
                 f"| {fd['name_resolution'].get('unresolved_field_name_instances', 0)} |"
             )
 
@@ -858,22 +925,32 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         total_funcs = 0
         total_emitted = 0
         total_goto_all = 0
+        total_label_all = 0
         total_null_all = 0
         total_field_all = 0
         total_dynamic_all = 0
+        total_if_all = 0
+        total_while_all = 0
 
         for fname, fd in track_a["fixtures"].items():
             total_funcs += fd["function_level"]["total_functions"]
             total_emitted += fd["function_level"]["functions_emitted"]
             patterns = fd["source_text_analysis"].get("fallback_patterns", {})
-            total_goto_all += patterns.get("goto_fallback", 0)
+            total_goto_all += patterns.get("raw_goto_comments", 0)
+            total_label_all += patterns.get("raw_label_comments", 0)
             total_null_all += patterns.get("nullcheck", 0)
             total_field_all += fd["name_resolution"]["unresolved_field_name_instances"]
             total_dynamic_all += fd["name_resolution"]["dynamic_type_references"]
+            sf = fd.get("structured_flow", {})
+            total_if_all += sf.get("structured_if_count", 0)
+            total_while_all += sf.get("structured_while_count", 0)
 
         md_lines.append(f"- **Total functions:** {total_funcs}")
         md_lines.append(f"- **Total emitted:** {total_emitted}")
-        md_lines.append(f"- **Goto/label fallbacks:** {total_goto_all}")
+        md_lines.append(f"- **Raw goto comments (preserved):** {total_goto_all}")
+        md_lines.append(f"- **Raw label comments (preserved):** {total_label_all}")
+        md_lines.append(f"- **Structured if statements:** {total_if_all}")
+        md_lines.append(f"- **Structured while statements:** {total_while_all}")
         md_lines.append(f"- **Nullcheck comments:** {total_null_all}")
         md_lines.append(f"- **Unresolved field names (fN):** {total_field_all}")
         md_lines.append(f"- **Dynamic type refs:** {total_dynamic_all}")
@@ -935,12 +1012,12 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             st_b = track_b["source_text_analysis"]
             pat_b = st_b.get("fallback_patterns", {})
             md_lines.append("")
-            md_lines.append("### Source Text Fallback Patterns")
+            md_lines.append("### Source Text Patterns (in decompiled output)")
             md_lines.append("")
             md_lines.append(f"- **Generated files:** {st_b.get('total_files', 0)}")
             md_lines.append(f"- **Total lines:** {st_b.get('total_lines', 0)}")
-            md_lines.append(f"- **Goto/label:** {pat_b.get('goto_fallback', 0)}")
-            md_lines.append(f"- **Label markers:** {pat_b.get('label_marker', 0)}")
+            md_lines.append(f"- **Raw goto comments (preserved):** {pat_b.get('raw_goto_comments', 0)}")
+            md_lines.append(f"- **Raw label comments (preserved):** {pat_b.get('raw_label_comments', 0)}")
             md_lines.append(f"- **Nullchecks:** {pat_b.get('nullcheck', 0)}")
             md_lines.append(f"- **Unknown opcodes:** {pat_b.get('unknown_opcode', 0)}")
             md_lines.append(f"- **Trap/catch handlers:** {pat_b.get('trap_handler', 0) + pat_b.get('catch_handler', 0)}")
@@ -949,6 +1026,17 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(f"- **Comment-only bodies:** {st_b.get('comment_only_method_bodies', 0)}")
             md_lines.append(f"- **Unbalanced braces files:** {st_b.get('unbalanced_braces_files', 0)}")
             md_lines.append(f"- **Unbalanced parens files:** {st_b.get('unbalanced_parens_files', 0)}")
+            md_lines.append("")
+
+        # Structured control flow
+        sf = track_b.get("structured_flow", {})
+        md_lines.append("### Structured Control Flow")
+        md_lines.append("")
+        md_lines.append(f"- **Structured if statements:** {sf.get('structured_if_count', '?')}")
+        md_lines.append(f"- **Structured while statements:** {sf.get('structured_while_count', '?')}")
+        ugf = sf.get("unstructured_goto_fallback", "not_measured")
+        md_lines.append(f"- **Unstructured goto fallback:** {ugf}")
+        md_lines.append("")
 
         if track_b.get("top_20_fallback_density"):
             md_lines.append("")
@@ -1091,21 +1179,20 @@ def main():
         )
 
         recommendation = {
-            "target": "ControlStructurer.cfg_to_structured — loop detection and structured output",
+            "target": "Field-name resolution — replace f{idx} with actual Haxe field names",
             "rationale": (
-                f"Goto/label fallback comments are the #1 readability problem across all fixtures "
-                f"(~{top_problems[0]['count']} instances in Track A alone). "
-                f"The ControlStructurer already has if/else handling; extending it to recognize "
-                f"back-edge patterns for while/for loops would eliminate the majority of "
-                f"unstructured fallback output. This is the highest-impact single change."
+                f"Unresolved field names (f0, f1, ...) are now the #2 readability problem "
+                f"across all fixtures (~{top_problems[2]['count']} occurrences in Track A alone). "
+                f"The first-fix target (while-loop structuring) was implemented in g5.3, "
+                f"converting ~1,400 goto/label fallbacks into structured while() blocks. "
+                f"Next-highest impact: resolving field name placeholders using class metadata."
             ),
-            "expected_impact": "High — would replace ~90% of goto/label fallbacks with structured loop output",
+            "expected_impact": "High — would improve readability of field access expressions across all fixtures",
             "notes": [
-                "ControlStructurer._walk_block already identifies back-edges (last.opcode == 58 and target <= blk.start_ip)",
-                "The existing loop_headers set parameter tracks potential loop header blocks",
-                "Implementation: when a back-edge is detected, collect the loop body blocks and emit IRStmt('while', ...)",
-                "Test: validate on Shapes.hl (has geometric loops) and Enums.hl (has enum iteration loops)",
-                "Do NOT attempt switch or try/catch structuring in the same change — keep it focused on loops only",
+                "ExprBuilder._resolve_field_name() already exists but falls back to f{idx} for many cases",
+                "Primary gap: parent class type cannot be determined from function signature alone",
+                "Secondary gap: field offset-to-name mapping via Obj type proto/binding metadata",
+                "Test: validate on classes.hl (Circle.area uses 'this.r', 'this.h') and Shapes.hl",
             ],
         }
     else:
