@@ -1186,18 +1186,45 @@ class ExprBuilder:
 # Control Flow Structurer
 # ============================================================================
 
+
+def _block_can_reach_any(block_map: Dict[int, 'BasicBlock'],
+                          start_id: int,
+                          targets: Set[int],
+                          max_depth: int = 50) -> bool:
+    """Check if a path exists from start_id to any target block via CFG edges.
+
+    Bounded by max_depth to avoid excessive traversal on degenerate CFGs.
+    """
+    visited: Set[int] = set()
+    queue = [start_id]
+    depth = 0
+    while queue and depth < max_depth:
+        bid = queue.pop(0)
+        if bid in visited or bid not in block_map:
+            continue
+        visited.add(bid)
+        if bid in targets:
+            return True
+        b = block_map[bid]
+        for succ_id in b.successors:
+            if succ_id not in visited:
+                queue.append(succ_id)
+        depth += 1
+    return False
+
+
 class ControlStructurer:
     """Transform flat CFG basic blocks into structured control flow.
 
     WARNING — This is a **partial implementation**:
-    - If/else: handled for simple conditional jumps (if-then, if-then-else)
-    - Loops: NOT yet structured; back-edge blocks fall through as sequential
-    - Switch: NOT yet structured; OSwitch emits as a flat comment
-    - Try/catch: NOT yet structured; OTrap/OCatch/OEndTrap emit as flat comments
+        - If/else: handled for simple conditional jumps (if-then, if-then-else)
+        - While loops: handled for simple natural loops (header+body+latch pattern)
+        - Switch: NOT yet structured; OSwitch emits as a flat comment
+        - Try/catch: NOT yet structured; OTrap/OCatch/OEndTrap emit as flat comments
 
-    For complex control flow the structurer falls back to flat statement
-    emission with goto/label markers preserved as IRStmt(\"goto\") and
-    IRStmt(\"label\") so no information is lost.
+        For complex control flow the structurer falls back to flat statement
+        emission with goto/label markers preserved as IRStmt("goto") and
+        IRStmt("label") so no information is lost.
     """
 
     def __init__(self, instructions: List[Instruction],
@@ -1242,18 +1269,133 @@ class ControlStructurer:
         # Build mapping from block id → block
         block_map = {blk.id: blk for blk in self.cfg}
 
+        # Pre-identify simple natural loops from the CFG
+        loop_info = self._find_natural_loops(block_map)
+
         # Start from entry block (id=0)
         visited: Set[int] = set()
         result: List[IRStmt] = []
-        self._walk_block(0, block_map, func_stmts, visited, result, set())
+        self._walk_block(0, block_map, func_stmts, visited, result, loop_info)
         return result
+
+    def _find_natural_loops(self, block_map: Dict[int, 'BasicBlock']) -> Dict[int, Dict]:
+        """Identify simple natural loops in the CFG.
+
+        Returns dict mapping header block_id → loop descriptor:
+            {
+                "header_id": int,
+                "body_ids": Set[int],     # blocks in the loop body (excl. header)
+                "latch_ids": Set[int],    # blocks with OJAlways back-edges to header
+                "exit_ids": Set[int],     # blocks to go to after loop
+            }
+
+        Only handles the simplest case:
+        - Header ends with a conditional jump (not OJAlways)
+        - At least one back-edge predecessor ending in OJAlways
+        - Body blocks have no exits (all successors stay within loop)
+        """
+        loops: Dict[int, Dict] = {}
+
+        for blk in block_map.values():
+            if not blk.is_loop_header:
+                continue
+            if not blk.instructions:
+                continue
+
+            last = blk.instructions[-1]
+            # Header must end with a conditional jump (opcodes 44-57, not 58)
+            if last.opcode not in _JUMP_OPCODES or last.opcode == 58:
+                continue
+
+            header_id = blk.id
+
+            # Find latch blocks: predecessors ending in OJAlways whose
+            # jump_target resolves to within this header's instruction range
+            latch_ids: Set[int] = set()
+            for pred_id in blk.predecessors:
+                if pred_id >= header_id:  # backward edge in block order
+                    pred = block_map.get(pred_id)
+                    if pred and pred.instructions:
+                        pred_last = pred.instructions[-1]
+                        if pred_last.opcode == 58:  # OJAlways
+                            target = pred_last.jump_target
+                            if target is not None and blk.start_ip <= target < blk.end_ip:
+                                latch_ids.add(pred_id)
+
+            if not latch_ids:
+                continue  # no back-edge, skip
+
+            # Determine successors: body entry vs exit
+            # A successor that can reach a latch block is body entry;
+            # otherwise it's the exit.
+            body_entry_ids: Set[int] = set()
+            exit_ids: Set[int] = set()
+            for succ_id in blk.successors:
+                if succ_id <= header_id:
+                    continue  # skip back-edges in header's own successors
+                if _block_can_reach_any(block_map, succ_id, latch_ids, max_depth=50):
+                    body_entry_ids.add(succ_id)
+                else:
+                    exit_ids.add(succ_id)
+
+            if not body_entry_ids:
+                continue
+
+            # BFS from body entries to collect body blocks, bounded by
+            # blocks that can reach a latch (unreachable blocks are exit)
+            body_ids: Set[int] = set()
+            queue = list(body_entry_ids)
+            body_visited: Set[int] = {header_id} | latch_ids
+
+            while queue:
+                bid = queue.pop(0)
+                if bid in body_visited or bid not in block_map:
+                    continue
+                body_visited.add(bid)
+                body_ids.add(bid)
+                b = block_map[bid]
+                for succ_id in b.successors:
+                    if (succ_id not in body_visited
+                            and succ_id not in latch_ids
+                            and succ_id != header_id):
+                        queue.append(succ_id)
+
+            # Validation: no body block has successors outside the loop
+            valid_simple = True
+            for bid in list(body_ids):
+                b = block_map.get(bid)
+                if not b:
+                    continue
+                for succ_id in b.successors:
+                    if succ_id == header_id:
+                        continue  # back-edge — allowed
+                    if succ_id in body_ids:
+                        continue  # within-body edge — allowed
+                    if succ_id in latch_ids:
+                        continue  # to latch — allowed
+                    valid_simple = False
+                    break
+                if not valid_simple:
+                    break
+
+            if not valid_simple:
+                continue  # complex loop — skip
+
+            loops[header_id] = {
+                "header_id": header_id,
+                "body_ids": body_ids,
+                "latch_ids": latch_ids,
+                "exit_ids": exit_ids,
+            }
+
+        return loops
 
     def _walk_block(self, blk_id: int,
                     block_map: Dict[int, BasicBlock],
                     func_stmts: Dict[int, List[IRStmt]],
                     visited: Set[int],
                     result: List[IRStmt],
-                    loop_headers: Set[int]):
+                    loop_info: Dict[int, Dict]):
         """Recursively walk blocks in topological order, producing structured output."""
         if blk_id in visited or blk_id not in block_map:
             return
@@ -1273,19 +1415,61 @@ class ControlStructurer:
             s_list = func_stmts.get(instr.index, [])
             block_stmts.extend(s_list)
 
-        # For the entry block, just emit decompiled stmts for each instruction
-        # and recurse into successors
+        # --- LOOP HEADER: produce while(...) instead of if/else fallback ---
+        if (blk_id in loop_info
+                and last
+                and last.opcode in _JUMP_OPCODES
+                and last.opcode != 58):
+            info = loop_info[blk_id]
+            body_ids = info["body_ids"]
+            exit_ids = info["exit_ids"]
+
+            condition = self._build_condition(last)
+            if condition is not None:
+                # Emit non-branch statements from the header
+                result.extend(block_stmts)
+
+                # Collect loop body statements
+                body_stmts: List[IRStmt] = []
+                walked_body = set()
+                # Walk body entry blocks; recursive _walk_block follows
+                # successors internally, including nested if/else patterns.
+                for bid in body_ids:
+                    if bid not in visited and bid not in walked_body:
+                        walked_body.add(bid)
+                        self._walk_block(bid, block_map, func_stmts,
+                                         visited, body_stmts, loop_info)
+
+                # Append latch blocks (if not already walked via body traversal)
+                for lid in info["latch_ids"]:
+                    if lid not in visited and lid not in walked_body:
+                        walked_body.add(lid)
+                        self._walk_block(lid, block_map, func_stmts,
+                                         visited, body_stmts, loop_info)
+
+                # Create while IR statement
+                while_stmt = IRStmt("while", src=condition, blocks=[body_stmts])
+                result.append(while_stmt)
+
+                # Follow exit path
+                for eid in exit_ids:
+                    if eid not in visited:
+                        self._walk_block(eid, block_map, func_stmts,
+                                         visited, result, loop_info)
+                return
+
+        # --- STANDARD FLOW (non-loop blocks) ---
         result.extend(block_stmts)
 
         if last and last.opcode == 58:  # OJAlways
             # Unconditional jump — follow if not back-edge
             target = last.jump_target
             if target is not None and target <= blk.start_ip:
-                pass  # back-edge, handled by loop detection
+                pass  # back-edge — handled by loop detection or silent fallback
             elif succs:
                 for sid in succs:
                     self._walk_block(sid, block_map, func_stmts,
-                                     visited, result, loop_headers)
+                                     visited, result, loop_info)
 
         elif last and _JUMP_OPCODES and last.opcode in _JUMP_OPCODES and last.opcode != 58:
             # Conditional jump — try if-then/if-else pattern
@@ -1296,13 +1480,13 @@ class ControlStructurer:
                 if succs:
                     then_stmts: List[IRStmt] = []
                     self._walk_block(succs[0], block_map, func_stmts,
-                                     visited, then_stmts, loop_headers)
+                                     visited, then_stmts, loop_info)
                     if_res.blocks[0] = then_stmts
-                # Else block: if there's a second successor and it's not the merge
+                # Else block: if there's a second successor
                 if len(succs) > 1:
                     else_stmts: List[IRStmt] = []
                     self._walk_block(succs[1], block_map, func_stmts,
-                                     visited, else_stmts, loop_headers)
+                                     visited, else_stmts, loop_info)
                     if_res.blocks[1] = else_stmts
                 result.append(if_res)
         else:
@@ -1310,7 +1494,7 @@ class ControlStructurer:
             if succs:
                 for sid in succs:
                     self._walk_block(sid, block_map, func_stmts,
-                                     visited, result, loop_headers)
+                                     visited, result, loop_info)
 
     def _build_condition(self, instr: Instruction) -> Optional[IRValue]:
         """Build a condition expression from a conditional jump instruction."""
@@ -2287,7 +2471,7 @@ class Decompiler:
         func_stmts = expr_builder.build_body_by_instruction(instructions, func_idx)
 
         # Step 4: Control flow structuring
-        cfg = self.disasm.get_cfg(func_idx)
+        cfg = self.disasm.build_cfg(func_idx) if self.disasm else []
         structurer = ControlStructurer(instructions, cfg, self.parser, self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
 

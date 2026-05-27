@@ -106,8 +106,92 @@ def _disasm_and_decompile(data: bytes) -> DecompileResult:
     return decompiler.decompile_all()
 
 
+def _build_minimal_with_raw_functions(
+    ntypes: int = 0,
+    type_blobs: list[bytes] = None,
+    nglobals: int = 0,
+    nnatives: int = 0,
+    raw_function_entries: list[bytes] = None,
+    ints: list[int] = None,
+    floats: list[float] = None,
+    strings: list[str] = None,
+    version: int = 5,
+) -> bytes:
+    """Build minimal HL bytecode accepting pre-built raw function entries.
+
+    For use with _build_function_entry_raw when custom opcode args are needed.
+    """
+    if type_blobs is None:
+        type_blobs = []
+    header = build_header(
+        version=version, flags=0,
+        nints=len(ints) if ints else 0,
+        nfloats=len(floats) if floats else 0,
+        nstrings=len(strings) if strings else 0,
+        ntypes=ntypes, nglobals=nglobals,
+        nnatives=nnatives,
+        nfunctions=len(raw_function_entries) if raw_function_entries else 0,
+        nconstants=0, entrypoint=0,
+    )
+    data = header
+    data += build_ints_pool(ints or [])
+    data += build_floats_pool(floats or [])
+    data += build_strings_pool(strings or [])
+    data += b"".join(type_blobs) if type_blobs else b""
+    data += build_globals_pool([0] * nglobals)
+    data += build_natives_pool([])
+    if raw_function_entries:
+        data += b"".join(raw_function_entries)
+    return data
+
+
+def _build_opcode_with_args(op_args: list[tuple[int, list[int]]]) -> bytes:
+    """Build a raw opcode byte sequence with specified args.
+
+    Each entry: (opcode_index, [arg1, arg2, ...])
+    Args are encoded as signed VarInts.
+
+    Unlike build_opcode_sequence which fills all args with zero,
+    this helper allows precise control over jump offsets.
+    """
+    data = b""
+    for op, args in op_args:
+        data += bytes([op])
+        for a in args:
+            data += encode_varint(a)
+    return data
+
+
+def _build_function_entry_raw(
+    type_idx: int,
+    findex: int,
+    reg_types: list[int],
+    raw_opcodes: bytes,
+    nops: int,
+    has_debug: bool = False,
+) -> bytes:
+    """Build a function entry with raw opcode bytes and explicit nops count.
+    
+    Needed when _build_opcode_with_args is used (non-zero jump offsets),
+    since build_function_entry reads len(opcodes) from a list[int].
+    """
+    data = encode_varint(type_idx)
+    data += encode_varint(findex)
+    data += encode_varint(len(reg_types))
+    data += encode_varint(nops)
+    # Register types
+    for rt in reg_types:
+        data += encode_varint(rt)
+    # Raw opcode bytes (pre-encoded with non-zero args)
+    data += raw_opcodes
+    # No debug info
+    if has_debug:
+        data += encode_varint(0)  # nassigns = 0
+    return data
+
+
 # ============================================================================
-# Test: IR Data Structures
+# Tests: IR Data Structures
 # ============================================================================
 
 class TestIRDataStructures:
@@ -1166,24 +1250,102 @@ class TestControlFlowStructuring:
             assert "goto" in src or "label" in src, \
                 "Fallthrough to goto/label expected for unstructured parts"
 
-    def test_loop_fallback_honest(self):
-        """D.4.2: Loop blocks fall through as sequential with goto comments."""
-        # Build a function with a backward jump (loop pattern)
-        # OJAlways -1 (back to itself)
-        ops = build_opcode_sequence([58, 0])
-        data = _build_minimal_with_types(
-            ntypes=1,
-            type_blobs=[build_type_primitive(K_VOID)],
-            functions=[(0, 0, [K_VOID], ops)],
+    def test_while_loop_output(self):
+        """D.5.1: Decompiler emits 'while' for simple natural loops."""
+        # Build a function with a real while loop pattern:
+        #   header: OJTrue r0, +1 → body entry (instr 2)
+        #           OJAlways +3 → exit (instr 5)
+        #   body:   OLabel (instr 2), OInt r1,42 (instr 3)
+        #           OJAlways -5 → header (instr 0)  [back-edge]
+        #   exit:   ORet (instr 5)
+        type_void = build_type_primitive(K_VOID)
+        type_i32 = build_type_primitive(K_I32)
+        raw_ops = _build_opcode_with_args([
+            (44, [0, 1]),   # OJTrue r0, +1 → instr 2 (body)
+            (58, [3]),      # OJAlways +3 → instr 5 (exit)
+            (66, []),       # OLabel (body start)
+            (1, [1, 42]),   # OAdd r1, 42 (body statement, nargs=2)
+            (58, [-5]),     # OJAlways -5 → instr 0 (header, back-edge)
+            (67, []),       # ORet
+        ])
+        raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[type_void, type_i32],
+            raw_function_entries=[raw_fn],
         )
         result = _disasm_and_decompile(data)
         assert result is not None
-        # Should not crash, should produce goto/label comments
+        assert len(result.errors) == 0
         fn = result.functions.get(0)
-        if fn:
-            src = " ".join(str(s.op) for s in fn.body)
-            # The output won't claim 'while' — it falls through
-            assert isinstance(fn.body, list)
+        assert fn is not None, "Function should be decompiled"
+        ops_seen = [s.op for s in fn.body]
+        assert "while" in ops_seen, f"Expected 'while' in structured body, got: {ops_seen}"
+
+    def test_while_loop_structured_body(self):
+        """D.5.2: While loop contains the body statements, not bare goto/label."""
+        type_void = build_type_primitive(K_VOID)
+        type_i32 = build_type_primitive(K_I32)
+        raw_ops = _build_opcode_with_args([
+            (44, [0, 1]),   # OJTrue r0, +1 → body
+            (58, [3]),      # OJAlways +3 → exit
+            (66, []),       # OLabel (body start)
+            (1, [1, 42]),   # OAdd r1, 42 (body, nargs=2)
+            (58, [-5]),     # OJAlways -5 → header (back-edge)
+            (67, []),       # ORet
+        ])
+        raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[type_void, type_i32],
+            raw_function_entries=[raw_fn],
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        assert len(result.errors) == 0
+        fn = result.functions.get(0)
+        assert fn is not None
+        while_stmts = [s for s in fn.body if s.op == "while"]
+        assert len(while_stmts) >= 1, "Expected at least one 'while' statement"
+        ws = while_stmts[0]
+        assert ws.src is not None, "While must have a condition"
+        assert len(ws.blocks) >= 1, "While must have at least one block (body)"
+        body_stmts = ws.blocks[0]
+        assert len(body_stmts) > 0, "While body must not be empty"
+        body_ops = [s.op for s in body_stmts]
+        has_non_comment = any(op not in ("goto", "label") for op in body_ops)
+        assert has_non_comment, f"Body should have real statements, got: {body_ops}"
+
+    def test_if_else_still_works_with_while(self):
+        """D.5.3: If/else structuring still works alongside while-loop detection."""
+        type_void = build_type_primitive(K_VOID)
+        type_i32 = build_type_primitive(K_I32)
+        raw_ops = _build_opcode_with_args([
+            (44, [0, 1]),   # OJTrue r0, +1 → body
+            (58, [3]),      # OJAlways +3 → exit
+            (66, []),       # OLabel (body start)
+            (1, [1, 42]),   # OAdd r1, 42
+            (58, [-5]),     # OJAlways -5 → header (back-edge)
+            (67, []),       # ORet
+        ])
+        raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[type_void, type_i32],
+            raw_function_entries=[raw_fn],
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        assert len(result.errors) == 0
+        fn = result.functions.get(0)
+        assert fn is not None
+        ops_seen = [s.op for s in fn.body]
+        assert "while" in ops_seen
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser)
+        output = writer.write_function(fn)
+        assert "while" in output
+        assert output.count("{") == output.count("}")
 
     def test_switch_fallback_honest(self):
         """D.4.3: OSwitch emits flat comment, not a structured switch."""

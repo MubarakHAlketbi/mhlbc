@@ -1,6 +1,29 @@
 # Session Tracking
 
-## Session 21 — May 23, 2026
+## Session 27 — May 27, 2026
+- Start: Continuation on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash:free via nous.
+- Project state: 474 passed, 3 skipped.
+- **Bugfix — CFG never built:** `_decompile_function` called `disasm.get_cfg()` which returned empty (CFG was never built). Changed to `disasm.build_cfg()`. This fix enables ALL control-flow structuring (if/else AND while) — previously both were silently inactive.
+- **While-loop structuring implemented:**
+  - Added `_block_can_reach_any()` CFG reachability checker
+  - Added `_find_natural_loops()` — pre-identifies natural loops via conditional-jump headers + OJAlways latch back-edges, reachability-based body/exit separation
+  - Modified `_walk_block()` — loop headers produce `IRStmt("while", ...)` with condition from conditional jump, body blocks collected into while body
+  - Updated class docstring to reflect while-loop support
+- **Tests:** 3 new while-loop tests (output contains while, body has real statements, braces balanced with if/else coexistence)
+- **Quality report:** Track A 7/7 passing, 0 errors; Track B 45,364 funcs, 2,290 while statements in 1,931 functions, 20,200 if statements in 19,374 functions
+- **Full test suite:** `pytest -x` → 474 passed, 3 skipped
+
+## Session 26 — May 27, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash:free via nous (Discord OmniDecomp thread).
+- Project state: 472 passed, 3 skipped, Gates 1-6 complete. Tier 1 baseline validated.
+- Gate freeze (Tier 1): N/A — Gate 6 validated. Further Tier 1 improvements continue under standard Haxe/HL correctness and Farever Track B readiness.
+- Tiers 2-5 frozen per README policy.
+- Farever Track B parser navigation resolved (Session 25). All 45,365 functions parse, 0 malformed, 22,124 constants.
+- Awaiting Sato's request.
+
+## Session 25 — May 27, 2026
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Project state: 418 tests passing (pre-existing 4 fixture failures unrelated), Gates 1-5 complete.

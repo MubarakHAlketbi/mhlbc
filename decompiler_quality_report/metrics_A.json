@@ -1,0 +1,3099 @@
+{
+  "fixtures": {
+    "Enums.hl": {
+      "function_level": {
+        "total_functions": 333,
+        "functions_emitted": 333,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 299,
+        "unnamed_functions": 34,
+        "duplicate_output_names": {
+          "new": 10,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 48,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 41,
+        "enums_emitted": 2,
+        "orphan_functions": 58,
+        "methods_emitted": 275,
+        "constructors_emitted": 9
+      },
+      "source_text_analysis": {
+        "total_files": 33,
+        "total_lines": 12825,
+        "fallback_patterns": {
+          "unresolved_register": 647,
+          "bare_register_ref": 647,
+          "goto_fallback": 616,
+          "unresolved_field": 402,
+          "nullcheck": 179,
+          "label_marker": 63,
+          "control_flow_switch": 5,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "Option.hx": {},
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 81,
+            "label_marker": 10,
+            "nullcheck": 32,
+            "unresolved_field": 89,
+            "unresolved_register": 184,
+            "bare_register_ref": 184,
+            "control_flow_switch": 5
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 226,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 387,
+        "unresolved_field_names": {
+          "f1": 95,
+          "f2": 67,
+          "f5": 40,
+          "f6": 38,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f11": 11,
+          "f9": 10,
+          "f10": 9,
+          "f8": 8,
+          "f12": 5,
+          "f20": 4,
+          "f15": 2,
+          "f13": 2,
+          "f18": 1,
+          "f17": 1
+        },
+        "dynamic_type_references": 301
+      },
+      "fidelity": {
+        "fixture": "Enums.hl",
+        "classes": {
+          "expected_count": 5,
+          "emitted_count": 41,
+          "found_classes": [],
+          "missing_classes": [
+            "Color",
+            "Day",
+            "Main",
+            "Optional",
+            "Result"
+          ],
+          "extra_classes": [
+            "Date",
+            "Enums",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 2,
+          "details": {
+            "Option": {
+              "construct_count": 2,
+              "construct_names": [
+                "Some",
+                "None"
+              ]
+            },
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Result": {
+            "expected": [],
+            "emitted": [],
+            "found": [],
+            "missing": [],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Optional": {
+            "expected": [],
+            "emitted": [],
+            "found": [],
+            "missing": [],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Color": {
+            "expected": [],
+            "emitted": [],
+            "found": [],
+            "missing": [],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Main": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Day": {
+            "expected": [],
+            "emitted": [],
+            "found": [],
+            "missing": [],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 373,
+          "while_loop": 63,
+          "switch": 5,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 408
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 33,
+      "output_file_names": [
+        "Date.hx",
+        "Option.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "Main.hl": {
+      "function_level": {
+        "total_functions": 333,
+        "functions_emitted": 333,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 299,
+        "unnamed_functions": 34,
+        "duplicate_output_names": {
+          "new": 10,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 48,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 41,
+        "enums_emitted": 1,
+        "orphan_functions": 58,
+        "methods_emitted": 275,
+        "constructors_emitted": 9
+      },
+      "source_text_analysis": {
+        "total_files": 32,
+        "total_lines": 12695,
+        "fallback_patterns": {
+          "unresolved_register": 637,
+          "bare_register_ref": 637,
+          "goto_fallback": 604,
+          "unresolved_field": 397,
+          "nullcheck": 177,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 30,
+            "unresolved_field": 84,
+            "unresolved_register": 174,
+            "bare_register_ref": 174,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 226,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 385,
+        "unresolved_field_names": {
+          "f1": 94,
+          "f2": 67,
+          "f6": 43,
+          "f5": 40,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f9": 9,
+          "f10": 9,
+          "f8": 8,
+          "f12": 5,
+          "f11": 5,
+          "f20": 4,
+          "f13": 3,
+          "f15": 2,
+          "f18": 1,
+          "f16": 1
+        },
+        "dynamic_type_references": 299
+      },
+      "fidelity": {
+        "fixture": "Main.hl",
+        "classes": {
+          "expected_count": 1,
+          "emitted_count": 41,
+          "found_classes": [
+            "Main"
+          ],
+          "missing_classes": [],
+          "extra_classes": [
+            "Date",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 1,
+          "details": {
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Main": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 369,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 408
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 32,
+      "output_file_names": [
+        "Date.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "Natives.hl": {
+      "function_level": {
+        "total_functions": 336,
+        "functions_emitted": 336,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 302,
+        "unnamed_functions": 34,
+        "duplicate_output_names": {
+          "new": 10,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 16,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 48,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 42,
+        "enums_emitted": 1,
+        "orphan_functions": 59,
+        "methods_emitted": 277,
+        "constructors_emitted": 9
+      },
+      "source_text_analysis": {
+        "total_files": 33,
+        "total_lines": 13081,
+        "fallback_patterns": {
+          "unresolved_register": 681,
+          "bare_register_ref": 681,
+          "goto_fallback": 605,
+          "unresolved_field": 407,
+          "nullcheck": 188,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.ds.StringMap.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 2,
+            "unresolved_register": 2,
+            "bare_register_ref": 2
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 39,
+            "unresolved_field": 94,
+            "unresolved_register": 216,
+            "bare_register_ref": 216,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 229,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 394,
+        "unresolved_field_names": {
+          "f1": 95,
+          "f2": 67,
+          "f6": 50,
+          "f5": 40,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f9": 10,
+          "f10": 10,
+          "f8": 8,
+          "f12": 5,
+          "f11": 5,
+          "f20": 4,
+          "f15": 2,
+          "f13": 2,
+          "f18": 1,
+          "f17": 1
+        },
+        "dynamic_type_references": 304
+      },
+      "fidelity": {
+        "fixture": "Natives.hl",
+        "classes": {
+          "expected_count": 1,
+          "emitted_count": 42,
+          "found_classes": [],
+          "missing_classes": [
+            "Main"
+          ],
+          "extra_classes": [
+            "Date",
+            "Natives",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.ds.StringMap",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 1,
+          "details": {
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Main": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 370,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 412
+        },
+        "orphan_function_count": 59
+      },
+      "output_files": 33,
+      "output_file_names": [
+        "Date.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.ds.StringMap.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "Shapes.hl": {
+      "function_level": {
+        "total_functions": 337,
+        "functions_emitted": 337,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 301,
+        "unnamed_functions": 36,
+        "duplicate_output_names": {
+          "new": 12,
+          "toString": 13,
+          "__string": 7,
+          "area": 2,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 49,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 44,
+        "enums_emitted": 2,
+        "orphan_functions": 58,
+        "methods_emitted": 279,
+        "constructors_emitted": 11
+      },
+      "source_text_analysis": {
+        "total_files": 35,
+        "total_lines": 12901,
+        "fallback_patterns": {
+          "unresolved_register": 660,
+          "bare_register_ref": 660,
+          "goto_fallback": 604,
+          "unresolved_field": 405,
+          "nullcheck": 178,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "Circle.hx": {
+            "unresolved_field": 1
+          },
+          "Rect.hx": {},
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "Flag.hx": {},
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 31,
+            "unresolved_field": 91,
+            "unresolved_register": 197,
+            "bare_register_ref": 197,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 228,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 393,
+        "unresolved_field_names": {
+          "f1": 94,
+          "f2": 67,
+          "f5": 42,
+          "f6": 40,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f12": 11,
+          "f9": 9,
+          "f10": 9,
+          "f8": 8,
+          "f11": 5,
+          "f18": 5,
+          "f20": 4,
+          "f15": 2,
+          "f13": 2,
+          "f21": 1
+        },
+        "dynamic_type_references": 300
+      },
+      "fidelity": {
+        "fixture": "Shapes.hl",
+        "classes": {
+          "expected_count": 4,
+          "emitted_count": 44,
+          "found_classes": [
+            "Circle",
+            "Rect"
+          ],
+          "missing_classes": [
+            "Main",
+            "Shape"
+          ],
+          "extra_classes": [
+            "Date",
+            "Math",
+            "Shapes",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 2,
+          "details": {
+            "Flag": {
+              "construct_count": 3,
+              "construct_names": [
+                "Active",
+                "Inactive",
+                "Pending"
+              ]
+            },
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Rect": {
+            "expected": [
+              "area",
+              "describe",
+              "new"
+            ],
+            "emitted": [
+              "area",
+              "new"
+            ],
+            "found": [
+              "area",
+              "new"
+            ],
+            "missing": [
+              "describe"
+            ],
+            "extra": [],
+            "constructor_found": true
+          },
+          "Circle": {
+            "expected": [
+              "area",
+              "describe",
+              "new"
+            ],
+            "emitted": [
+              "area",
+              "new"
+            ],
+            "found": [
+              "area",
+              "new"
+            ],
+            "missing": [
+              "describe"
+            ],
+            "extra": [],
+            "constructor_found": true
+          },
+          "Main": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Shape": {
+            "expected": [],
+            "emitted": [],
+            "found": [],
+            "missing": [],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 369,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 412
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 35,
+      "output_file_names": [
+        "Circle.hx",
+        "Date.hx",
+        "Flag.hx",
+        "Rect.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "classes.hl": {
+      "function_level": {
+        "total_functions": 339,
+        "functions_emitted": 339,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 302,
+        "unnamed_functions": 37,
+        "duplicate_output_names": {
+          "new": 13,
+          "area": 2,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 49,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 45,
+        "enums_emitted": 2,
+        "orphan_functions": 58,
+        "methods_emitted": 281,
+        "constructors_emitted": 12
+      },
+      "source_text_analysis": {
+        "total_files": 36,
+        "total_lines": 12928,
+        "fallback_patterns": {
+          "unresolved_register": 660,
+          "bare_register_ref": 660,
+          "goto_fallback": 604,
+          "unresolved_field": 406,
+          "nullcheck": 178,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Point.hx": {
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "Shape.hx": {},
+          "Circle.hx": {
+            "unresolved_field": 2,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "haxe.io.Error.hx": {},
+          "Color.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 31,
+            "unresolved_field": 90,
+            "unresolved_register": 195,
+            "bare_register_ref": 195,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 229,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 394,
+        "unresolved_field_names": {
+          "f1": 95,
+          "f2": 68,
+          "f5": 41,
+          "f6": 39,
+          "f3": 35,
+          "f7": 32,
+          "f4": 28,
+          "f11": 11,
+          "f9": 9,
+          "f10": 9,
+          "f8": 8,
+          "f12": 5,
+          "f20": 5,
+          "f17": 4,
+          "f15": 2,
+          "f13": 2,
+          "f18": 1
+        },
+        "dynamic_type_references": 298
+      },
+      "fidelity": {
+        "fixture": "classes.hl",
+        "classes": {
+          "expected_count": 4,
+          "emitted_count": 45,
+          "found_classes": [
+            "Circle",
+            "Shape"
+          ],
+          "missing_classes": [
+            "Main",
+            "Rect"
+          ],
+          "extra_classes": [
+            "Classes",
+            "Date",
+            "Math",
+            "Point",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 2,
+          "details": {
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            },
+            "Color": {
+              "construct_count": 4,
+              "construct_names": [
+                "Red",
+                "Green",
+                "Blue",
+                "Rgb"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Rect": {
+            "expected": [
+              "area",
+              "describe",
+              "new"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "area",
+              "describe",
+              "new"
+            ],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Circle": {
+            "expected": [
+              "area",
+              "describe",
+              "new"
+            ],
+            "emitted": [
+              "area",
+              "new"
+            ],
+            "found": [
+              "area",
+              "new"
+            ],
+            "missing": [
+              "describe"
+            ],
+            "extra": [],
+            "constructor_found": true
+          },
+          "Main": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          },
+          "Shape": {
+            "expected": [],
+            "emitted": [
+              "area",
+              "new"
+            ],
+            "found": [],
+            "missing": [],
+            "extra": [
+              "area",
+              "new"
+            ],
+            "constructor_found": true
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 369,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 414
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 36,
+      "output_file_names": [
+        "Circle.hx",
+        "Color.hx",
+        "Date.hx",
+        "Point.hx",
+        "Shape.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "hello.hl": {
+      "function_level": {
+        "total_functions": 333,
+        "functions_emitted": 333,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 299,
+        "unnamed_functions": 34,
+        "duplicate_output_names": {
+          "new": 10,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 48,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 41,
+        "enums_emitted": 1,
+        "orphan_functions": 58,
+        "methods_emitted": 275,
+        "constructors_emitted": 9
+      },
+      "source_text_analysis": {
+        "total_files": 32,
+        "total_lines": 12656,
+        "fallback_patterns": {
+          "unresolved_register": 634,
+          "bare_register_ref": 634,
+          "goto_fallback": 604,
+          "unresolved_field": 396,
+          "nullcheck": 176,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 29,
+            "unresolved_field": 83,
+            "unresolved_register": 171,
+            "bare_register_ref": 171,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 226,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 384,
+        "unresolved_field_names": {
+          "f1": 94,
+          "f2": 67,
+          "f6": 42,
+          "f5": 40,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f9": 9,
+          "f10": 9,
+          "f8": 8,
+          "f12": 5,
+          "f11": 5,
+          "f20": 4,
+          "f13": 3,
+          "f15": 2,
+          "f18": 1,
+          "f16": 1
+        },
+        "dynamic_type_references": 297
+      },
+      "fidelity": {
+        "fixture": "hello.hl",
+        "classes": {
+          "expected_count": 1,
+          "emitted_count": 41,
+          "found_classes": [
+            "Hello"
+          ],
+          "missing_classes": [],
+          "extra_classes": [
+            "Date",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 1,
+          "details": {
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Hello": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 369,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 408
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 32,
+      "output_file_names": [
+        "Date.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    },
+    "types.hl": {
+      "function_level": {
+        "total_functions": 333,
+        "functions_emitted": 333,
+        "functions_skipped": 0,
+        "malformed": 0,
+        "zero_nops": 0,
+        "named_functions": 299,
+        "unnamed_functions": 34,
+        "duplicate_output_names": {
+          "new": 10,
+          "toString": 13,
+          "__string": 7,
+          "toLowerCase": 15,
+          "charAt": 7,
+          "charCodeAt": 5,
+          "findChar": 3,
+          "indexOf": 9,
+          "lastIndexOf": 8,
+          "split": 2,
+          "substr": 2,
+          "substring": 2,
+          "__compare": 2,
+          "hasNext": 9,
+          "next": 9,
+          "getDyn": 7,
+          "setDyn": 7,
+          "blit": 7,
+          "pushDyn": 6,
+          "popDyn": 6,
+          "shiftDyn": 6,
+          "unshiftDyn": 6,
+          "insertDyn": 6,
+          "containsDyn": 6,
+          "removeDyn": 6,
+          "sortDyn": 6,
+          "slice": 7,
+          "splice": 7,
+          "join": 7,
+          "reverse": 7,
+          "resize": 7,
+          "__cast": 2,
+          "isArrayObj": 2,
+          "concat": 6,
+          "pop": 6,
+          "push": 6,
+          "shift": 6,
+          "sort": 6,
+          "unshift": 6,
+          "insert": 6,
+          "contains": 6,
+          "remove": 6,
+          "copy": 6,
+          "iterator": 6,
+          "keyValueIterator": 6,
+          "map": 6,
+          "filter": 6,
+          "__expand": 5
+        },
+        "duplicate_output_name_count": 48,
+        "decompilation_errors": 0,
+        "per_function_errors": 0,
+        "total_errors": 0
+      },
+      "class_level": {
+        "classes_emitted": 41,
+        "enums_emitted": 1,
+        "orphan_functions": 58,
+        "methods_emitted": 275,
+        "constructors_emitted": 9
+      },
+      "source_text_analysis": {
+        "total_files": 32,
+        "total_lines": 12743,
+        "fallback_patterns": {
+          "unresolved_register": 642,
+          "bare_register_ref": 642,
+          "goto_fallback": 604,
+          "unresolved_field": 398,
+          "nullcheck": 178,
+          "label_marker": 62,
+          "control_flow_switch": 4,
+          "trap_handler": 1,
+          "unknown_opcode": 1
+        },
+        "per_file_fallback_counts": {
+          "hl.BaseType.hx": {
+            "goto_fallback": 7,
+            "label_marker": 1,
+            "unresolved_register": 4,
+            "bare_register_ref": 4
+          },
+          "hl.Class.hx": {},
+          "String.hx": {
+            "goto_fallback": 66,
+            "label_marker": 6,
+            "nullcheck": 14,
+            "unresolved_field": 10,
+            "unresolved_register": 38,
+            "bare_register_ref": 38
+          },
+          "hl.types.ArrayAccess.hx": {
+            "unresolved_field": 12,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "hl.types.ArrayBase.hx": {
+            "goto_fallback": 1,
+            "nullcheck": 1,
+            "unresolved_field": 56,
+            "unresolved_register": 15,
+            "bare_register_ref": 15
+          },
+          "hl.types.ArrayBytes_Int.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayBytes_hl_UI16.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 66,
+            "bare_register_ref": 66
+          },
+          "hl.types.ArrayBytes_hl_F32.hx": {
+            "goto_fallback": 80,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 65,
+            "bare_register_ref": 65
+          },
+          "hl.types.ArrayBytes_Float.hx": {
+            "goto_fallback": 78,
+            "label_marker": 7,
+            "nullcheck": 12,
+            "unresolved_field": 27,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.types.ArrayDyn.hx": {
+            "goto_fallback": 32,
+            "label_marker": 9,
+            "nullcheck": 49,
+            "unresolved_field": 4,
+            "unresolved_register": 34,
+            "bare_register_ref": 34
+          },
+          "hl.Enum.hx": {},
+          "hl.types.ArrayObj.hx": {
+            "goto_fallback": 75,
+            "label_marker": 9,
+            "trap_handler": 1,
+            "nullcheck": 12,
+            "unknown_opcode": 1,
+            "unresolved_field": 62,
+            "unresolved_register": 64,
+            "bare_register_ref": 64
+          },
+          "hl.CoreType.hx": {},
+          "hl.CoreEnum.hx": {},
+          "Date.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 3,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "StringBuf.hx": {
+            "goto_fallback": 20,
+            "nullcheck": 2,
+            "unresolved_field": 14,
+            "unresolved_register": 26,
+            "bare_register_ref": 26
+          },
+          "SysError.hx": {
+            "nullcheck": 1,
+            "unresolved_field": 1,
+            "unresolved_register": 3,
+            "bare_register_ref": 3
+          },
+          "haxe.Exception.hx": {
+            "nullcheck": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.exceptions.PosException.hx": {
+            "nullcheck": 4,
+            "unresolved_field": 7,
+            "unresolved_register": 12,
+            "bare_register_ref": 12
+          },
+          "haxe.exceptions.NotImplementedException.hx": {},
+          "haxe.iterators.ArrayIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 1,
+            "unresolved_register": 1,
+            "bare_register_ref": 1
+          },
+          "haxe.iterators.ArrayKeyValueIterator.hx": {},
+          "hl.NativeArrayIterator_Dynamic.hx": {
+            "goto_fallback": 2
+          },
+          "hl.NativeArrayIterator_Int.hx": {
+            "goto_fallback": 2
+          },
+          "hl.types.BytesIterator_Float.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_Int.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_F32.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.BytesIterator_hl_UI16.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "hl.types.ArrayDynIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 5
+          },
+          "hl.types.ArrayObjIterator.hx": {
+            "goto_fallback": 2,
+            "nullcheck": 2,
+            "unresolved_field": 6
+          },
+          "haxe.io.Error.hx": {},
+          "_orphans.hx": {
+            "goto_fallback": 69,
+            "label_marker": 9,
+            "nullcheck": 31,
+            "unresolved_field": 85,
+            "unresolved_register": 179,
+            "bare_register_ref": 179,
+            "control_flow_switch": 4
+          }
+        },
+        "empty_method_bodies": 0,
+        "comment_only_method_bodies": 226,
+        "unbalanced_braces_files": 0,
+        "unbalanced_parens_files": 0,
+        "suspicious_syntax_count": 0
+      },
+      "name_resolution": {
+        "unresolved_func_refs": {
+          "fun_bracket": 0,
+          "str_bracket": 0
+        },
+        "unresolved_field_name_instances": 386,
+        "unresolved_field_names": {
+          "f1": 94,
+          "f2": 67,
+          "f6": 44,
+          "f5": 40,
+          "f3": 35,
+          "f7": 31,
+          "f4": 28,
+          "f9": 9,
+          "f10": 9,
+          "f8": 8,
+          "f12": 5,
+          "f11": 5,
+          "f20": 4,
+          "f13": 3,
+          "f15": 2,
+          "f18": 1,
+          "f16": 1
+        },
+        "dynamic_type_references": 299
+      },
+      "fidelity": {
+        "fixture": "types.hl",
+        "classes": {
+          "expected_count": 1,
+          "emitted_count": 41,
+          "found_classes": [
+            "Types"
+          ],
+          "missing_classes": [],
+          "extra_classes": [
+            "Date",
+            "Std",
+            "String",
+            "StringBuf",
+            "Sys",
+            "SysError",
+            "Type",
+            "haxe.Exception",
+            "haxe.Log",
+            "haxe.NativeStackTrace",
+            "haxe.ds.ArraySort",
+            "haxe.exceptions.NotImplementedException",
+            "haxe.exceptions.PosException",
+            "haxe.iterators.ArrayIterator",
+            "haxe.iterators.ArrayKeyValueIterator",
+            "hl.BaseType",
+            "hl.Class",
+            "hl.CoreEnum",
+            "hl.CoreType",
+            "hl.Enum",
+            "hl.NativeArrayIterator_Dynamic",
+            "hl.NativeArrayIterator_Int",
+            "hl._Bytes.Bytes_Impl_",
+            "hl._NativeArray.NativeArray_Impl_",
+            "hl._Type.Type_Impl_",
+            "hl.types.ArrayAccess",
+            "hl.types.ArrayBase",
+            "hl.types.ArrayBytes_Float",
+            "hl.types.ArrayBytes_Int",
+            "hl.types.ArrayBytes_hl_F32",
+            "hl.types.ArrayBytes_hl_UI16",
+            "hl.types.ArrayDyn",
+            "hl.types.ArrayDynIterator",
+            "hl.types.ArrayObj",
+            "hl.types.ArrayObjIterator",
+            "hl.types.BytesIterator_Float",
+            "hl.types.BytesIterator_Int",
+            "hl.types.BytesIterator_hl_F32",
+            "hl.types.BytesIterator_hl_UI16",
+            "hl.types._BytesMap.BytesMap_Impl_"
+          ]
+        },
+        "enums": {
+          "emitted_count": 1,
+          "details": {
+            "haxe.io.Error": {
+              "construct_count": 4,
+              "construct_names": [
+                "Blocked",
+                "Overflow",
+                "OutsideBounds",
+                "Custom"
+              ]
+            }
+          }
+        },
+        "method_fidelity": {
+          "Types": {
+            "expected": [
+              "main"
+            ],
+            "emitted": [],
+            "found": [],
+            "missing": [
+              "main"
+            ],
+            "extra": [],
+            "constructor_found": false
+          }
+        },
+        "control_flow_patterns": {
+          "if_else": 369,
+          "while_loop": 62,
+          "switch": 4,
+          "for_loop": 0,
+          "try_catch": 1,
+          "return_stmt": 408
+        },
+        "orphan_function_count": 58
+      },
+      "output_files": 32,
+      "output_file_names": [
+        "Date.hx",
+        "String.hx",
+        "StringBuf.hx",
+        "SysError.hx",
+        "_orphans.hx",
+        "haxe.Exception.hx",
+        "haxe.exceptions.NotImplementedException.hx",
+        "haxe.exceptions.PosException.hx",
+        "haxe.io.Error.hx",
+        "haxe.iterators.ArrayIterator.hx",
+        "haxe.iterators.ArrayKeyValueIterator.hx",
+        "hl.BaseType.hx",
+        "hl.Class.hx",
+        "hl.CoreEnum.hx",
+        "hl.CoreType.hx",
+        "hl.Enum.hx",
+        "hl.NativeArrayIterator_Dynamic.hx",
+        "hl.NativeArrayIterator_Int.hx",
+        "hl.types.ArrayAccess.hx",
+        "hl.types.ArrayBase.hx",
+        "hl.types.ArrayBytes_Float.hx",
+        "hl.types.ArrayBytes_Int.hx",
+        "hl.types.ArrayBytes_hl_F32.hx",
+        "hl.types.ArrayBytes_hl_UI16.hx",
+        "hl.types.ArrayDyn.hx",
+        "hl.types.ArrayDynIterator.hx",
+        "hl.types.ArrayObj.hx",
+        "hl.types.ArrayObjIterator.hx",
+        "hl.types.BytesIterator_Float.hx",
+        "hl.types.BytesIterator_Int.hx",
+        "hl.types.BytesIterator_hl_F32.hx",
+        "hl.types.BytesIterator_hl_UI16.hx"
+      ]
+    }
+  },
+  "overall": {
+    "total_fixtures": 7,
+    "total_functions": 2344,
+    "total_classes": 295,
+    "total_enums": 10,
+    "total_methods": 1937,
+    "total_orphans": 407,
+    "total_errors": 0
+  }
+}
