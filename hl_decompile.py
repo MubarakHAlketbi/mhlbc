@@ -881,7 +881,13 @@ class ExprBuilder:
                 return IRStmt("comment", comment=f"malformed OField args={args}")
             dst = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2], self._func_idx)
+            # Try metadata/static-field resolution for non-this object registers
+            metadata_name = self._resolve_metadata_static_field_name(
+                args[1], args[2], self._func_idx)
+            if metadata_name is not None:
+                field = metadata_name
+            else:
+                field = self._resolve_field_name(args[2], self._func_idx)
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get", [obj, IRConst(field)]))
 
@@ -1147,28 +1153,75 @@ class ExprBuilder:
             pass
         return f"fun[{findex}]"
 
+    def _resolve_field_from_type(self, type_idx: int,
+                                 field_idx: int) -> Optional[str]:
+        """Resolve a field name by walking the type's field list and super chain.
+
+        HashLink field indices are absolute offsets into the complete field list
+        including inherited fields. The index counts from the ROOT of the
+        hierarchy (the base type without a super), so we collect the chain
+        from base → leaf and subtract local field counts in that order.
+        """
+        if not (0 < type_idx < len(self.parser.types)):
+            return None
+
+        # 1. Build the inheritance chain from base → leaf
+        chain: List[int] = []
+        seen: Set[int] = set()
+        idx = type_idx
+        while idx is not None and idx > 0 and idx < len(self.parser.types):
+            if idx in seen:
+                return None  # cycle guard
+            seen.add(idx)
+            t = self.parser.types[idx]
+            if t.kind not in (K_OBJ, K_STRUCT):
+                break
+            chain.append(idx)
+            idx = t.super_idx
+        # Now chain is leaf → ... → base. Reverse to base → leaf.
+        chain.reverse()
+
+        # 2. Walk from base toward leaf, subtracting local field counts
+        remaining = field_idx
+        for c_idx in chain:
+            t = self.parser.types[c_idx]
+            nlocal = len(t.fields)
+            if remaining < nlocal:
+                f = t.fields[remaining]
+                if f.name is not None and f.name < len(self.parser.strings):
+                    return self.parser.strings[f.name]
+                return None
+            remaining -= nlocal
+        return None
+
     def _resolve_field_name(self, field_idx: int,
                             func_idx: Optional[int] = None) -> str:
         """Resolve a field index to a name.
 
-        If func_idx is provided, tries to determine the parent class type
-        from the function's type signature and resolves field names
-        from that class's definition.
+        Uses three strategies in order:
+          1. fn.parent_type (most reliable — parser already resolves this)
+          2. fn.type → signature args → 'this' type (existing fallback)
         """
         if func_idx is not None and func_idx >= 0 and self.parser is not None and func_idx < len(self.parser.functions):
             fn = self.parser.functions[func_idx]
+
+            # Strategy 1: Use parent_type directly (populated by _resolve_function_names)
+            pt = fn.parent_type
+            if pt is not None and pt >= 0 and pt < len(self.parser.types):
+                name = self._resolve_field_from_type(pt, field_idx)
+                if name is not None:
+                    return name
+
+            # Strategy 2: Infer from function type signature (existing approach)
             ft = fn.type
             if ft > 0 and ft < len(self.parser.types):
                 ftt = self.parser.types[ft]
                 if ftt.kind in (K_FUN, K_METHOD) and len(ftt.args) > 0:
-                    # First arg of FUN type is the 'this' type for methods
                     this_type = ftt.args[0]
                     if this_type > 0 and this_type < len(self.parser.types):
-                        this_t = self.parser.types[this_type]
-                        if this_t.kind in (K_OBJ, K_STRUCT) and field_idx < len(this_t.fields):
-                            f = this_t.fields[field_idx]
-                            if f.name is not None and f.name < len(self.parser.strings):
-                                return self.parser.strings[f.name]
+                        name = self._resolve_field_from_type(this_type, field_idx)
+                        if name is not None:
+                            return name
         return f"f{field_idx}"
 
     def _arith_op(self, opcode: int) -> str:
@@ -1180,6 +1233,58 @@ class ExprBuilder:
             17: "&", 18: "|", 19: "^",
         }
         return _ARITH_OPS.get(opcode, f"op{opcode}")
+
+    def _resolve_metadata_static_field_name(
+        self, obj_reg: int, field_idx: int, func_idx: int
+    ) -> Optional[str]:
+        """Narrow resolver for OField accesses on compiler metadata/static-field types.
+
+        Checks whether the object register's declared bytecode type is a known
+        compiler-generated metadata wrapper (hl.Enum, $Class, etc.) whose field
+        table contains the requested index.  If so, returns the field name from
+        the parser's type definition.
+
+        Guard predicates (only one needs to match):
+          - type name is exactly "hl.Enum"
+          - type name starts with '$'
+          - type name contains '.$'
+          - resolved field name starts with '__'
+
+        This is intentionally narrow — only observed compiler/runtime metadata
+        shapes are accepted.  Falls back to None for all other patterns, which
+        leaves the caller to use _resolve_field_name() as usual.
+        """
+        if func_idx < 0 or func_idx >= len(self.parser.functions):
+            return None
+        fn = self.parser.functions[func_idx]
+        if obj_reg < 0 or obj_reg >= len(fn.reg_types):
+            return None
+        rt_idx = fn.reg_types[obj_reg]
+        if not (0 < rt_idx < len(self.parser.types)):
+            return None
+        rt = self.parser.types[rt_idx]
+        if rt.kind not in (K_OBJ, K_STRUCT):
+            return None
+        # Use inheritance-aware resolution to support fields inherited from
+        # metadata base types (hl.BaseType → hl.Class → $Std chain, etc.)
+        resolved_name = self._resolve_field_from_type(rt_idx, field_idx)
+        if resolved_name is None:
+            return None
+
+        # Check guard predicates
+        type_name = None
+        if rt.name is not None and 0 <= rt.name < len(self.parser.strings):
+            type_name = self.parser.strings[rt.name]
+        if type_name is None:
+            return None
+
+        if (type_name == "hl.Enum"
+                or type_name.startswith('$')
+                or '.$' in type_name
+                or resolved_name.startswith('__')):
+            return resolved_name
+
+        return None
 
 
 # ============================================================================
@@ -1873,6 +1978,39 @@ class ClassBuilder:
                         )
                         methods.append(ctor_sig)
                         break  # one constructor per class
+
+        # $Class static method recovery: functions marked by the parser's
+        # $Class field↔binding type matching, whose parent_type matches this
+        # class, become static methods — unless already emitted by bindings.
+        existing_static_indices = {m.func_index for m in static_methods if m.func_index >= 0}
+        for i, fn in enumerate(self.parser.functions):
+            if not getattr(fn, 'from_class_wrapper', False):
+                continue
+            if fn.parent_type != t_idx:
+                continue
+            if i in existing_static_indices:
+                continue
+            fn_name = fn.name or f"func[{i}]"
+            ft = fn.type
+            ret_type = K_VOID
+            params: List[Tuple[str, int]] = []
+            if 0 < ft < len(self.parser.types):
+                ftt = self.parser.types[ft]
+                if ftt.kind in (K_FUN, K_METHOD):
+                    args_list = ftt.args
+                    ret_type = ftt.ret if ftt.ret is not None else K_VOID
+                    for j in range(len(args_list)):
+                        params.append((f"p{j}", args_list[j]))
+            static_sig = FunctionSig(
+                name=fn_name,
+                params=params,
+                ret_type=ret_type,
+                is_method=False,
+                parent_class=name,
+                has_this=False,
+                func_index=i,
+            )
+            static_methods.append(static_sig)
 
         return ClassDef(
             name=name,

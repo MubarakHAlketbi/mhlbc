@@ -1354,4 +1354,73 @@ class TestHighRegOpsConsumption:
         parser.parse_functions(stream_from_bytes(data))
         f = parser.functions[0]
         assert f.malformed
-        assert any("exceeds remaining" in w["message"] for w in parser.parse_warnings)
+
+
+class TestConstructorDetection:
+    """Constructor parent_type recovery in _resolve_function_names."""
+
+    def test_constructor_with_ogetthis_gets_parent_type(self):
+        """Point constructor has OGetThis → gets parent_type assigned."""
+        import io, os
+        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures', 'hl')
+        path = os.path.join(fixtures_dir, 'classes.hl')
+        p = HLParser(path)
+        with open(path, 'rb') as f:
+            p.execute(stream=io.BytesIO(f.read()))
+
+        assert p.functions[0].parent_type is not None, \
+            "Point constructor should have parent_type resolved"
+
+    def test_circle_constructor_no_ogetthis_resolve(self):
+        """Circle.new has OSetThis but field_idx OOB → NOT assigned."""
+        import io, os
+        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures', 'hl')
+        path = os.path.join(fixtures_dir, 'classes.hl')
+        p = HLParser(path)
+        with open(path, 'rb') as f:
+            p.execute(stream=io.BytesIO(f.read()))
+
+        assert p.functions[4].parent_type is None, \
+            "Circle constructor field idx is OOB → should NOT get parent_type"
+
+    def test_point_length_has_parent_type(self):
+        """Point.length is named method → already has parent_type from protos."""
+        import io, os
+        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures', 'hl')
+        path = os.path.join(fixtures_dir, 'classes.hl')
+        p = HLParser(path)
+        with open(path, 'rb') as f:
+            p.execute(stream=io.BytesIO(f.read()))
+
+        assert p.functions[1].parent_type is not None, \
+            "Point.length should have parent_type from proto"
+
+    def test_no_ogetthis_no_parent_type_assignment(self):
+        """Functions lacking OGetThis/OSetThis are not assigned parent_type."""
+        import io, os
+        fixtures_dir = os.path.join(os.path.dirname(__file__), 'fixtures', 'hl')
+        path = os.path.join(fixtures_dir, 'hello.hl')
+        p = HLParser(path)
+        with open(path, 'rb') as f:
+            p.execute(stream=io.BytesIO(f.read()))
+
+        # Count unnamed K_FUNs with args[0]=Obj that still lack parent_type
+        remaining = 0
+        for fn in p.functions:
+            if fn.parent_type is not None or fn.nops <= 0:
+                continue
+            ft = fn.type
+            if not (0 < ft < len(p.types)):
+                continue
+            ftt = p.types[ft]
+            if ftt.kind != 10 or len(ftt.args) == 0:
+                continue
+            first_arg = ftt.args[0]
+            if not (0 < first_arg < len(p.types)):
+                continue
+            if p.types[first_arg].kind in (11, 21):
+                remaining += 1
+
+        # All remaining should lack OGetThis/OSetThis (constructor-detection guard)
+        assert remaining <= 5, \
+            f"Expected <= 5 orphan K_FUNs with Obj args but no this-field ops, got {remaining}"

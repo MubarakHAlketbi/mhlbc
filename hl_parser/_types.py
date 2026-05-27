@@ -182,6 +182,7 @@ class FunctionDef:
     name: Optional[str] = None   # resolved function name
     parent_type: Optional[int] = None  # type index of parent class
     malformed: bool = False      # True if header was clamped/recovered
+    from_class_wrapper: bool = False  # True if recovered via $Class field↔binding type match
 
     # Debug info (only populated when has_debug is True)
     debug_lines: Optional[List[int]] = None

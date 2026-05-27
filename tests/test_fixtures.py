@@ -8,10 +8,15 @@ function structure, and overall correctness.
 import os
 import sys
 import struct
+import io
+
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from hl_parser import HLParser, KIND_NAMES
+from hl_disasm import Disassembler
+from hl_decompile import Decompiler, ExprBuilder
+from hl_parser._consts import K_OBJ, K_STRUCT, K_FUN, K_METHOD
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
 
@@ -500,3 +505,481 @@ def test_fuzzer_truncated_file(fname):
                 f"cut_point={cut_point}: parser raised unhandled "
                 f"{type(e).__name__}: {e}"
             )
+
+
+# ── Field name resolution tests ───────────────────────────────────────
+
+
+def _find_field_funcs(parser, fn_name_substr):
+    """Find function indices whose name contains the given substring."""
+    return [i for i, fn in enumerate(parser.functions)
+            if fn.name and fn_name_substr in fn.name]
+
+
+def test_field_resolution_circle_radius():
+    """Circle.area OGetThis field=0 resolves to 'radius'."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Find Circle.area function
+    area_idxs = _find_field_funcs(p, "area")
+    circle_area = [i for i in area_idxs
+                   if p.functions[i].parent_type is not None
+                   and p.types[p.functions[i].parent_type].name is not None
+                   and p.strings[p.types[p.functions[i].parent_type].name] == "Circle"]
+    assert len(circle_area) >= 1, "Circle.area function not found"
+    func_idx = circle_area[0]
+
+    # Create ExprBuilder with register names
+    fn = p.functions[func_idx]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    # Circle has 1 local field (radius), no inherited fields from Shape (interface)
+    # field=0 should resolve to 'radius'
+    name = eb._resolve_field_name(0, func_idx)
+    assert name == "radius", f"Expected 'radius', got '{name}'"
+    # field=1 is out of range
+    name = eb._resolve_field_name(1, func_idx)
+    assert name == "f1", f"Expected 'f1' for OOB field, got '{name}'"
+
+
+def test_field_resolution_string_buf():
+    """StringBuf methods resolve 'b', 'size', 'pos'."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Find StringBuf.add function by finding the StringBuf type
+    sb_type_idx = None
+    for i, t in enumerate(p.types):
+        if t.kind == K_OBJ and t.name is not None and t.name < len(p.strings):
+            if p.strings[t.name] == "StringBuf":
+                sb_type_idx = i
+                break
+    assert sb_type_idx is not None, "StringBuf type not found"
+
+    # Fields should be ['b', 'size', 'pos']
+    sb_type = p.types[sb_type_idx]
+    field_names = []
+    for f in sb_type.fields:
+        if f.name is not None and f.name < len(p.strings):
+            field_names.append(p.strings[f.name])
+    assert field_names == ["b", "size", "pos"], f"Expected [b, size, pos], got {field_names}"
+
+    # Find a StringBuf method
+    sb_funcs = _find_field_funcs(p, "add")
+    sb_method = None
+    for i in sb_funcs:
+        if p.functions[i].parent_type == sb_type_idx:
+            sb_method = i
+            break
+    assert sb_method is not None, "StringBuf.add not found"
+
+    fn = p.functions[sb_method]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    # Verify field resolution
+    assert eb._resolve_field_name(0, sb_method) == "b", "field=0 should be 'b'"
+    assert eb._resolve_field_name(1, sb_method) == "size", "field=1 should be 'size'"
+    assert eb._resolve_field_name(2, sb_method) == "pos", "field=2 should be 'pos'"
+    assert eb._resolve_field_name(3, sb_method) == "f3", "field=3 should be unresolved"
+
+
+def test_field_resolution_point():
+    """Point.length resolves 'x' (field=0) and 'y' (field=1)."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Find Point.length
+    length_funcs = _find_field_funcs(p, "length")
+    point_length = None
+    for i in length_funcs:
+        pt = p.functions[i].parent_type
+        if pt is not None and pt < len(p.types):
+            t = p.types[pt]
+            if t.name is not None and t.name < len(p.strings) and p.strings[t.name] == "Point":
+                point_length = i
+                break
+    assert point_length is not None, "Point.length not found"
+
+    fn = p.functions[point_length]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    assert eb._resolve_field_name(0, point_length) == "x", "field=0 should be 'x'"
+    assert eb._resolve_field_name(1, point_length) == "y", "field=1 should be 'y'"
+
+
+def test_field_resolution_inheritance():
+    """PosException inherits fields from Exception: __exceptionMessage at index 0."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Find PosException type
+    pe_type_idx = None
+    for i, t in enumerate(p.types):
+        if t.kind == K_OBJ and t.name is not None and t.name < len(p.strings):
+            if p.strings[t.name] == "haxe.exceptions.PosException":
+                pe_type_idx = i
+                break
+    assert pe_type_idx is not None, "PosException type not found"
+
+    # PosException super is haxe.Exception which has 4 fields
+    # PosException adds 1 field: posInfos = field[4]
+    pe_type = p.types[pe_type_idx]
+    assert len(pe_type.fields) == 1, f"PosException should have 1 local field, got {len(pe_type.fields)}"
+
+    # Find a PosException method
+    pe_funcs = [i for i, fn in enumerate(p.functions)
+                if fn.parent_type == pe_type_idx and fn.name]
+    assert len(pe_funcs) >= 1, "No named PosException method found"
+    func_idx = pe_funcs[0]
+
+    fn = p.functions[func_idx]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    # Through inheritance chain: Exception has 4 fields, PosException adds posInfos
+    result = eb._resolve_field_name(4, func_idx)
+    assert result == "posInfos", f"field=4 should be 'posInfos', got '{result}'"
+
+
+def test_field_resolution_ogetthis_vs_ofield_distinction():
+    """OGetThis resolves via parent_type; OField with obj!=this may not resolve."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Count resolution rates per opcode type
+    from hl_decompile import K_VOID, K_I32, K_F64
+    from collections import Counter
+    op_resolved = Counter()
+    op_total = Counter()
+
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+        eb = ExprBuilder(p, d, reg_names)
+        for ins in instrs:
+            if ins.opcode in (38, 39, 40, 41):
+                op_total[ins.opcode] += 1
+                field_idx = ins.args[-1]
+                resolved = eb._resolve_field_name(field_idx, func_idx)
+                if not resolved.startswith('f') or resolved == 'f0':
+                    op_resolved[ins.opcode] += 1
+
+    op_names = {38: "OField", 39: "OSetField", 40: "OGetThis", 41: "OSetThis"}
+    for opcode in sorted(op_total):
+        total = op_total[opcode]
+        resolved = op_resolved.get(opcode, 0)
+        rate = resolved / total * 100 if total > 0 else 0
+        print(f"  {op_names.get(opcode, opcode)}: {resolved}/{total} resolved ({rate:.0f}%)")
+
+    # OGetThis/OSetThis should resolve at a high rate (80%+)
+    this_total = op_total.get(40, 0) + op_total.get(41, 0)
+    this_resolved = op_resolved.get(40, 0) + op_resolved.get(41, 0)
+    assert this_total > 0, "No OGetThis/OSetThis instructions found"
+    ogetthis_rate = this_resolved / this_total
+    assert ogetthis_rate >= 0.80, (
+        f"OGetThis/OSetThis resolution rate too low: "
+        f"{this_resolved}/{this_total} ({ogetthis_rate*100:.0f}%)"
+    )
+
+
+# ── Metadata/static-field resolver tests ──────────────────────────────
+
+
+def test_metadata_static_field_hl_enum():
+    """hl.Enum.__evalues__ resolved through metadata field resolver."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    found = False
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 38 and len(ins.args) >= 3:
+                meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                    ins.args[1], ins.args[2], func_idx)
+                if meta_name and meta_name.startswith("__"):
+                    found = True
+    assert found, "No hl.Enum metadata field resolved"
+
+
+def test_metadata_static_field_math_pi():
+    """Math.PI resolved through metadata field resolver."""
+    raw = _load("Shapes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "Shapes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # func[5] area in Shapes.hl accessed reg[2] $Math field=5 -> 'PI'
+    found = False
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 38 and len(ins.args) >= 3:
+                meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                    ins.args[1], ins.args[2], func_idx)
+                if meta_name == "PI":
+                    found = True
+    assert found, "Math.PI not resolved via _resolve_metadata_static_field_name"
+
+
+def test_metadata_static_field_haxe_log():
+    """haxe.$Log.trace resolved through metadata field resolver."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    found_trace = False
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 38 and len(ins.args) >= 3:
+                meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                    ins.args[1], ins.args[2], func_idx)
+                if meta_name == "trace":
+                    found_trace = True
+    assert found_trace, "haxe.$Log.trace not resolved via metadata resolver"
+
+
+def test_metadata_static_field_std_to_string_depth():
+    """$Std.toStringDepth resolved through metadata field resolver."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    found = False
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 38 and len(ins.args) >= 3:
+                meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                    ins.args[1], ins.args[2], func_idx)
+                if meta_name == "toStringDepth":
+                    found = True
+    assert found, "$Std.toStringDepth not resolved via metadata resolver"
+
+
+def test_metadata_static_field_concrete_type_still_unresolved():
+    """hl.types.ArrayBytes_Int.bytes NOT resolved (correctly rejected by guard)."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Concrete type fields should NOT trigger the metadata resolver
+    meta_resolved = 0
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 38 and len(ins.args) >= 3:
+                obj_reg = ins.args[1]
+                if obj_reg < len(fn.reg_types):
+                    rt_idx = fn.reg_types[obj_reg]
+                    if 0 < rt_idx < len(p.types):
+                        rt = p.types[rt_idx]
+                        tname = p.strings[rt.name] if rt.name is not None and rt.name < len(p.strings) else ""
+                        if tname in ("hl.types.ArrayBytes_Int", "hl.types.ArrayBytes_Float",
+                                     "hl.types.ArrayBytes_hl_F32", "hl.types.ArrayBytes_hl_UI16",
+                                     "String", "hl.types.ArrayBase", "hl.types.ArrayObj",
+                                     "hl.types.ArrayDyn"):
+                            meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                                obj_reg, ins.args[2], func_idx)
+                            if meta_name:
+                                meta_resolved += 1
+    assert meta_resolved == 0, f"Concrete types should NOT be metadata-resolved, got {meta_resolved} hits"
+
+
+def test_metadata_static_field_osetfield_unaffected():
+    """OSetField (op 39) is NOT affected by the metadata resolver."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    osetfield_resolved = 0
+    for func_idx, fn in enumerate(p.functions):
+        instrs = list(d.disassemble_function(func_idx))
+        for ins in instrs:
+            if ins.opcode == 39 and len(ins.args) >= 3:
+                meta_name = _make_expr_builder(p, d, func_idx)._resolve_metadata_static_field_name(
+                    ins.args[1], ins.args[2], func_idx)
+                if meta_name:
+                    osetfield_resolved += 1
+    assert osetfield_resolved == 0, "OSetField should not be metadata-resolved"
+
+
+def _make_expr_builder(p, d, func_idx):
+    """Helper to create an ExprBuilder for a function."""
+    fn = p.functions[func_idx]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    return ExprBuilder(p, d, reg_names)
+
+
+# ═══════════════════════════════════════════════════════════════
+# $Class field↔binding type matching tests
+# ═══════════════════════════════════════════════════════════════
+
+def _decompile_fixture(fname):
+    """Parse + decompile a fixture and return (parser, result)."""
+    path = os.path.join(FIXTURES_DIR, fname)
+    p = HLParser(path)
+    with open(path, "rb") as f:
+        p.execute(stream=io.BytesIO(f.read()))
+    d = Disassembler(p)
+    decomp = Decompiler(p, d)
+    result = decomp.decompile_all()
+    return p, result
+
+
+def test_class_wrapper_main_recovered():
+    """Hello.main is recovered into Hello class, not orphans."""
+    p, result = _decompile_fixture("hello.hl")
+    # Hello should have a static method named "main"
+    hello_cls = result.classes.get("Hello")
+    assert hello_cls is not None, "Hello class should exist"
+    static_names = [m.name for m in hello_cls.static_methods]
+    assert "main" in static_names, f"Hello.main should be a static method, got {static_names}"
+    # main should NOT be orphaned
+    for oi in result.orphan_functions:
+        f = p.functions[oi]
+        assert f.name != "main", f"main should not be orphaned (orphan[{oi}])"
+
+
+def test_class_wrapper_all_mains_recovered():
+    """All fixture main classes have their main() recovered."""
+    fixtures_mapping = [
+        ("classes.hl", "Classes"),
+        ("Main.hl", "Main"),
+        ("Shapes.hl", "Shapes"),
+        ("hello.hl", "Hello"),
+        ("Natives.hl", "Natives"),
+        ("Enums.hl", "Enums"),
+        ("types.hl", "Types"),
+    ]
+    for fname, cls_name in fixtures_mapping:
+        p, result = _decompile_fixture(fname)
+        cls = result.classes.get(cls_name)
+        assert cls is not None, f"{cls_name} should exist in {fname}"
+        static_names = [m.name for m in cls.static_methods]
+        assert "main" in static_names, (
+            f"{cls_name}.main should be static in {fname}, got {static_names}")
+        # Verify NOT orphaned
+        for oi in result.orphan_functions:
+            f = p.functions[oi]
+            assert f.name != "main", f"main should not be orphaned in {fname}"
+
+
+def test_class_wrapper_std_static_recovered():
+    """Std.string and Std.__add__ are recovered as static methods."""
+    p, result = _decompile_fixture("Main.hl")
+    std_cls = result.classes.get("Std")
+    assert std_cls is not None, "Std class should exist"
+    static_names = [m.name for m in std_cls.static_methods]
+    assert "string" in static_names, f"Std.string should exist, got {static_names}"
+    assert "__add__" in static_names, f"Std.__add__ should exist, got {static_names}"
+
+
+def test_class_wrapper_type_static_recovered():
+    """Type.init / initClass / initEnum / register are recovered as static methods."""
+    p, result = _decompile_fixture("Main.hl")
+    type_cls = result.classes.get("Type")
+    assert type_cls is not None, "Type class should exist"
+    static_names = [m.name for m in type_cls.static_methods]
+    for expected in ("init", "initClass", "initEnum", "register"):
+        assert expected in static_names, (
+            f"Type.{expected} should exist, got {static_names}")
+
+
+def test_class_wrapper_from_ucs2_utf8_ambiguity():
+    """fromUCS2 and fromUTF8 are both correctly recovered via positional disambiguation.
+
+    Both functions have the same function type (type=20), so type-match alone is
+    ambiguous.  Positional disambiguation (Nth binding of type T → Nth field of
+    type T) must resolve them correctly.
+    """
+    p, result = _decompile_fixture("Main.hl")
+    # String class should have static methods from $Class recovery
+    str_cls = result.classes.get("String")
+    assert str_cls is not None, "String class should exist"
+    static_names = [m.name for m in str_cls.static_methods]
+    # The static methods include fromCharCode, __alloc__, call_toString, fromUCS2, fromUTF8, __add__
+    assert "fromCharCode" in static_names, f"String.fromCharCode should exist, got {static_names}"
+    assert "fromUCS2" in static_names, f"String.fromUCS2 should exist, got {static_names}"
+    assert "fromUTF8" in static_names, f"String.fromUTF8 should exist, got {static_names}"
+    # Verify both are resolved (not the same entry with one duplicated)
+    from_ucs2_count = sum(1 for m in str_cls.static_methods if m.name == "fromUCS2")
+    from_utf8_count = sum(1 for m in str_cls.static_methods if m.name == "fromUTF8")
+    assert from_ucs2_count == 1, f"fromUCS2 should appear exactly once, got {from_ucs2_count}"
+    assert from_utf8_count == 1, f"fromUTF8 should appear exactly once, got {from_utf8_count}"
+    assert from_ucs2_count + from_utf8_count == 2, "Both fromUCS2 and fromUTF8 should exist"
+
+
+def test_class_wrapper_instance_methods_not_duplicated():
+    """Instance methods (Circle.area, Point.length) are not duplicated as static methods."""
+    p, result = _decompile_fixture("classes.hl")
+    for cls_name in ("Circle", "Point", "Shape"):
+        cls = result.classes.get(cls_name)
+        assert cls is not None, f"{cls_name} should exist"
+        # Instance methods should be in .methods, not .static_methods
+        instance_names = [m.name for m in cls.methods]
+        static_names = [m.name for m in cls.static_methods]
+        for name in instance_names:
+            assert name not in static_names, (
+                f"{cls_name}.{name} should not be both instance and static")
+        # All func_indices should be unique across methods + static_methods
+        all_indices = [m.func_index for m in cls.methods + cls.static_methods if m.func_index >= 0]
+        assert len(all_indices) == len(set(all_indices)), (
+            f"{cls_name} has duplicate func_index across methods")
+
+
+def test_class_wrapper_constructors_not_affected():
+    """Constructors remain as instance methods, not duplicated or classified as static."""
+    p, result = _decompile_fixture("classes.hl")
+    for cls_name in ("Circle", "Point", "Shape"):
+        cls = result.classes.get(cls_name)
+        assert cls is not None
+        instance_names = [m.name for m in cls.methods]
+        static_names = [m.name for m in cls.static_methods]
+        assert "new" in instance_names, (
+            f"{cls_name}.new should exist in methods, got {instance_names}")
+        assert "new" not in static_names, (
+            f"{cls_name}.new should NOT be in static methods")
+
+
+def test_class_wrapper_no_broad_parent_type():
+    """No function is class-assigned solely because parent_type exists.
+
+    Only functions with from_class_wrapper=True are added as static methods
+    by the $Class recovery path.  Constructor-detected functions (parent_type
+    set but not from_class_wrapper) should NOT appear as static methods.
+    """
+    p, result = _decompile_fixture("classes.hl")
+    # Collect all func_indices from static_methods across all classes
+    static_func_indices = set()
+    for cls_name, cls in result.classes.items():
+        for m in cls.static_methods:
+            if m.func_index >= 0:
+                static_func_indices.add(m.func_index)
+    # Verify: each static method func should have from_class_wrapper=True
+    for fi in static_func_indices:
+        fn = p.functions[fi]
+        assert getattr(fn, 'from_class_wrapper', False), (
+            f"func[{fi}] ({fn.name}) should have from_class_wrapper=True, "
+            f"but it's a static method without the flag")

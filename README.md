@@ -186,7 +186,7 @@ mhlbc/
 │   ├── test_parser.py             # Full pipeline tests (422+ tests)
 │   ├── test_logger.py             # Logger write/flush/close behavior
 │   ├── test_disasm.py             # Opcode decode, CFG builder, CLI disasm (43 tests)
-│   └── test_decompile.py          # Decompilation engine: IR, Haxe writer (54 tests)
+│   ├── test_decompile.py          # Decompilation engine: IR, Haxe writer (216 tests)
 │
 └── workspace/
     └── Farever/
@@ -228,7 +228,7 @@ mhlbc/
   - Function name resolution via class protos and static bindings
   - Robustness layer: corruption detection, malformed flags, resync heuristics
   - Functions tab in UI
-  - 469 tests covering all gates
+  - 497 tests covering all gates
 
 - [x] **Gate 4: Disassembly Engine & Control Flow**
   - Full opcode decoder: translate bytecode → human-readable instructions
@@ -254,7 +254,7 @@ mhlbc/
   - Decompile subcommand with `--function`, `--output-dir`, `--json`, `--comments`
   - Decompilation tab in GUI with dark theme
   - Error recovery: malformed functions, unknown opcodes, unresolvable types
-  - 54 tests covering all pipeline stages
+  - 497 tests covering all pipeline stages
   - CLI exit codes per CONTRIBUTING.md §11.4
 
 - [x] **Gate 6: End-to-End Validation on Standard Fixtures** ✅
@@ -263,7 +263,7 @@ mhlbc/
   - Farever readiness is tracked separately under **Track B** — Farever does not define Gate 6 completion
   - HaxeWriter output: 233 .hx files, all brace-balanced, no bare function signatures
   - Control-flow structuring: if/else (tested); loops/switch/try-catch fallback to flat goto/label comments
-  - Function body alignment (OSwitch fix) verified — all 469 tests pass
+  - Function body alignment (OSwitch fix) verified — all 497 tests pass
   - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
 
 ### Tiers 2–5 (Frozen per process rule — see `checklist.md §G.6`)
@@ -323,7 +323,7 @@ python app.py
 ## Running Tests
 
 ```bash
-pytest                     # All 469 tests, compact output
+pytest                     # All 497 tests, compact output
 pytest -v                  # One test per line
 pytest -x                  # Stop on first failure
 pytest -k "varint"         # Filter by keyword
@@ -360,7 +360,7 @@ This is a **Track B** (Farever progress) known issue, not a general decompiler b
 
 ### Function Body Alignment
 
-Fixed in Session 20 (P35): OSwitch opcode consumed 1 wrong byte per occurrence, causing cumulative stream drift in function bodies. All 469 tests now pass.
+Fixed in Session 20 (P35): OSwitch opcode consumed 1 wrong byte per occurrence, causing cumulative stream drift in function bodies. All 497 tests now pass.
 
 ---
 

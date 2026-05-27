@@ -1118,6 +1118,262 @@ class HLParser:
             self.functions[fn_idx].name = "init"
             self._log("FUNC", f"  Resolved entrypoint: findex={ep} → func[{fn_idx}] name=init", level=DEBUG)
 
+        # --- $Class field↔binding type matching for static method recovery ---
+        # $Class GUID wrappers store real static method names as fields and
+        # function indices as bindings (with HL-internal binding names).
+        # When a binding's function type matches a field's type, we can recover
+        # both the correct method name and the class ownership.
+        # Positional disambiguation: when multiple fields share the same type,
+        # the Nth binding of that type maps to the Nth field of that type.
+        self._resolve_class_wrapper_static_methods()
+
+        # --- Constructor detection: K_FUN with args[0]=Obj/Struct + OGetThis/OSetThis ---
+        # Functions not in any proto/binding whose FUN type has args[0] pointing to a
+        # class type, AND whose body contains OGetThis/OSetThis instructions that reference
+        # valid fields within that class hierarchy, are inferred as constructors.
+        # Guard: requires (a) K_FUN, (b) args[0]=K_OBJ/K_STRUCT, (c) body has OGetThis
+        # or OSetThis, (d) at least one field_idx resolves within the inherited+local
+        # field layout.  Does NOT assign function names — only parent_type for field
+        # resolution purposes.
+        for fn_idx, fn in enumerate(self.functions):
+            if fn.parent_type is not None or fn.nops <= 0:
+                continue
+            ft = fn.type
+            if not (0 < ft < len(self.types)):
+                continue
+            ftt = self.types[ft]
+            if ftt.kind != K_FUN or len(ftt.args) == 0:
+                continue
+            first_arg = ftt.args[0]
+            if not (0 < first_arg < len(self.types)):
+                continue
+            pt = self.types[first_arg]
+            if pt.kind not in (K_OBJ, K_STRUCT):
+                continue
+
+            total_fields = self._count_inherited_fields(first_arg)
+            if total_fields == 0:
+                continue
+
+            if self._scan_body_for_this_field_op(fn, first_arg, total_fields):
+                self.functions[fn_idx].parent_type = first_arg
+                self._log("FUNC", f"  Inferred constructor parent: func[{fn_idx}] "
+                                         f"findex={fn.findex} → type[{first_arg}] "
+                                         f"(K_FUN args[0]=Obj/Struct, OGetThis/OSetThis "
+                                         f"field resolves in {total_fields}-field layout)",
+                          level=DEBUG)
+
+    def _resolve_class_wrapper_static_methods(self):
+        """Recover static method names and class ownership from $Class GUID wrappers.
+
+        $Class types carry two parallel metadata lists:
+          - fields: real static method names + their function types
+          - bindings: function indices (findex) + HL-internal field names (wrong)
+
+        We match a binding to a field when the binding's function TYPE matches
+        the field's type.  When multiple fields share the same type (e.g.
+        $String.fromUCS2 and $String.fromUTF8 both have type=20), positional
+        disambiguation is used: the Nth binding of type T maps to the Nth field
+        of type T.  Both lists are emitted by the compiler in deterministic
+        order, so their relative ordering within the same type value is preserved.
+
+        Only unnamed functions not already assigned to a real type are recovered.
+        """
+        if not hasattr(self, 'functions') or not self.functions:
+            return
+
+        def _resolve_str(idx):
+            if idx is None or not isinstance(idx, int):
+                return idx
+            if 0 <= idx < len(self.strings):
+                return self.strings[idx]
+            return str(idx)
+
+        # Build set of findices already assigned to real (non-$Class) types
+        assigned_findices = set()
+        for t_idx, t in enumerate(self.types):
+            if t.kind not in (K_OBJ, K_STRUCT):
+                continue
+            type_name = _resolve_str(t.name)
+            if type_name and (type_name.startswith('$') or '.$' in type_name):
+                continue
+            for p in t.protos:
+                if p.findex is not None:
+                    assigned_findices.add(p.findex)
+            for b in t.bindings:
+                if b.findex is not None:
+                    assigned_findices.add(b.findex)
+
+        findex_to_idx = {f.findex: i for i, f in enumerate(self.functions)}
+
+        for ct_idx, ct in enumerate(self.types):
+            if ct.kind not in (K_OBJ, K_STRUCT):
+                continue
+            cname = _resolve_str(ct.name)
+            if not cname:
+                continue
+            # Only process GUID wrappers (name starts with $ or contains .$)
+            if not (cname.startswith('$') or '.$' in cname):
+                continue
+
+            # Derive real type name by stripping leading $ or .$
+            if cname.startswith('$'):
+                real_name = cname[1:]
+            else:
+                # Handle pkg.$ClassName → pkg.ClassName
+                parts = cname.rsplit('.$', 1)
+                if len(parts) != 2:
+                    continue
+                real_name = parts[0] + '.' + parts[1]
+
+            # Find real type index
+            real_t_idx = None
+            if real_name:
+                for rt_idx, rt in enumerate(self.types):
+                    rt_name = _resolve_str(rt.name)
+                    if rt_name == real_name:
+                        real_t_idx = rt_idx
+                        break
+
+            # Skip if this $Class has no bindings to process
+            if not ct.bindings:
+                continue
+
+            # Group bindings by function type.
+            # For each binding in order: collect (position_in_bindings, findex, function)
+            bindings_by_type = {}
+            binding_order = []
+            for b_pos, b in enumerate(ct.bindings):
+                if b.findex is None:
+                    continue
+                if b.findex in assigned_findices:
+                    continue
+                fn_idx = findex_to_idx.get(b.findex)
+                if fn_idx is None:
+                    continue
+                fn = self.functions[fn_idx]
+                if fn.name and fn.name != '?':
+                    continue  # already named through other means
+                fn_type = fn.type
+                if fn_type not in bindings_by_type:
+                    bindings_by_type[fn_type] = []
+                bindings_by_type[fn_type].append((b_pos, b.findex, fn_idx))
+
+            # Group fields by type, preserving field order
+            fields_by_type = {}
+            for f_pos, f in enumerate(ct.fields):
+                ftype = f.type
+                fname = _resolve_str(f.name)
+                if fname is None:
+                    continue
+                if ftype not in fields_by_type:
+                    fields_by_type[ftype] = []
+                fields_by_type[ftype].append((f_pos, fname))
+
+            # Match: for each function type, positionally pair bindings with fields
+            for fn_type, binding_list in bindings_by_type.items():
+                field_list = fields_by_type.get(fn_type, [])
+                if len(binding_list) != len(field_list):
+                    # Count mismatch — ambiguous, skip all for this type
+                    self._log("FUNC",
+                              f"  $Class type[{ct_idx}] '{cname}': {len(binding_list)} bindings vs "
+                              f"{len(field_list)} fields of type={fn_type} — count mismatch, "
+                              f"skipping ambiguous recovery",
+                              level=WARN)
+                    continue
+
+                # Positional pairing: same order within same type group
+                for (b_pos, b_findex, fn_idx), (f_pos, fname) in \
+                        sorted(zip(binding_list, field_list), key=lambda x: x[0][0]):
+                    fn = self.functions[fn_idx]
+                    old_name = fn.name
+                    fn.name = fname
+                    fn.from_class_wrapper = True
+                    if real_t_idx is not None:
+                        fn.parent_type = real_t_idx
+                    self._log("FUNC",
+                              f"  $Class recovered: {cname} field='{fname}' "
+                              f"type={fn_type} -> func[{fn_idx}] findex={b_findex} "
+                              f"name='{old_name}'→'{fname}' "
+                              f"real_type={'?' if real_t_idx is None else real_name}({real_t_idx})",
+                              level=DEBUG)
+
+    def _count_inherited_fields(self, type_idx: int) -> int:
+        """Count total fields including inherited fields for an Obj/Struct type.
+
+        Walks the super_idx chain from base → leaf, accumulating local field
+        counts at each level.  Returns the total field count.
+        """
+        if not (0 < type_idx < len(self.types)):
+            return 0
+        # Build chain from leaf → base
+        chain = []
+        seen = set()
+        idx = type_idx
+        while idx is not None and 0 < idx < len(self.types):
+            if idx in seen:
+                return 0
+            seen.add(idx)
+            t = self.types[idx]
+            if t.kind not in (K_OBJ, K_STRUCT):
+                break
+            chain.append(idx)
+            idx = t.super_idx
+        # Sum fields in order base → leaf
+        total = 0
+        for c_idx in reversed(chain):
+            total += len(self.types[c_idx].fields)
+        return total
+
+    def _scan_body_for_this_field_op(self, fn, candidate_type_idx: int,
+                                      total_fields: int) -> bool:
+        """Scan function raw opcode bytes for OGetThis/OSetThis with resolvable field.
+
+        Walks the raw opcode body between opcode_start and opcode_end, using
+        OPCODE_NARGS to skip instruction arguments.  Returns True if at least
+        one OGetThis (40) or OSetThis (41) references a field_idx < total_fields
+        within the candidate type's inherited+local field layout.
+        """
+        if self._raw_data is None:
+            return False
+        start = getattr(fn, 'opcode_start', 0)
+        end = getattr(fn, 'opcode_end', 0)
+        if start <= 0 or end <= start or end > len(self._raw_data):
+            return False
+
+        body = self._raw_data[start:end]
+        buf = io.BytesIO(body)
+        remaining = fn.nops
+
+        while remaining > 0:
+            cur = buf.tell()
+            if cur >= len(body):
+                break
+            b = body[cur]
+            opcode = b
+            buf.seek(cur + 1)  # advance past opcode byte
+
+            if opcode in (40, 41):  # OGetThis, OSetThis
+                nargs = OPCODE_NARGS[opcode] if opcode < len(OPCODE_NARGS) else 0
+                if nargs >= 2:
+                    # Skip dst/src register (first VarInt)
+                    self.read_varint(buf, context="ctor-scan-skip")
+                    # Read field_idx (second VarInt)
+                    field_idx = self.read_varint(buf, context="ctor-scan-field")
+                    if 0 <= field_idx < total_fields:
+                        return True
+            else:
+                nargs = OPCODE_NARGS[opcode] if opcode < len(OPCODE_NARGS) else 0
+                if nargs < 0:
+                    # Vararg opcode — can't safely skip, abort
+                    return False
+                for _ in range(nargs):
+                    self.read_varint(buf, context="ctor-scan-skip")
+
+            remaining -= 1
+
+        return False
+
     # === Constants Parsing ===
 
     def parse_constants(self, stream: BinaryIO, progress_callback=None):

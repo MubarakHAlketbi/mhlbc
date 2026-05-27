@@ -1,5 +1,31 @@
 # Session Tracking
 
+## Session 28 — May 27, 2026
+- Start: New session initialized.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 489 tests passing, Gates 1-6 complete. g6.0-13-g7268449, clean working tree.
+- **Corrected metric labeling:** Previous metadata resolver report mixed per-fixture (604/62/1) with aggregate (4241/435/7) values. Confirmed: the report script outputs are correct, my transcription was misleading.
+- **$Class field↔binding type matching implemented (full):**
+  - Step A — Parser: `_resolve_class_wrapper_static_methods()` recovers function name + parent_type from $Class GUID wrapper fields (real names) and bindings (function indices), matched via field.type == function.type with positional disambiguation for same-type collisions.
+  - Step B — ClassBuilder: Only functions with `from_class_wrapper=True` and matching `parent_type` are added as static methods. No broad parent_type scanning.
+  - `from_class_wrapper: bool` added to FunctionDef dataclass.
+  - fromUCS2/fromUTF8 positional disambiguation verified: both resolved correctly, no guessing.
+  - Count mismatch → WARN-level skip entire type group.
+- **8 new tests** (test_class_wrapper_*) covering: main recovery across all 7 fixtures, Std/Type/String static methods, fromUCS2/fromUTF8 ambiguity, instance methods not duplicated, constructors unaffected, no broad parent_type assignment.
+- **Full test suite: 497 passed, 3 skipped** (+8 new, 0 regressions).
+- **Track A metrics:**
+  - orphans: 407 → 309 (−98, −24.1%)
+  - named_functions: 2,101 → 2,199 (+98)
+  - missing expected main methods: 7 fixtures → 0 (all mains in class files)
+  - total_classes: 295 unchanged, errors: 0
+  - unresolved_field_name_instances: 1,659 → 1,624 (−35, side-effect of class-context field resolution)
+  - raw_goto_comments: 4,241 → 4,227 (−14, output-accounting shift from orphan→class contexts)
+- **Track B (sample=200):** 0 errors, compatible name_ratio (0.8422).
+- **Metric shift explanation:** All shifts are output-accounting improvements (functions migrated from _orphans.hx to class files), not decompiler semantic changes. Class-context TypeResolver resolves ~8 additional fN patterns per fixture.
+- **Nullcheck lowering feasibility:** DEFER. 1,240 nullcheck comments. Lowering to `if(val==null) throw null;` risks CFG disruption and adds ~2,500+ extra lines. Current comment-only form is safe and conventional.
+- **Field/name/class ownership work capped.** Remaining orphan categories (309 total across Track A) have no safe recovery path without register type inference.
+- **Session closed.**
+
 ## Session 27 — May 27, 2026
 - Start: Continuation on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash:free via nous.
