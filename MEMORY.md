@@ -1,6 +1,6 @@
 # Session Tracking
 
-## Session 28 — May 27, 2026
+## Session 27 — May 27, 2026
 - Start: New session initialized.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Project state: 489 tests passing, Gates 1-6 complete. g6.0-13-g7268449, clean working tree.
