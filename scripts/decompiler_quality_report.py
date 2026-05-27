@@ -60,41 +60,40 @@ DEFAULT_OUTPUT_DIR = _PROJECT_DIR / "decompiler_quality_report"
 # Track A fixtures metadata (from test_fixtures.py)
 FIXTURE_META = {
     "hello.hl": {"src": "Hello.hx", "main_class": "Hello"},
-    "classes.hl": {"src": "Classes.hx", "main_class": "Main"},
-    "Enums.hl": {"src": "Enums.hx", "main_class": "Main"},
+    "classes.hl": {"src": "Classes.hx", "main_class": "Classes"},
+    "Enums.hl": {"src": "Enums.hx", "main_class": "Enums"},
     "Main.hl": {"src": "Main.hx", "main_class": "Main"},
     "types.hl": {"src": "Types.hx", "main_class": "Types"},
-    "Natives.hl": {"src": "Natives.hx", "main_class": "Main"},
-    "Shapes.hl": {"src": "Shapes.hx", "main_class": "Main"},
+    "Natives.hl": {"src": "Natives.hx", "main_class": "Natives"},
+    "Shapes.hl": {"src": "Shapes.hx", "main_class": "Shapes"},
 }
 
 # Expected classes per fixture (from source files)
 EXPECTED_CLASSES = {
     "hello.hl": {"Hello"},
-    "classes.hl": {"Circle", "Rect", "Shape", "Main"},
-    "Enums.hl": {"Color", "Optional", "Result", "Day", "Main"},
+    "classes.hl": {"Classes", "Point", "Circle", "Shape"},
+    "Enums.hl": {"Enums"},
     "Main.hl": {"Main"},
     "types.hl": {"Types"},
-    "Natives.hl": {"Main"},
-    "Shapes.hl": {"Circle", "Rect", "Shape", "Main"},
+    "Natives.hl": {"Natives"},
+    "Shapes.hl": {"Shapes", "Circle", "Rect"},
 }
 
 # Expected methods per fixture class
 EXPECTED_METHODS = {
     "classes.hl": {
-        "Circle": {"new", "area", "describe"},
-        "Rect": {"new", "area", "describe"},
-        "Shape": set(),
-        "Main": {"main"},
+        "Classes": {"main"},
+        "Point": {"new", "length"},
+        "Circle": {"new", "area"},
+        "Shape": {"new", "area"},
     },
     "Shapes.hl": {
-        "Circle": {"new", "area", "describe"},
-        "Rect": {"new", "area", "describe"},
-        "Shape": set(),
-        "Main": {"main"},
+        "Shapes": {"main"},
+        "Circle": {"new", "area"},
+        "Rect": {"new", "area"},
     },
     "Enums.hl": {
-        "Main": {"main"},
+        "Enums": {"main"},
     },
     "hello.hl": {
         "Hello": {"main"},
@@ -103,7 +102,7 @@ EXPECTED_METHODS = {
         "Main": {"main"},
     },
     "Natives.hl": {
-        "Main": {"main"},
+        "Natives": {"main"},
     },
     "types.hl": {
         "Types": {"main"},
@@ -435,6 +434,75 @@ def analyze_source_fidelity(
             "constructor_found": has_constructor,
         }
 
+    # ── Recovered-mains check ──────────────────────────────────────────────
+    meta = FIXTURE_META.get(fname, {})
+    main_class_name = meta.get("main_class", "")
+    main_recovery: Dict[str, Any] = {
+        "main_class": main_class_name,
+        "main_found": False,
+        "in_orphans": False,
+        "in_class_file": False,
+    }
+    if main_class_name:
+        # Check if main() exists as a static method on the main class
+        if main_class_name in result.classes:
+            cls_def = result.classes[main_class_name]
+            static_names = {m.name for m in cls_def.static_methods}
+            if "main" in static_names:
+                main_recovery["main_found"] = True
+                main_recovery["in_class_file"] = True
+        # Check if main() is still orphaned
+        for oi in result.orphan_functions:
+            fn = parser.functions[oi]
+            if fn.name == "main":
+                main_recovery["in_orphans"] = True
+                break
+
+    # ── Unsupported construct annotations ──────────────────────────────────
+    def _source_path(fname: str) -> Optional[str]:
+        """Resolve the .hx source path for a fixture bytecode file."""
+        meta = FIXTURE_META.get(fname, {})
+        src_name = meta.get("src", "")
+        if not src_name:
+            return None
+        candidate = FIXTURES_DIR.parent / "src" / src_name
+        if candidate.exists():
+            return str(candidate)
+        candidate2 = FIXTURES_DIR.parent / "src" / fname.replace(".hl", ".hx")
+        if candidate2.exists():
+            return str(candidate2)
+        return None
+
+    unsupported: List[Dict[str, str]] = []
+    src_path = _source_path(fname)
+
+    # Scan source for interfaces and @:enum abstracts
+    if src_path:
+        try:
+            with open(src_path, "r") as f:
+                src_text = f.read()
+            # Detect interface definitions (not emitted because HL interface
+            # representation differs from class representation)
+            for m in re.finditer(r"^\s*(?:interface\s+(\w+))", src_text, re.MULTILINE):
+                name = m.group(1)
+                unsupported.append({
+                    "construct": name,
+                    "kind": "interface",
+                    "reason": "HL interface representation differs from class; not emitted as a normal class file",
+                })
+            # Detect @:enum abstracts (not emitted as normal Haxe enums)
+            for m in re.finditer(
+                r"@:enum\s+abstract\s+(\w+)", src_text
+            ):
+                name = m.group(1)
+                unsupported.append({
+                    "construct": name,
+                    "kind": "abstract_enum",
+                    "reason": "@:enum abstract is a compiler-intrinsic enum; not emitted as a normal Haxe enum",
+                })
+        except (IOError, OSError):
+            pass
+
     # Enum fidelity
     enum_fidelity = {}
     for enum_name, enum_def in result.enums.items():
@@ -467,6 +535,8 @@ def analyze_source_fidelity(
             "details": enum_fidelity,
         },
         "method_fidelity": method_fidelity,
+        "main_recovery": main_recovery,
+        "unsupported_constructs": unsupported,
         "control_flow_patterns": cf_patterns,
         "orphan_function_count": len(result.orphan_functions),
     }
@@ -625,9 +695,11 @@ def compute_top_problems(
 
     # Top 5 problems ranking
     problem_candidates = [
-        ("Unstructured control flow (goto/label fallback)", total_goto,
-         "ControlStructurer handles if/else and simple while loops; switch, try/catch, and complex loops produce flat goto/label comments. "
-         "This is the most common decompiler readability issue."),
+        ("Raw goto/label audit comments (preserved provenance)", total_goto,
+         "Raw goto/label comments preserve bytecode jump provenance. "
+         "Some are inside already-structured if/while blocks. "
+         "Switch, try/catch, and complex loops produce flat goto/label comments. "
+         "unstructured_goto_fallback is currently not measured."),
         ("Null-check comments (ONullCheck -> '// nullcheck(...)')", total_nullcheck,
          "ONullCheck is emitted as a comment instead of structured throw-on-null. "
          "This is a minor readability issue."),
@@ -837,7 +909,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     md_lines.append("")
     md_lines.append("---")
     md_lines.append("")
-    md_lines.append("## Track A — Standard Haxe/HL Fixtures")
+    md_lines.append("## Track A -- Standard Haxe/HL Fixtures")
     md_lines.append("")
     if track_a:
         md_lines.append("| Fixture | Functions | Emitted | Skipped | Classes | Enums | Orphans | Errors | Empty Bodies | Raw goto | Raw label | Nullcheck | If Stmts | While Stmts | Fields(fN) |")
@@ -871,7 +943,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         md_lines.append("")
 
         # Source fidelity table
-        md_lines.append("### Track A — Source Fidelity Audit")
+        md_lines.append("### Track A -- Source Fidelity Audit")
         md_lines.append("")
         for fname in sorted(track_a["fixtures"].keys()):
             fd = track_a["fixtures"][fname]
@@ -887,6 +959,20 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             if fid['classes']['extra_classes']:
                 md_lines.append(f"- **EXTRA:** {', '.join(fid['classes']['extra_classes'])}")
             md_lines.append(f"- **Orphans:** {fid['orphan_function_count']}")
+
+            # Main recovery check
+            mr = fid.get("main_recovery", {})
+            if mr.get("main_class"):
+                status = "OK" if mr.get("main_found") else "MISSING"
+                location = "class file" if mr.get("in_class_file") else "orphans" if mr.get("in_orphans") else "unknown"
+                md_lines.append(f"- **Main recovery:** {mr['main_class']}.main -> {status} (in {location})")
+
+            # Unsupported construct annotations
+            unsup = fid.get("unsupported_constructs", [])
+            if unsup:
+                md_lines.append("- **Unsupported source constructs (not emitted):**")
+                for uc in unsup:
+                    md_lines.append(f"  - `{uc['construct']}` ({uc['kind']}): {uc['reason']}")
 
             for cls_name, meth_info in fid["method_fidelity"].items():
                 md_lines.append(f"  - **{cls_name}:** methods {meth_info['found']} / {meth_info['expected']} found"
@@ -904,7 +990,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("")
 
         # Common fallback patterns
-        md_lines.append("### Track A — Top Fallback Patterns (All Fixtures)")
+        md_lines.append("### Track A -- Top Fallback Patterns (All Fixtures)")
         md_lines.append("")
         md_lines.append("| Pattern | Count | Impact |")
         md_lines.append("|---------|-------|--------|")
@@ -920,7 +1006,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         md_lines.append("")
 
         # Overall aggregation
-        md_lines.append("### Track A — Aggregate Metrics")
+        md_lines.append("### Track A -- Aggregate Metrics")
         md_lines.append("")
         total_funcs = 0
         total_emitted = 0
@@ -960,7 +1046,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     if track_b:
         md_lines.append("---")
         md_lines.append("")
-        md_lines.append("## Track B — Farever Inventory")
+        md_lines.append("## Track B -- Farever Inventory")
         md_lines.append("")
 
         # Summary block
@@ -1156,7 +1242,7 @@ def main():
     track_b_data = None
 
     if run_a:
-        print("\n── Track A: Standard Haxe/HL Fixtures ──")
+        print("\n-- Track A: Standard Haxe/HL Fixtures --")
         track_a_data = run_track_a()
         oa = track_a_data["overall"]
         print(f"\n  Track A summary: {oa['total_fixtures']} fixtures, "
@@ -1164,7 +1250,7 @@ def main():
               f"{oa['total_enums']} enums, {oa['total_errors']} errors")
 
     if run_b:
-        print("\n── Track B: Farever ──")
+        print("\n-- Track B: Farever --")
         track_b_data = run_track_b(args.farever, args.sample)
         print(f"\n  Track B summary: "
               f"{track_b_data.get('nfunctions', '?')} functions, "
@@ -1179,25 +1265,28 @@ def main():
         )
 
         recommendation = {
-            "target": "Field-name resolution — replace f{idx} with actual Haxe field names",
+            "target": "Unknown-opcode feasibility pass -- identify and classify the 7 Track A unknown_opcode comments",
             "rationale": (
-                f"Unresolved field names (f0, f1, ...) are now the #2 readability problem "
-                f"across all fixtures (~{top_problems[2]['count']} occurrences in Track A alone). "
-                f"The first-fix target (while-loop structuring) was implemented in g5.3, "
-                f"converting ~1,400 goto/label fallbacks into structured while() blocks. "
-                f"Next-highest impact: resolving field name placeholders using class metadata."
+                f"Unknown opcodes are currently the lowest-count issue ({top_problems[4]['count']} occurrences) "
+                f"but could indicate function body misalignment or genuinely unhandled opcodes. "
+                f"The prior top target (field-name resolution via $Class wrapper matching) was implemented "
+                f"in Session 27, recovering ~24% of orphans and improving named_functions by +98. "
+                f"Next-highest impact: verify whether the 7 unknown opcodes in Track A are semantics "
+                f"already covered by opcode tables/docs, or genuine gaps requiring new handlers."
             ),
-            "expected_impact": "High — would improve readability of field access expressions across all fixtures",
+            "expected_impact": "Low in count but important for parser correctness -- eliminates last unknown-opcode blind spot in Track A",
             "notes": [
-                "ExprBuilder._resolve_field_name() already exists but falls back to f{idx} for many cases",
-                "Primary gap: parent class type cannot be determined from function signature alone",
-                "Secondary gap: field offset-to-name mapping via Obj type proto/binding metadata",
-                "Test: validate on classes.hl (Circle.area uses 'this.r', 'this.h') and Shapes.hl",
+                "Track A aggregate: 7 unknown opcode comments across all 7 fixtures",
+                "For each unknown, extract opcode index from the comment text",
+                "Check if opcode index is already known in _OPCODE_NARGS and opcode name tables",
+                "Cross-reference with doc/opcodes.md and reference HashLink source",
+                "Implement handler only if the opcode semantics are tiny and unambiguous (e.g., ONullCheck was deferred as comment-only; similarly suitable candidates)",
+                "Leave unknown opcodes as honest comments if semantics are unclear or require CFG changes",
             ],
         }
     else:
         top_problems = []
-        recommendation = {"target": "N/A — no Track A data", "rationale": "", "expected_impact": "", "notes": []}
+        recommendation = {"target": "N/A -- no Track A data", "rationale": "", "expected_impact": "", "notes": []}
 
     md_path, json_path = write_report(
         track_a_data or {},

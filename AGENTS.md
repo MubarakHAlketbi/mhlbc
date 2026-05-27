@@ -404,6 +404,7 @@ Do not do these:
 - Do not let UI work block the Qt main thread.
 - Do not add LLM-based reconstruction to the parser or decompiler critical path.
 - Do not expand scope into later tiers without explicit owner instruction.
+- Do not use non-ASCII Unicode in generated report output (em dashes `--`, arrows `->`). Terminal/Discord/email renderers corrupt or mangle characters like `—` and `→`. All generated text must use ASCII-safe alternatives.
 
 ## 13. Agent Success Criteria
 
