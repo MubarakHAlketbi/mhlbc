@@ -1,16 +1,16 @@
 # Session Tracking
 
-## Session 28 — May 27, 2026
+## Session 28 — May 28, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Project state: 497 passed, 3 skipped. Gates 1-6 complete. g6.0-15-ga393757, clean working tree.
-- **Awaiting Sato's instructions.**
-- **Wording fixes:** Renamed "Unstructured control flow (goto/label fallback)" to "Raw goto/label audit comments (preserved provenance)" with corrected explanation about preserved bytecode provenance and `unstructured_goto_fallback=not_measured`. Replaced all non-ASCII Unicode (`—`, `→`) with ASCII-safe alternatives (`--`, `->`) in generated report output.
+- **Report-fixture expectation cleanup:** Corrected FIXTURE_META, EXPECTED_CLASSES, EXPECTED_METHODS for all 7 Track A fixtures. Removed false "Main missing" errors. Added recovered-mains check + unsupported-construct annotations (Shape interface, Color abstract_enum).
+- **Wording fixes:** Renamed "Unstructured control flow (goto/label fallback)" to "Raw goto/label audit comments (preserved provenance)" with corrected explanation about presevered bytecode provenance and `unstructured_goto_fallback=not_measured`. Replaced all non-ASCII Unicode (`—`, `→`) with ASCII-safe alternatives (`--`, `->`) in generated report output.
 - **ASCII-safe convention added** to AGENTS.md section 12 (Agent Pitfalls).
 - **ORethrow handler implemented:** Opcode 69 (ORethrow) was the sole unknown opcode -- all 7 Track A UNKNOWN comments across all 7 fixtures were the same instruction (`hl.types.ArrayObj.toStringDepth`). Now handled as `IRStmt("throw", src=...)` in ExprBuilder, producing `throw rN;` output. Unknown opcodes: 7 -> 0. 1 new test (test_orethrow_emits_throw_not_unknown).
-- **Regenerated report** -- pytest: 498 passed, 3 skipped (+1 ORethrow test).
+- **Regenerated report** -- unknown_opcode: 0; pytest: 498 passed, 3 skipped (+1).
 - **Recommendation updated** to register type inference.
-- **Committed and pushed:** `c6bbc66` (report cleanup + wording fixes) + pending ORethrow commit.
+- **Committed and pushed:** `c6bbc66` (report cleanup + wording fixes), `5863d3f` (ORethrow handler + final report).
 - **Session closed.**
 
 ## Session 27 — May 27, 2026
