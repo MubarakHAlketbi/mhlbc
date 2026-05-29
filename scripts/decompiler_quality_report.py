@@ -47,12 +47,37 @@ from hl_parser import HLParser, KIND_NAMES, TypeDef, FunctionDef
 from hl_disasm import Disassembler
 from hl_decompile import (
     Decompiler, HaxeWriter, TypeResolver, DecompileResult,
-    IRFunction, IRStmt,
+    IRFunction, IRStmt, CallReturnRecord,
     DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
     DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
     DYN_CAT_CALL_UNRESOLVED, DYN_CAT_VIRTUAL_UNSUPPORTED,
     DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_NULL_RESOLVED, DYN_CAT_OTHER,
+    CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
+    CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+    CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
+    CR_CAT_UNKNOWN_CALLEE, CR_CAT_METHOD_BINDING_MISS,
+    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+    NT_CAT_DECLARED_DYN, NT_CAT_DECLARED_DYNOBJ,
+    NT_CAT_VOID_OR_INVALID, NT_CAT_VIRTUAL_UNSUPPORTED,
+    NT_CAT_REG_TYPE_MISSING, NT_CAT_REG_TYPE_INVALID,
+    NT_CAT_MOV_CHAIN_MISSING, NT_CAT_PHI_OR_BRANCH,
+    NT_CAT_FIELD_STORE, NT_CAT_GLOBAL_STORE, NT_CAT_ARRAY_DYN_STORE,
+    NT_CAT_FUN_OR_METHOD_TYPE, NT_CAT_NULLABLE_TYPE,
+    NT_CAT_OTHER, NT_CAT_UNKNOWN,
 )
+
+# Call return subcategory grouping for actionable_dynamic formula
+# Expected/non-actionable: declared Dynamic/Void returns (not resolvable)
+_CR_EXPECTED_KEYS = frozenset({
+    CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
+    CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+})
+# Actionable: genuinely unresolved call returns (potential inference targets)
+_CR_ACTIONABLE_KEYS = frozenset({
+    CR_CAT_UNKNOWN_CALLEE, CR_CAT_CALLEE_TYPE_INVALID,
+    CR_CAT_CALLEE_MISSING, CR_CAT_METHOD_BINDING_MISS,
+    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+})
 
 # ============================================================================
 # Constants
@@ -454,6 +479,93 @@ def analyze_dynamic_attributions(
         "category_breakdown": dict(category_counts),
         "type_kind_breakdown": type_kind_breakdown_out,
     }
+
+
+def analyze_call_return_unresolved(
+    result: DecompileResult,
+    parser: HLParser,
+) -> Dict[str, Any]:
+    """Analyze all call_return_unresolved variables to understand the root cause.
+
+    Produces a breakdown by:
+    - callee source category
+    - opcode
+    - resolvable vs unresolvable
+    - top functions and type indices
+
+    Returns a dict with structured analysis data.
+    """
+    total_records = 0
+    by_callee_source: Dict[str, int] = defaultdict(int)
+    by_opcode: Dict[str, int] = defaultdict(int)
+    by_subcategory: Dict[str, int] = defaultdict(int)
+    resolvable_count = 0
+    unresolvable_count = 0
+    by_func: Dict[str, int] = defaultdict(int)
+    by_return_type_idx: Dict[int, int] = defaultdict(int)
+    unresolvable_details: List[Dict[str, Any]] = []
+
+    for ir_fn in result.functions.values():
+        fn_name = ir_fn.name
+        for vname, cat in ir_fn.var_attributions.items():
+            if cat != DYN_CAT_CALL_UNRESOLVED:
+                continue
+            total_records += 1
+            record = ir_fn.call_return_analysis.get(vname)
+
+            if record is not None:
+                by_callee_source[record.callee_source] += 1
+                by_opcode[record.op_name] += 1
+                by_subcategory[record.unresolved_category] += 1
+                if record.is_resolvable:
+                    resolvable_count += 1
+                else:
+                    unresolvable_count += 1
+                    unresolvable_details.append({
+                        "func": fn_name,
+                        "vname": vname,
+                        "op": record.op_name,
+                        "callee_source": record.callee_source,
+                        "callee_findex": record.callee_findex,
+                        "resolved_return_type": record.resolved_return_type,
+                        "dst_type_idx": record.dst_type_idx,
+                        "unresolved_category": record.unresolved_category,
+                    })
+                if record.callee_func_type_idx is not None:
+                    by_return_type_idx[record.callee_func_type_idx] += 1
+                elif record.callee_return_type_idx is not None:
+                    by_return_type_idx[record.callee_return_type_idx] += 1
+
+            by_func[fn_name] += 1
+
+    # Top 20 functions by count
+    top_funcs = sorted(by_func.items(), key=lambda x: -x[1])[:20]
+
+    # Top 20 return/function type indices
+    top_type_indices = sorted(by_return_type_idx.items(), key=lambda x: -x[1])[:20]
+
+    return {
+        "total_call_return_unresolved": total_records,
+        "by_callee_source": dict(sorted(by_callee_source.items(), key=lambda x: -x[1])),
+        "by_opcode": dict(sorted(by_opcode.items(), key=lambda x: -x[1])),
+        "by_subcategory": dict(sorted(by_subcategory.items(), key=lambda x: -x[1])),
+        "resolvable_count": resolvable_count,
+        "unresolvable_count": unresolvable_count,
+        "top_functions": top_funcs,
+        "top_callee_type_indices": top_type_indices,
+        "unresolvable_samples": unresolvable_details[:30],
+    }
+
+
+def analyze_null_target_subcategories(
+    result: DecompileResult,
+) -> Dict[str, int]:
+    """Aggregate null_without_target_type subcategories from decompiled functions."""
+    subcats: Dict[str, int] = defaultdict(int)
+    for ir_fn in result.functions.values():
+        for vname, subcat in ir_fn.null_analysis.items():
+            subcats[subcat] += 1
+    return dict(sorted(subcats.items(), key=lambda x: -x[1]))
 
 
 def analyze_name_resolution(
@@ -863,6 +975,8 @@ def run_track_a() -> Dict[str, Any]:
         src_metrics = analyze_source_text(sources)
         name_metrics = analyze_name_resolution(parser, result, sources)
         dyn_metrics = analyze_dynamic_attributions(result, parser)
+        call_ret_metrics = analyze_call_return_unresolved(result, parser)
+        null_subcat_metrics = analyze_null_target_subcategories(result)
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
         flow_metrics = analyze_structured_flow(result)
 
@@ -872,6 +986,8 @@ def run_track_a() -> Dict[str, Any]:
             "source_text_analysis": src_metrics,
             "name_resolution": name_metrics,
             "dynamic_attribution": dyn_metrics,
+            "call_return_analysis": call_ret_metrics,
+            "null_target_analysis": null_subcat_metrics,
             "fidelity": fidelity,
             "structured_flow": flow_metrics,
             "output_files": len(sources),
@@ -1123,6 +1239,12 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         dynamic_type_kind_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         total_if_all = 0
         total_while_all = 0
+        # New formula defaults (track_a may be empty)
+        cr_total = 0
+        cr_expected_non_actionable = 0
+        cr_actionable = 0
+        null_without_target_type = 0
+        actionable_dynamic_new = 0
 
         for fname, fd in track_a['fixtures'].items():
             total_funcs += fd['function_level']['total_functions']
@@ -1144,6 +1266,23 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             total_if_all += sf.get('structured_if_count', 0)
             total_while_all += sf.get('structured_while_count', 0)
 
+        # Aggregate call return subcategories for new actionable_dynamic formula
+        all_cr_subcats: Dict[str, int] = defaultdict(int)
+        for fname, fd in track_a['fixtures'].items():
+            cra = fd.get('call_return_analysis', {})
+            if cra:
+                for subcat, cnt in cra.get('by_subcategory', {}).items():
+                    all_cr_subcats[subcat] += cnt
+        cr_total = sum(all_cr_subcats.values())
+        cr_expected_non_actionable = sum(
+            all_cr_subcats.get(k, 0) for k in _CR_EXPECTED_KEYS
+        )
+        cr_actionable = sum(
+            all_cr_subcats.get(k, 0) for k in _CR_ACTIONABLE_KEYS
+        )
+        null_without_target_type = dynamic_category_counts.get(DYN_CAT_NULL_AMBIGUOUS, 0)
+        actionable_dynamic_new = null_without_target_type + cr_actionable
+
         md_lines.append(f'- **Total functions:** {total_funcs}')
         md_lines.append(f'- **Total emitted:** {total_emitted}')
         md_lines.append(f'- **Raw goto comments (preserved):** {total_goto_all}')
@@ -1153,7 +1292,11 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         md_lines.append(f'- **Nullcheck comments:** {total_null_all}')
         md_lines.append(f'- **Unresolved field names (fN):** {total_field_all}')
         md_lines.append(f'- **Dynamic type refs (regex):** {total_dynamic_all}')
-        md_lines.append(f'- **Actionable dynamic refs:** {total_actionable_dynamic}')
+        md_lines.append(f'- **Actionable dynamic refs (legacy formula):** {total_actionable_dynamic}')
+        md_lines.append(f'- **Call return unresolved total (aggregate):** {cr_total}')
+        md_lines.append(f'- **Call return expected non-actionable (declared Dynamic/Void):** {cr_expected_non_actionable}')
+        md_lines.append(f'- **Call return actionable:** {cr_actionable}')
+        md_lines.append(f'- **Actionable dynamic refs (corrected):** null_without_target_type ({null_without_target_type}) + call_return_actionable ({cr_actionable}) = **{actionable_dynamic_new}**')
         md_lines.append('')
 
         # Dynamic category breakdown
@@ -1179,10 +1322,18 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 desc = _DYNAMIC_DESCRIPTIONS.get(cat, cat)
                 md_lines.append(f'| {cat} | {dynamic_category_counts[cat]} | {desc} |')
             md_lines.append('')
+            # Legacy formula note
             md_lines.append(
-                '> Actionable dynamic (excludes genuine, invalid_idx,'
-                ' resolved_null, virtual_unsupported)'
+                '> **Legacy formula:** Actionable dynamic = total_dynamic -- non_actionable'
                 f' = {total_actionable_dynamic}')
+            md_lines.append(
+                '> **Corrected formula:** Actionable dynamic = null_without_target_type + call_return_actionable'
+                f' = {actionable_dynamic_new}')
+            md_lines.append(
+                f'> Declared Dynamic/Void call returns ({cr_expected_non_actionable} of {cr_total})'
+                ' are expected and excluded from actionable_dynamic.')
+            md_lines.append(
+                '> This is a KPI correctness correction, not a decompiler quality improvement.')
             md_lines.append('')
 
         # Dynamic category type kind sub-breakdown
@@ -1215,6 +1366,193 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     pct = 100.0 * cnt / dynamic_category_counts[cat] if dynamic_category_counts[cat] else 0
                     md_lines.append(f'  - {kind_name}: {cnt} ({pct:.1f}%)')
                 md_lines.append('')
+
+        # Call Return Unresolved Breakdown
+        call_return_data = []
+        for fname in sorted(track_a["fixtures"].keys()):
+            fd = track_a["fixtures"][fname]
+            cra = fd.get('call_return_analysis', {})
+            if cra:
+                call_return_data.append((fname, cra))
+        if call_return_data:
+            md_lines.append('#### Call Return Unresolved Breakdown')
+            md_lines.append('')
+            total_cr = sum(cra['total_call_return_unresolved'] for _, cra in call_return_data)
+            resolvable = sum(cra['resolvable_count'] for _, cra in call_return_data)
+            unresolvable = sum(cra['unresolvable_count'] for _, cra in call_return_data)
+            md_lines.append(f'- **Total call_return_unresolved:** {total_cr}')
+            md_lines.append(f'- **Resolvable (safe direct evidence):** {resolvable}')
+            md_lines.append(f'- **Unresolvable (no safe evidence):** {unresolvable}')
+            md_lines.append('')
+
+            # Consolidated callee source breakdown
+            all_sources: Dict[str, int] = defaultdict(int)
+            all_opcodes: Dict[str, int] = defaultdict(int)
+            for _, cra in call_return_data:
+                for src, cnt in cra.get('by_callee_source', {}).items():
+                    all_sources[src] += cnt
+                for op, cnt in cra.get('by_opcode', {}).items():
+                    all_opcodes[op] += cnt
+            md_lines.append('| Callee Source | Count |')
+            md_lines.append('|--------------|-------|')
+            for src in sorted(all_sources.keys(), key=lambda s: -all_sources[s]):
+                md_lines.append(f'| {src} | {all_sources[src]} |')
+            md_lines.append('')
+
+            # Classification subcategory breakdown
+            all_subcats: Dict[str, int] = defaultdict(int)
+            for _, cra in call_return_data:
+                for subcat, cnt in cra.get('by_subcategory', {}).items():
+                    all_subcats[subcat] += cnt
+            # Define display labels and grouping
+            non_actionable_labels = {
+                "call_return_declared_dynamic": "call_return_declared_dynamic",
+                "call_return_declared_void": "call_return_declared_void",
+                "closure_return_declared_dynamic": "closure_return_declared_dynamic",
+                "method_return_declared_dynamic": "method_return_declared_dynamic",
+                "method_return_declared_void": "method_return_declared_void",
+            }
+            actionable_labels = {
+                "call_return_callee_type_invalid": "call_return_callee_type_invalid",
+                "call_return_callee_missing": "call_return_callee_missing",
+                "call_return_unknown_callee": "call_return_unknown_callee",
+                "method_binding_missing": "method_binding_missing",
+                "receiver_type_missing": "receiver_type_missing",
+                "unclassified": "unclassified",
+            }
+            if all_subcats:
+                non_actionable_total = sum(v for k, v in all_subcats.items()
+                                           if k in non_actionable_labels)
+                actionable_total = sum(v for k, v in all_subcats.items()
+                                       if k in actionable_labels)
+                md_lines.append('**Subcategory Breakdown:**')
+                md_lines.append('')
+                md_lines.append('**Non-actionable / expected:**')
+                md_lines.append(f'- total: {non_actionable_total}')
+                for subcat in sorted(all_subcats.keys(), key=lambda s: -all_subcats[s]):
+                    label = non_actionable_labels.get(subcat)
+                    if label:
+                        md_lines.append(f'  - {label}: {all_subcats[subcat]}')
+                md_lines.append('')
+                md_lines.append('**Potentially actionable:**')
+                md_lines.append(f'- total: {actionable_total}')
+                for subcat in sorted(all_subcats.keys(), key=lambda s: -all_subcats[s]):
+                    label = actionable_labels.get(subcat)
+                    if label:
+                        md_lines.append(f'  - {label}: {all_subcats[subcat]}')
+                md_lines.append('')
+                md_lines.append('**Note:** Declared Dynamic/Void call returns (non-actionable) are expected --')
+                md_lines.append('callee explicitly declares Dynamic or Void as its return type.')
+                md_lines.append('These 89 cases are excluded from actionable_dynamic.')
+                md_lines.append('The 21 call_return_unknown_callee cases are the only actionable call-return targets.')
+                md_lines.append('')
+
+            # Per-fixture call return breakdown
+            md_lines.append('| Fixture | Total | Resolvable | Unresolvable | Top Source |')
+            md_lines.append('|---------|-------|------------|-------------|-----------|')
+            for fname, cra in sorted(call_return_data, key=lambda x: -x[1]['total_call_return_unresolved']):
+                top_src = sorted(cra['by_callee_source'].items(), key=lambda x: -x[1])
+                top_src_str = top_src[0][0] if top_src else '-'
+                md_lines.append(
+                    f'| {fname} | {cra["total_call_return_unresolved"]} '
+                    f'| {cra["resolvable_count"]} | {cra["unresolvable_count"]} '
+                    f'| {top_src_str} |'
+                )
+            md_lines.append('')
+
+            # Top 20 functions by call_return_unresolved
+            all_top_funcs: Dict[str, int] = defaultdict(int)
+            for _, cra in call_return_data:
+                for fn_name, cnt in cra.get('top_functions', []):
+                    all_top_funcs[fn_name] += cnt
+            top20_funcs = sorted(all_top_funcs.items(), key=lambda x: -x[1])[:20]
+            if top20_funcs:
+                md_lines.append('**Top 20 Functions by call_return_unresolved:**')
+                md_lines.append('')
+                md_lines.append('| Function | Unresolved Calls |')
+                md_lines.append('|----------|-----------------|')
+                for fn_name, cnt in top20_funcs:
+                    md_lines.append(f'| {fn_name} | {cnt} |')
+                md_lines.append('')
+
+            # Top 20 callee type indices
+            all_top_types: Dict[int, int] = defaultdict(int)
+            for _, cra in call_return_data:
+                for tidx, cnt in cra.get('top_callee_type_indices', []):
+                    all_top_types[tidx] += cnt
+            top20_types = sorted(all_top_types.items(), key=lambda x: -x[1])[:20]
+            if top20_types:
+                md_lines.append('**Top 20 Callee Return Type Indices:**')
+                md_lines.append('')
+                md_lines.append('| Type Index | Count |')
+                md_lines.append('|-----------|-------|')
+                for tidx, cnt in top20_types:
+                    md_lines.append(f'| {tidx} | {cnt} |')
+                md_lines.append('')
+
+            # Unresolvable samples (first 15)
+            all_samples: List[Dict[str, Any]] = []
+            for _, cra in call_return_data:
+                all_samples.extend(cra.get('unresolvable_samples', []))
+            if all_samples:
+                md_lines.append('**Sample Unresolvable Cases (first 15):**')
+                md_lines.append('')
+                md_lines.append('| Func | Var | Op | Callee Source | Return Type |')
+                md_lines.append('|------|-----|----|--------------|-------------|')
+                for s in all_samples[:15]:
+                    md_lines.append(
+                        f'| {s.get("func", "?")} | {s.get("vname", "?")} '
+                        f'| {s.get("op", "?")} | {s.get("callee_source", "?")} '
+                        f'| {s.get("resolved_return_type", "?")} |'
+                    )
+                md_lines.append('')
+
+        # ── Null Target Analysis ─────────────────────────────────────────────
+        # Aggregate null subcategories across all Track A fixtures
+        all_null_subcats: Dict[str, int] = defaultdict(int)
+        for fname, fd in track_a['fixtures'].items():
+            nta = fd.get('null_target_analysis', {})
+            for subcat, cnt in nta.items():
+                all_null_subcats[subcat] += cnt
+        if all_null_subcats:
+            md_lines.append('')
+            md_lines.append('### Null Without Target Type -- Subcategory Breakdown')
+            md_lines.append('')
+            null_total = sum(all_null_subcats.values())
+            md_lines.append(f'- **Total null_without_target_type:** {null_total}')
+            # Expected vs actionable split
+            _NT_EXPECTED_KEYS = frozenset({
+                NT_CAT_DECLARED_DYN, NT_CAT_DECLARED_DYNOBJ,
+                NT_CAT_VOID_OR_INVALID, NT_CAT_VIRTUAL_UNSUPPORTED,
+            })
+            null_expected = sum(c for k, c in all_null_subcats.items() if k in _NT_EXPECTED_KEYS)
+            null_actionable = null_total - null_expected
+            md_lines.append(f'- **Expected / non-actionable:** {null_expected}')
+            md_lines.append(f'- **Potentially actionable:** {null_actionable}')
+            md_lines.append('')
+            md_lines.append('| Subcategory | Count | Description |')
+            md_lines.append('|------------|-------|-------------|')
+            _NT_DESCRIPTIONS = {
+                NT_CAT_DECLARED_DYN: 'Reg type is explicitly K_DYN',
+                NT_CAT_DECLARED_DYNOBJ: 'Reg type is K_DYNOBJ',
+                NT_CAT_VOID_OR_INVALID: 'Reg type is Void or invalid context',
+                NT_CAT_VIRTUAL_UNSUPPORTED: 'Reg type is K_VIRTUAL (unsupported for emission)',
+                NT_CAT_REG_TYPE_MISSING: 'Register index OOB in reg_types',
+                NT_CAT_REG_TYPE_INVALID: 'Reg type index OOB in type pool',
+                NT_CAT_MOV_CHAIN_MISSING: 'Null flows through OMov without type propagation',
+                NT_CAT_PHI_OR_BRANCH: 'Null in branch/merge pattern',
+                NT_CAT_FIELD_STORE: 'Null stored to field with known type',
+                NT_CAT_GLOBAL_STORE: 'Null stored to global with known type',
+                NT_CAT_ARRAY_DYN_STORE: 'Null stored through array/dynamic access',
+                NT_CAT_FUN_OR_METHOD_TYPE: 'Reg type is K_FUN/K_METHOD (overridden to Dynamic)',
+                NT_CAT_NULLABLE_TYPE: 'Reg type is K_NULL (inherently nullable)',
+                NT_CAT_OTHER: 'Other uncategorized null target',
+                NT_CAT_UNKNOWN: 'Unable to classify',
+            }
+            for subcat, cnt in sorted(all_null_subcats.items(), key=lambda x: -x[1]):
+                desc = _NT_DESCRIPTIONS.get(subcat, subcat)
+                md_lines.append(f'| {subcat} | {cnt} | {desc} |')
+            md_lines.append('')
 
     # ── Track B ─────────────────────────────────────────────────────────────
     if track_b:
@@ -1359,6 +1697,17 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         "track_B": track_b,
         "ranked_problems": top_problems,
         "recommendation": recommendation,
+        "actionable_dynamic_formula": {
+            "actionable_dynamic_legacy": total_actionable_dynamic,
+            "actionable_dynamic_corrected": actionable_dynamic_new,
+            "call_return_unresolved_total": cr_total,
+            "call_return_expected_non_actionable": cr_expected_non_actionable,
+            "call_return_actionable": cr_actionable,
+            "null_without_target_type": null_without_target_type,
+            "formula_legacy": "total_dynamic - non_actionable",
+            "formula_corrected": "null_without_target_type + call_return_actionable",
+            "note": "Declared Dynamic/Void call returns are expected and excluded from actionable_dynamic. This is a KPI correctness correction, not a decompiler quality improvement.",
+        },
     }
     with open(report_json_path, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=2, default=str)

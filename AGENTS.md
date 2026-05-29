@@ -417,3 +417,35 @@ A good change should satisfy these checks:
 - It handles malformed input without masking standard-format regressions.
 - It updates tests and docs when behavior changes.
 - It leaves future agents with clearer evidence than before.
+
+## 14. OCall0-4 Type-Indexed Call Resolution
+
+For OCall0-4 instructions (opcodes 24-28), `args[1]` is either:
+
+1. A **function index (findex)** when `0 <= args[1] < len(parser.functions)` — standard direct call.
+2. A **type index** when `args[1] >= len(parser.functions)` and `0 <= args[1] < len(parser.types)` and `parser.types[args[1]].kind in (K_FUN, K_METHOD)` — type-dispatched call.
+
+For type-indexed calls, the K_FUN type's `ret` field gives the callee's return type directly. This is safe bytecode evidence — no producer tracing needed.
+
+### Resolution Rules
+
+- In `build_register_type_evidence()`, when `args[1]` is a type index (not a valid function index) with K_FUN kind, extract `ret` for concrete return types (Int, Bool, String, etc.).
+- In `_analyze_call_return()`, same condition sets `callee_func_type_idx = args[1]` and `callee_return_type_idx = ft.ret` for proper Void/Dynamic subcategory classification.
+- Guard: `args[1] >= len(parser.functions)` prevents overlapping with valid function indices that are also valid type indices with K_FUN kind.
+- K_OBJ type indices that fail the K_FUN/K_METHOD check remain truly unresolvable.
+
+### Testing
+
+- Use `reg_types=[9]` (K_DYN index in primitives) and place the K_FUN type at a type index >= nfunctions.
+- OCall1 test: `ops=[(25, [0, type_idx, 1]), ...]` where `type_idx >= nfunctions`.
+
+## 15. Null Target Subcategory Classification
+
+`null_analysis` is added to `IRFunction` as `Dict[str, str]` mapping variable names to null subcategories. Populated in `Decompiler._analyze_null_target()` (Step 9 in `_decompile_function()`).
+
+Classification priority:
+1. Register type kind check: K_DYN → `null_target_declared_dynamic`, K_VOID → `null_target_void_or_invalid_context`, K_VIRTUAL → `null_target_virtual_unsupported`, K_FUN/K_METHOD → `null_target_fun_or_method_type`, K_NULL → `null_target_nullable_type`.
+2. Consumer pattern check: OSetField → field store, OSetArray/OSArraySet → array/dynamic store, OMov → mov chain, conditional jumps → phi/branch merge.
+3. Fallback: `null_target_unknown`.
+
+The `null_analysis` key is included in the quality report as `null_target_analysis` per fixture and aggregated in the "Null Without Target Type -- Subcategory Breakdown" section.

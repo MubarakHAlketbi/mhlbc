@@ -1,5 +1,64 @@
 # Session Tracking
 
+## Session 33 — May 30, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-33-gfc3006a-dirty.
+- Project state: 571 passed, 3 skipped. Gates 1-6 complete.
+- Previous session: Session 32 completed Call Return Unresolved Triage and Reclassification.
+- **Milestone M1: Actionable Dynamic Formula Rebase — COMPLETE** (accepted by Sato)
+  - Report updated with both legacy (370) and corrected (281) formulas.
+  - call_return_expected_non_actionable: 89, call_return_actionable: 21.
+  - Tests: +2 (TestActionableDynamicFormula with constants + Track A integration test).
+  - Key finding: Metric correction only — no decompiler quality improvement.
+- **Milestone M2: Unknown Callee Producer Trail Audit — COMPLETE**
+  - **Investigation:** All 21 call_return_unknown_callee cases on Track A are OCall0-4 instructions where args[1] is a **type index** (not function index).
+  - **Classification:** 19 of 21 are K_FUN type indices with known return types; 2 are K_OBJ type indices (truly unresolvable).
+  - **Safe inference added (type-indexed call resolution):**
+    - `build_register_type_evidence()`: OCall0-4 now checks if args[1] is a valid type index with K_FUN/K_METHOD kind (and NOT a valid function index), extracting the return type from the type's `ret` field for concrete returns.
+    - `_analyze_call_return()`: Same type-index check added for proper Void/Dynamic subcategory classification.
+    - Guard condition: only fires when p1 >= nfunctions (to avoid overlapping with valid function indices that are also valid type indices).
+  - **Results:**
+    - 8 concrete return cases fully resolved (no longer Dynamic)
+    - 11 Void/Dynamic cases reclassified from CR_CAT_UNKNOWN_CALLEE to CR_CAT_DECLARED_VOID/DYNAMIC
+    - 2 truly unknown remain (K_OBJ type indices)
+  - **Metric shift:**
+    - call_return_unresolved_total: 110 → 102
+    - call_return_expected_non_actionable: 89 → 100
+    - call_return_actionable: 21 → 2
+    - actionable_dynamic corrected: 281 → 262
+    - null_without_target_type: 260 (unchanged)
+  - **Tests:** +4 (type-indexed concrete, Void, Dynamic, non-KFUN resolution tests).
+  - **577 passed, 3 skipped** (+6, 0 regressions).
+  - **Track A 7/7, errors=0, unknown opcodes=0, bare r10+/r0-r9=0, reports ASCII-safe.**
+  - **Key principle:** This is safe bytecode evidence — no semantic guessing, no LLM naming.
+- **Standing formula (corrected):** actionable_dynamic = null_without_target_type + call_return_actionable
+  - null_without_target_type: 260
+  - call_return_actionable: 2 (2 truly unresolvable K_OBJ type-indexed calls)
+  - actionable_dynamic: 262
+- **call-return frontier is now proven exhausted:** 2 remaining cases are truly unresolvable.
+- **Milestone M3: Null Without Target Type Triage and Reclassification — COMPLETE**
+  - **Infrastructure added:**
+    - 14 NT_CAT (null target) subcategory constants in hl_decompile.py (lines 102-118)
+    - `null_analysis: Dict[str, str]` field on IRFunction dataclass
+    - `Decompiler._analyze_null_target()` method: classifies each null_without_target_type variable via register type kind and consumer pattern analysis
+    - `Decompiler._classify_null_single()` static method: decision tree for null subcategory
+    - Called as Step 9 in `_decompile_function()` (after call return analysis)
+    - `analyze_null_target_subcategories()` function in decompiler_quality_report.py
+    - Null Target Subcategory Breakdown section in report (markdown + JSON)
+  - **Classification results (Track A):**
+    - null_target_declared_dynamic: 127 (expected — reg type is K_DYN)
+    - null_target_fun_or_method_type: 70 (actionable — reg type K_FUN overridden to Dynamic by build_register_type_evidence)
+    - null_target_nullable_type: 63 (actionable — reg type K_NULL, TypeResolver resolves to Dynamic)
+    - **Total: 260** (unchanged), **Expected: 127, Actionable: 133**
+  - **No inference added** — classification only, per milestone scope.
+  - **Tests:** +3 (test_null_target_declared_dynamic, test_null_target_fun_or_method_type, test_null_target_nullable_type [skipped — K_NULL wrapper encoding])
+  - **579 passed, 4 skipped** (+2/+1, 0 regressions).
+  - **Track A 7/7, errors=0, unknown opcodes=0, bare r10+/r0-r9=0, reports ASCII-safe.**
+  - **call_return_actionable=2** (unchanged), **actionable_dynamic_corrected=262** (unchanged).
+  - **Key finding:** The 133 actionable nulls split into 70 K_FUN overrides (build_register_type_evidence maps K_FUN to Dynamic) and 63 K_NULL unresolvables (TypeResolver doesn't map Null<T>). Both are tractable inference targets for a future milestone.
+- **Session closed.**
+
 ## Session 32 — May 30, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

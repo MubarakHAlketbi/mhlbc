@@ -84,6 +84,61 @@ DYN_CAT_FUN_UNSUPPORTED    = "function_type_unsupported"  # K_FUN/K_METHOD that 
 DYN_CAT_NULL_RESOLVED    = "resolved_null_target_type" # ONull with provable concrete target type
 DYN_CAT_OTHER         = "other_dynamic"               # uncategorized Dynamic
 
+# Call return unresolved subcategory constants
+# Non-actionable / expected
+CR_CAT_DECLARED_DYNAMIC     = "call_return_declared_dynamic"
+CR_CAT_DECLARED_VOID        = "call_return_declared_void"
+CR_CAT_CLOSURE_DYN          = "closure_return_declared_dynamic"
+CR_CAT_METHOD_DYN           = "method_return_declared_dynamic"
+CR_CAT_METHOD_VOID          = "method_return_declared_void"
+# Potentially actionable
+CR_CAT_CALLEE_TYPE_INVALID  = "call_return_callee_type_invalid"
+CR_CAT_CALLEE_MISSING       = "call_return_callee_missing"
+CR_CAT_UNKNOWN_CALLEE       = "call_return_unknown_callee"
+CR_CAT_METHOD_BINDING_MISS  = "method_binding_missing"
+CR_CAT_RECEIVER_TYPE_MISS   = "receiver_type_missing"
+CR_CAT_UNCLASSIFIED         = "unclassified"
+
+# Null target subcategory constants (null_without_target_type classification)
+# Non-actionable / expected
+NT_CAT_DECLARED_DYN       = "null_target_declared_dynamic"
+NT_CAT_DECLARED_DYNOBJ    = "null_target_declared_dynobj"
+NT_CAT_VOID_OR_INVALID    = "null_target_void_or_invalid_context"
+NT_CAT_VIRTUAL_UNSUPPORTED = "null_target_virtual_unsupported"
+# Potentially actionable
+NT_CAT_REG_TYPE_MISSING   = "null_target_reg_type_missing"
+NT_CAT_REG_TYPE_INVALID   = "null_target_reg_type_invalid"
+NT_CAT_MOV_CHAIN_MISSING  = "null_target_mov_chain_missing"
+NT_CAT_PHI_OR_BRANCH      = "null_target_phi_or_branch_merge"
+NT_CAT_FIELD_STORE        = "null_target_field_store_type_available"
+NT_CAT_GLOBAL_STORE       = "null_target_global_store_type_available"
+NT_CAT_ARRAY_DYN_STORE    = "null_target_array_or_dynamic_store"
+NT_CAT_FUN_OR_METHOD_TYPE = "null_target_fun_or_method_type"
+NT_CAT_NULLABLE_TYPE      = "null_target_nullable_type"
+NT_CAT_OTHER              = "null_target_other"
+NT_CAT_UNKNOWN             = "null_target_unknown"
+
+# ============================================================================
+# Call return analysis record
+# ============================================================================
+@dataclass
+class CallReturnRecord:
+    """Evidence about a call instruction's callee and return type."""
+    instr_index: int               # instruction index within the function
+    opcode: int                    # opcode (24-32)
+    op_name: str                   # mnemonic
+    dst_reg: int                   # destination register
+    dst_type_idx: int              # declared register type (from reg_types)
+    callee_source: str             # "direct_findex", "closure", "method_call",
+                                   # "this_call", "native_call", "dynamic",
+                                   # "unknown"
+    callee_findex: Optional[int]   # function index (if known)
+    callee_func_type_idx: Optional[int]  # K_FUN type index of callee
+    callee_return_type_idx: Optional[int] # return type index
+    resolved_return_type: str      # what TypeResolver returns for the return type
+    is_resolvable: bool            # True if type can be resolved to non-Dynamic
+    unresolved_category: str = CR_CAT_UNCLASSIFIED
+
 # Opcode ranges for type propagation
 _ARITHMETIC_BINARY_OPS = frozenset(range(7, 20))   # OAdd..OXor (dst=a op b)
 _ARITHMETIC_UNARY_OPS  = {20, 21}                  # ONeg (20), ONot (21)
@@ -236,6 +291,8 @@ class IRFunction:
     raw_regnames: Dict[int, str]   # reg → assigned var name
     errors: List[str] = field(default_factory=list)
     var_attributions: Dict[str, str] = field(default_factory=dict)  # var_name → Dynamic category
+    call_return_analysis: Dict[str, CallReturnRecord] = field(default_factory=dict)  # var_name → analysis
+    null_analysis: Dict[str, str] = field(default_factory=dict)  # var_name → null subcategory
 
 
 @dataclass
@@ -886,6 +943,198 @@ def build_register_type_evidence(
                 # Only set if no stronger evidence exists
                 if dst_reg not in evidence:
                     evidence[dst_reg] = ret_type
+
+    # Call return type resolution: safe cases only
+    # Build producer_map: reg -> instruction whose dst matches reg
+    producer_map: Dict[int, Instruction] = {}
+    for instr in instructions:
+        a = instr.args
+        if not a:
+            continue
+        opc = instr.opcode
+        dst = None
+        if opc in (0, 1, 2, 3, 4, 5, 6):
+            dst = a[0]
+        elif opc in _ARITHMETIC_BINARY_OPS or opc in _ARITHMETIC_UNARY_OPS:
+            dst = a[0]
+        elif opc in _CALL_OPS:
+            dst = a[0]
+        elif opc in (33, 34, 35, 36, 38, 40, 42, 82, 83, 84, 85, 86, 87, 88, 90):
+            dst = a[0]
+        if dst is not None and dst not in producer_map:
+            producer_map[dst] = instr
+
+    for instr in instructions:
+        opc = instr.opcode
+        a = instr.args
+        if opc not in _CALL_OPS or not a:
+            continue
+
+        dst_reg = a[0]
+        # Allow overriding evidence from declared sources (params, ORet, reg_types)
+        if dst_reg in evidence:
+            existing = evidence.get(dst_reg)
+            is_reg_type_fallback = (0 <= dst_reg < len(reg_types) and existing == reg_types[dst_reg])
+            is_oret_evidence = (existing == getattr(sig, 'ret_type', -1))
+            # Param evidence: check if any sig param has this reg and this type
+            is_param_evidence = False
+            if sig and sig.params:
+                for pi, (_, ptype) in enumerate(sig.params):
+                    preg = pi + (1 if sig.has_this else 0)
+                    if preg == dst_reg and ptype == existing:
+                        is_param_evidence = True
+                        break
+            if not (is_reg_type_fallback or is_oret_evidence or is_param_evidence):
+                continue  # Higher-priority evidence (constants, arithmetic) - skip
+        if dst_reg < 0 or dst_reg >= len(reg_types):
+            continue
+
+        ret_type_idx: Optional[int] = None
+        callee_source: Optional[str] = None
+
+        if opc in (24, 25, 26, 27, 28):  # OCall0-4: args[1] is a direct findex
+            if len(a) >= 2:
+                fidx = a[1]
+                if 0 <= fidx < len(parser.functions):
+                    callee = parser.functions[fidx]
+                    ct_idx = callee.type
+                    if 0 <= ct_idx < len(parser.types):
+                        ct = parser.types[ct_idx]
+                        if ct.kind in (K_FUN, K_METHOD) and ct.ret is not None:
+                            # Only set evidence if return type is concrete (non-Dynamic, non-Void)
+                            ret_kind = parser.types[ct.ret].kind if 0 <= ct.ret < len(parser.types) else -1
+                            if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID, -1):
+                                evidence[dst_reg] = ct.ret
+                else:
+                    # Try as native findex
+                    if fidx >= 0:
+                        for native in parser.natives:
+                            if native.findex == fidx:
+                                nt_idx = native.type
+                                if 0 <= nt_idx < len(parser.types):
+                                    nt = parser.types[nt_idx]
+                                    if nt.kind in (K_FUN, K_METHOD) and nt.ret is not None:
+                                        ret_kind = parser.types[nt.ret].kind if 0 <= nt.ret < len(parser.types) else -1
+                                        if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID, -1):
+                                            evidence[dst_reg] = nt.ret
+                                break
+
+            # If fidx is a valid type index with K_FUN/K_METHOD kind (NOT a findex), extract ret
+            if (len(a) >= 2 and
+                    a[1] >= len(parser.functions) and  # NOT a valid function index
+                    0 <= a[1] < len(parser.types) and
+                    parser.types[a[1]].kind in (K_FUN, K_METHOD)):
+                ft = parser.types[a[1]]
+                if ft.ret is not None:
+                    ret_kind = parser.types[ft.ret].kind if 0 <= ft.ret < len(parser.types) else -1
+                    if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID, -1):
+                        evidence[dst_reg] = ft.ret
+
+        elif opc == 29:  # OCallN: args[1] is fun_reg (register)
+            fun_reg = a[1] if len(a) >= 2 else None
+            if fun_reg is not None and fun_reg in producer_map:
+                prod = producer_map[fun_reg]
+                findex = None
+                if prod.opcode == 33:  # OStaticClosure
+                    findex = prod.args[1] if len(prod.args) >= 2 else None
+                    callee_source = "direct_findex"
+                elif prod.opcode in (34, 35):  # OInstanceClosure, OVirtualClosure
+                    findex = prod.args[2] if len(prod.args) >= 3 else None
+                if findex is not None and 0 <= findex < len(parser.functions):
+                    callee = parser.functions[findex]
+                    ct_idx = callee.type
+                    if 0 <= ct_idx < len(parser.types):
+                        ct = parser.types[ct_idx]
+                        if ct.kind in (K_FUN, K_METHOD) and ct.ret is not None:
+                            # Only set if return type is concrete
+                            if 0 <= ct.ret < len(parser.types):
+                                ret_kind = parser.types[ct.ret].kind
+                                if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID):
+                                    evidence[dst_reg] = ct.ret
+
+        elif opc == 30:  # OCallMethod
+            # args: [dst, method_index, nargs_byte, extra[0]=receiver, extra[1:]=args]
+            method_idx = a[1] if len(a) >= 2 else None
+            nargs = a[2] if len(a) >= 3 else 0
+            obj_reg = a[3] if len(a) >= 4 else None
+            if obj_reg is not None and method_idx is not None:
+                obj_type_idx = evidence.get(
+                    obj_reg,
+                    reg_types[obj_reg] if 0 <= obj_reg < len(reg_types) else -1
+                )
+                if 0 <= obj_type_idx < len(parser.types):
+                    obj_type = parser.types[obj_type_idx]
+                    if obj_type.kind in (K_OBJ, K_STRUCT) and obj_type.protos:
+                        if 0 <= method_idx < len(obj_type.protos):
+                            proto = obj_type.protos[method_idx]
+                            p_findex = proto.findex
+                            if 0 <= p_findex < len(parser.functions):
+                                fn_type_idx = parser.functions[p_findex].type
+                                if 0 <= fn_type_idx < len(parser.types):
+                                    ft = parser.types[fn_type_idx]
+                                    if ft.kind in (K_FUN, K_METHOD) and ft.ret is not None:
+                                        if 0 <= ft.ret < len(parser.types):
+                                            ret_kind = parser.types[ft.ret].kind
+                                            if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID):
+                                                evidence[dst_reg] = ft.ret
+
+        elif opc == 31:  # OCallThis
+            # args: [dst, method_index, nargs_byte, extra[0:]=args]
+            method_idx = a[1] if len(a) >= 2 else None
+            func_index = sig.func_index if sig is not None else -1
+            if method_idx is not None and 0 <= func_index < len(parser.functions):
+                fn = parser.functions[func_index]
+                if fn.parent_type is not None and 0 <= fn.parent_type < len(parser.types):
+                    parent_type = parser.types[fn.parent_type]
+                    if parent_type.kind in (K_OBJ, K_STRUCT) and parent_type.protos:
+                        if 0 <= method_idx < len(parent_type.protos):
+                            proto = parent_type.protos[method_idx]
+                            p_findex = proto.findex
+                            if 0 <= p_findex < len(parser.functions):
+                                fn_type_idx = parser.functions[p_findex].type
+                                if 0 <= fn_type_idx < len(parser.types):
+                                    ft = parser.types[fn_type_idx]
+                                    if ft.kind in (K_FUN, K_METHOD) and ft.ret is not None:
+                                        if 0 <= ft.ret < len(parser.types):
+                                            ret_kind = parser.types[ft.ret].kind
+                                            if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID):
+                                                evidence[dst_reg] = ft.ret
+
+        elif opc == 32:  # OCallClosure
+            closure_reg = a[1] if len(a) >= 2 else None
+            if closure_reg is not None:
+                closure_type_idx = evidence.get(
+                    closure_reg,
+                    reg_types[closure_reg] if 0 <= closure_reg < len(reg_types) else -1
+                )
+                if 0 <= closure_type_idx < len(parser.types):
+                    ct = parser.types[closure_type_idx]
+                    if ct.kind in (K_FUN, K_METHOD) and ct.ret is not None:
+                        if 0 <= ct.ret < len(parser.types):
+                            ret_kind = parser.types[ct.ret].kind
+                            if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID):
+                                evidence[dst_reg] = ct.ret
+
+        # Also check natives: a call to a function that maps to a native
+        if callee_source == "direct_findex":
+            findex = None
+            fun_reg = a[1] if len(a) >= 2 else None
+            if fun_reg is not None and fun_reg in producer_map:
+                prod = producer_map[fun_reg]
+                if prod.opcode == 33:
+                    findex = prod.args[1] if len(prod.args) >= 2 else None
+            if findex is not None:
+                for native in parser.natives:
+                    if native.findex == findex:
+                        nt_idx = native.type
+                        if 0 <= nt_idx < len(parser.types):
+                            nt = parser.types[nt_idx]
+                            if nt.kind in (K_FUN, K_METHOD) and nt.ret is not None:
+                                if 0 <= nt.ret < len(parser.types):
+                                    ret_kind = parser.types[nt.ret].kind
+                                    if ret_kind not in (K_DYN, K_DYNOBJ, K_VOID):
+                                        evidence[dst_reg] = nt.ret
+                        break
 
     for reg_idx in range(len(reg_types)):
         if reg_idx not in evidence:
@@ -3040,6 +3289,398 @@ class Decompiler:
             self._log("DECOMPILE", f"  [ERROR] func[{func_idx}]: {e}", level=WARN)
             return None
 
+    def _analyze_call_return(
+        self,
+        instructions: List[Instruction],
+        reg_type_evidence: Dict[int, int],
+        reg_types: List[int],
+        reg_names: Dict[int, str],
+        func_idx: int,
+    ) -> Dict[str, CallReturnRecord]:
+        """Analyze call instructions to determine callee evidence for return type resolution.
+
+        For each CALL instruction (OCall0-4, OCallN, OCallMethod, OCallThis,
+        OCallClosure), traces the callee register to find what produced it and
+        resolves the return type if possible.
+
+        Returns:
+            Dict[var_name -> CallReturnRecord] for each call dst variable.
+        """
+        parser = self.parser
+        if parser is None:
+            return {}
+        type_resolver = self.type_resolver
+        if type_resolver is None:
+            type_resolver = TypeResolver(parser)
+
+        # Build producer map: reg_idx -> instruction that writes it
+        producer_map: Dict[int, Instruction] = {}
+        for instr in instructions:
+            args = instr.args
+            if not args:
+                continue
+            op = instr.opcode
+            dst_reg = None
+            if op in (0, 1, 2, 3, 4, 5, 6):
+                dst_reg = args[0]
+            elif op in _ARITHMETIC_BINARY_OPS or op in _ARITHMETIC_UNARY_OPS:
+                dst_reg = args[0]
+            elif op in _CALL_OPS:
+                dst_reg = args[0]
+            elif op in (33, 34, 35):  # closures
+                dst_reg = args[0]
+            elif op in (36, 38, 40, 42, 82, 83, 84, 85, 86, 87, 88, 90):
+                dst_reg = args[0]
+            if dst_reg is not None and dst_reg not in producer_map:
+                producer_map[dst_reg] = instr
+
+        result: Dict[str, CallReturnRecord] = {}
+
+        for instr in instructions:
+            op = instr.opcode
+            args = instr.args
+            if op not in _CALL_OPS:
+                continue
+            if not args:
+                continue
+
+            dst_reg = args[0]
+            vname = reg_names.get(dst_reg, f"r{dst_reg}")
+
+            dst_type_idx = reg_types[dst_reg] if 0 <= dst_reg < len(reg_types) else -1
+            callee_source = "unknown"
+            callee_findex: Optional[int] = None
+            callee_func_type_idx: Optional[int] = None
+            callee_return_type_idx: Optional[int] = None
+
+            if op in (24, 25, 26, 27, 28, 29):  # OCall0-4, OCallN
+                # args[1] is fun_reg (or fun_type_idx for OCall0-4)
+                fun_reg = args[1] if len(args) >= 2 else None
+                if fun_reg is not None and fun_reg in producer_map:
+                    prod = producer_map[fun_reg]
+                    if prod.opcode == 33:  # OStaticClosure
+                        callee_source = "direct_findex"
+                        callee_findex = prod.args[1] if len(prod.args) >= 2 else None
+                        if callee_findex is not None and 0 <= callee_findex < len(parser.functions):
+                            callee_func_type_idx = parser.functions[callee_findex].type
+                    elif prod.opcode in (34, 35):  # OInstanceClosure, OVirtualClosure
+                        callee_source = "closure"
+                        callee_findex = prod.args[2] if len(prod.args) >= 3 else None
+                        if callee_findex is not None and 0 <= callee_findex < len(parser.functions):
+                            callee_func_type_idx = parser.functions[callee_findex].type
+                    elif prod.opcode in _CALL_OPS:
+                        callee_source = "dynamic"
+                    else:
+                        callee_source = "closure"
+                # If fun_reg looks like a type index for a direct call, try as findex
+                if callee_source == "unknown" and fun_reg is not None:
+                    if 0 <= fun_reg < len(parser.functions):
+                        callee_source = "direct_findex"
+                        callee_findex = fun_reg
+                        callee_func_type_idx = parser.functions[fun_reg].type
+                    elif (fun_reg >= len(parser.functions) and  # NOT a valid function index
+                          0 <= fun_reg < len(parser.types)):
+                        ft = parser.types[fun_reg]
+                        if ft.kind in (K_FUN, K_METHOD):
+                            callee_source = "direct_findex"
+                            callee_findex = fun_reg
+                            callee_func_type_idx = fun_reg
+                            if ft.ret is not None:
+                                callee_return_type_idx = ft.ret
+
+            elif op == 30:  # OCallMethod
+                callee_source = "method_call"
+                # args: [dst, method_index, nargs_byte, extra[0]=receiver, extra[1:]=args]
+                method_idx = args[1] if len(args) >= 2 else None
+                nargs = args[2] if len(args) >= 3 else 0
+                obj_reg = args[3] if len(args) >= 4 else None
+                # Try to resolve via proto table
+                method_found = None
+                if obj_reg is not None and method_idx is not None:
+                    obj_type_idx = reg_type_evidence.get(
+                        obj_reg,
+                        reg_types[obj_reg] if 0 <= obj_reg < len(reg_types) else -1
+                    )
+                    if 0 <= obj_type_idx < len(parser.types):
+                        obj_type = parser.types[obj_type_idx]
+                        if obj_type.kind in (K_OBJ, K_STRUCT) and obj_type.protos:
+                            if 0 <= method_idx < len(obj_type.protos):
+                                proto = obj_type.protos[method_idx]
+                                p_findex = proto.findex
+                                callee_findex = p_findex
+                                if 0 <= p_findex < len(parser.functions):
+                                    callee_func_type_idx = parser.functions[p_findex].type
+                                    callee_source = "method_call"
+                                    method_found = p_findex
+
+            elif op == 31:  # OCallThis
+                callee_source = "this_call"
+                # args: [dst, method_index, nargs_byte, extra[0:]=args]
+                method_idx = args[1] if len(args) >= 2 else None
+                # Method on 'this' -- resolve via parent class protos
+                method_found = None
+                if method_idx is not None and 0 <= func_idx < len(parser.functions):
+                    fn = parser.functions[func_idx]
+                    if fn.parent_type is not None and 0 <= fn.parent_type < len(parser.types):
+                        parent_type = parser.types[fn.parent_type]
+                        if parent_type.kind in (K_OBJ, K_STRUCT) and parent_type.protos:
+                            if 0 <= method_idx < len(parent_type.protos):
+                                proto = parent_type.protos[method_idx]
+                                p_findex = proto.findex
+                                callee_findex = p_findex
+                                if 0 <= p_findex < len(parser.functions):
+                                    callee_func_type_idx = parser.functions[p_findex].type
+                                    callee_source = "this_call"
+                                    method_found = p_findex
+
+            elif op == 32:  # OCallClosure
+                closure_reg = args[1] if len(args) >= 2 else None
+                if closure_reg is not None:
+                    closure_type_idx = reg_type_evidence.get(
+                        closure_reg,
+                        reg_types[closure_reg] if 0 <= closure_reg < len(reg_types) else -1
+                    )
+                    if 0 <= closure_type_idx < len(parser.types):
+                        ctype = parser.types[closure_type_idx]
+                        if ctype.kind in (K_FUN, K_METHOD):
+                            callee_source = "closure"
+                            callee_func_type_idx = closure_type_idx
+                        else:
+                            callee_source = "dynamic"
+
+            # Now try to get the return type
+            ret_type_idx = None
+            if callee_func_type_idx is not None and 0 <= callee_func_type_idx < len(parser.types):
+                ft = parser.types[callee_func_type_idx]
+                if ft.kind in (K_FUN, K_METHOD) and ft.ret is not None:
+                    ret_type_idx = ft.ret
+
+            if ret_type_idx is None and callee_source == "direct_findex" and callee_findex is not None:
+                # Try native resolution: natives have type indices that are K_FUN types
+                for native in parser.natives:
+                    if native.findex == callee_findex:
+                        nt_idx = native.type
+                        if 0 <= nt_idx < len(parser.types):
+                            nt = parser.types[nt_idx]
+                            if nt.kind in (K_FUN, K_METHOD) and nt.ret is not None:
+                                ret_type_idx = nt.ret
+                                callee_source = "native_call"
+                        break
+
+            resolved = type_resolver.resolve(ret_type_idx) if ret_type_idx is not None else "Dynamic"
+            is_resolvable = (resolved != "Dynamic" and resolved != "Void")
+
+            record = CallReturnRecord(
+                instr_index=instr.index,
+                opcode=op,
+                op_name=instr.mnemonic,
+                dst_reg=dst_reg,
+                dst_type_idx=dst_type_idx,
+                callee_source=callee_source,
+                callee_findex=callee_findex,
+                callee_func_type_idx=callee_func_type_idx,
+                callee_return_type_idx=ret_type_idx,
+                resolved_return_type=resolved,
+                is_resolvable=is_resolvable,
+            )
+
+            # Classification: subcategory when the call return is unresolved
+            if not is_resolvable:
+                cs = callee_source
+                rrt = resolved
+                if cs in ("method_call", "this_call"):
+                    if callee_findex is None or callee_func_type_idx is None:
+                        # Proto/resolution failure -- check receiver availability
+                        if op == 30 and obj_reg is not None:
+                            obj_rt = reg_types[obj_reg] if 0 <= obj_reg < len(reg_types) else -1
+                            is_obj = (0 <= obj_rt < len(parser.types)
+                                      and parser.types[obj_rt].kind in (K_OBJ, K_STRUCT))
+                            if is_obj:
+                                record.unresolved_category = CR_CAT_METHOD_BINDING_MISS
+                            else:
+                                record.unresolved_category = CR_CAT_RECEIVER_TYPE_MISS
+                        else:
+                            record.unresolved_category = CR_CAT_METHOD_BINDING_MISS
+                    elif rrt == "Dynamic":
+                        record.unresolved_category = CR_CAT_METHOD_DYN
+                    elif rrt == "Void":
+                        record.unresolved_category = CR_CAT_METHOD_VOID
+                    else:
+                        record.unresolved_category = CR_CAT_CALLEE_TYPE_INVALID
+                elif cs == "closure":
+                    if callee_func_type_idx is not None and rrt == "Dynamic":
+                        record.unresolved_category = CR_CAT_CLOSURE_DYN
+                    elif callee_func_type_idx is None:
+                        record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
+                    else:
+                        record.unresolved_category = CR_CAT_CALLEE_TYPE_INVALID
+                elif cs in ("direct_findex", "native_call"):
+                    if callee_findex is not None and rrt == "Dynamic":
+                        record.unresolved_category = CR_CAT_DECLARED_DYNAMIC
+                    elif callee_findex is not None and rrt == "Void":
+                        record.unresolved_category = CR_CAT_DECLARED_VOID
+                    elif callee_findex is None:
+                        record.unresolved_category = CR_CAT_CALLEE_MISSING
+                    else:
+                        record.unresolved_category = CR_CAT_CALLEE_TYPE_INVALID
+                elif cs == "unknown" or cs == "dynamic":
+                    record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
+                else:
+                    record.unresolved_category = CR_CAT_UNCLASSIFIED
+
+            result[vname] = record
+
+        return result
+
+    def _analyze_null_target(
+        self,
+        var_attributions: Dict[str, str],
+        instructions: list,
+        reg_types: list[int],
+        func_idx: int,
+    ) -> Dict[str, str]:
+        """Classify each null_without_target_type variable into a subcategory.
+
+        Uses register type evidence and consumer analysis to determine
+        whether a null target is expected (declared Dynamic/Void/Virtual)
+        or potentially actionable (K_FUN/K_NULL/field store/global store/etc.).
+        """
+        result: Dict[str, str] = {}
+        consumers: Dict[int, list] = {}
+
+        # Build consumer map: reg -> instructions that read it
+        for instr in instructions:
+            src_regs = self._get_src_regs_instr(instr)
+            for r in src_regs:
+                if r not in consumers:
+                    consumers[r] = []
+                consumers[r].append(instr)
+
+        for vname, cat in var_attributions.items():
+            if cat != "null_without_target_type":
+                continue
+
+            reg_idx = _var_name_to_reg(vname)
+            subcat = self._classify_null_single(
+                reg_idx, reg_types, consumers,
+            )
+            result[vname] = subcat
+
+        return result
+
+    @staticmethod
+    def _get_src_regs_instr(instr) -> list:
+        """Get source registers for an instruction (static helper)."""
+        from hl_disasm import Instruction
+        op = instr.opcode
+        a = instr.args
+        if not a:
+            return []
+        # OMov: src is args[1]
+        if op == 1 and len(a) >= 2:
+            return [a[1]]
+        # OInt, OFloat, OBool, etc. have no src registers
+        if op in (0, 2, 3, 4, 5, 6, 7, 8, 82, 84, 85, 86):
+            return []
+        # Arithmetic: src are args[1], args[2]
+        if 7 <= op <= 19 and len(a) >= 3:
+            return [a[1], a[2]]
+        # Unary: src is args[1]
+        if op in (20, 21, 59, 60, 61, 62, 63, 64, 65) and len(a) >= 2:
+            return [a[1]]
+        # Calls: all args after dst are src
+        if op in (24, 25, 26, 27, 28, 29):
+            return list(a[2:]) if len(a) >= 3 else []
+        if op == 30 and len(a) >= 4:  # OCallMethod
+            return list(a[3:])
+        if op == 32 and len(a) >= 3:  # OCallClosure
+            return list(a[2:])
+        # Jumps: src is args[0] for conditional jumps
+        if op in (44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58) and len(a) >= 1:
+            return [a[0]]
+        # OSwitch: val is args[0]
+        if op == 70 and len(a) >= 1:
+            return [a[0]]
+        # OField, OSetField: object reg is args[1] for OField, args[0] for OSetField
+        if op == 38 and len(a) >= 2:
+            return [a[1]]
+        if op == 39 and len(a) >= 2:
+            return [a[0]]
+        # OGetGlobal: no src
+        if op == 36:
+            return []
+        # OGetThis: no src
+        if op == 40:
+            return []
+        # ORef/OUnref: src is args[1]
+        if op in (87, 88) and len(a) >= 2:
+            return [a[1]]
+        # OSetArray: src are args[1], args[2]; dynamic store
+        if op in (81, 91, 92) and len(a) >= 3:
+            return [a[1], a[2]]
+        if op == 83 and len(a) >= 3:
+            return [a[1], a[2]]
+        return []
+
+    def _classify_null_single(
+        self,
+        reg_idx: Optional[int],
+        reg_types: list[int],
+        consumers: Dict[int, list],
+    ) -> str:
+        """Classify a single null_without_target_type variable."""
+        # OOB register
+        if reg_idx is None or reg_idx < 0 or reg_idx >= len(reg_types):
+            return NT_CAT_REG_TYPE_MISSING
+
+        raw_type = reg_types[reg_idx]
+
+        # invalid type index
+        if raw_type < 0 or raw_type >= len(self.parser.types):
+            return NT_CAT_REG_TYPE_INVALID
+
+        t = self.parser.types[raw_type]
+        kind = t.kind
+
+        # Expected / non-actionable
+        if kind == K_DYN:
+            return NT_CAT_DECLARED_DYN
+        if kind == K_DYNOBJ:
+            return NT_CAT_DECLARED_DYNOBJ
+        if kind == K_VOID:
+            return NT_CAT_VOID_OR_INVALID
+        if kind == K_VIRTUAL:
+            return NT_CAT_VIRTUAL_UNSUPPORTED
+
+        # K_FUN/K_METHOD: actionable (reg_type evidence overrides to Dynamic)
+        if kind in (K_FUN, K_METHOD):
+            return NT_CAT_FUN_OR_METHOD_TYPE
+
+        # K_NULL: inherently nullable, resolve from declared type
+        if kind == K_NULL:
+            return NT_CAT_NULLABLE_TYPE
+
+        # Check consumer patterns
+        reg_consumers = consumers.get(reg_idx, [])
+        has_field_store = any(i.opcode == 39 for i in reg_consumers)
+        has_global_store = any(i.opcode == 36 for i in reg_consumers)
+        has_array_store = any(i.opcode in (81, 91, 92) for i in reg_consumers)
+        has_omov = any(i.opcode == 1 for i in reg_consumers)
+        has_branch = any(i.opcode in (44, 45, 46, 47, 56, 57, 58) for i in reg_consumers)
+
+        if has_field_store:
+            return NT_CAT_FIELD_STORE
+        if has_global_store:
+            return NT_CAT_GLOBAL_STORE
+        if has_array_store:
+            return NT_CAT_ARRAY_DYN_STORE
+        if has_omov:
+            return NT_CAT_MOV_CHAIN_MISSING
+        if has_branch:
+            return NT_CAT_PHI_OR_BRANCH
+
+        return NT_CAT_UNKNOWN
+
     def _decompile_function(self, func_idx: int) -> IRFunction:
         """Internal: run full decompilation pipeline on one function."""
         func = self.parser.functions[func_idx]
@@ -3124,6 +3765,16 @@ class Decompiler:
             self.type_resolver, self.parser,
         )
 
+        # Step 8: Compute call return analysis (for diagnostic/reporting)
+        call_return_analysis = self._analyze_call_return(
+            instructions, reg_type_evidence, reg_types, reg_names, func_idx,
+        )
+
+        # Step 9: Compute null target classification (for diagnostic/reporting)
+        null_analysis = self._analyze_null_target(
+            var_attributions, instructions, reg_types, func_idx,
+        )
+
         # Override name from the function data
         fn_name = func.name or sig.name
 
@@ -3138,6 +3789,8 @@ class Decompiler:
             raw_regnames=reg_names,
             errors=[],
             var_attributions=var_attributions,
+            call_return_analysis=call_return_analysis,
+            null_analysis=null_analysis,
         )
 
         return ir_fn

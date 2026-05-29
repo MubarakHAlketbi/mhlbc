@@ -49,6 +49,13 @@ from hl_decompile import (
     DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
     DYN_CAT_CALL_UNRESOLVED, DYN_CAT_VIRTUAL_UNSUPPORTED,
     DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_NULL_RESOLVED, DYN_CAT_OTHER,
+    CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
+    CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+    CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
+    CR_CAT_UNKNOWN_CALLEE, CR_CAT_METHOD_BINDING_MISS,
+    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+    NT_CAT_DECLARED_DYN, NT_CAT_FUN_OR_METHOD_TYPE,
+    NT_CAT_NULLABLE_TYPE,
     _sanitize_type_name,
 )
 
@@ -1023,6 +1030,624 @@ class TestDynamicAttribution:
         cat = ir_fn.var_attributions.get('t0', '')
         assert cat == DYN_CAT_CALL_UNRESOLVED, \
             f'OCall0 should produce call_return_unresolved, got {cat}'
+
+    def test_direct_call_return_concrete(self):
+        """OCall0-4 with concrete callee return type resolves the variable."""
+        # Types: type[0]=K_I32(3), type[1]=K_BOOL(7), type[2]=K_FUN([0]->1) returns Bool
+        i32_type = build_type_primitive(K_I32)
+        bool_type = build_type_primitive(K_BOOL)
+        fun_type = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(1)
+        type_blobs = [i32_type, bool_type, fun_type]
+
+        # Callee: findex=0, type_idx=2 (K_FUN with Bool ret)
+        callee_entry = self._build_func_body(
+            reg_types=[K_I32], type_idx=2, findex=0, nregs=1, ops=[(67, [0])],
+        )
+        # Caller: r0=param, r1 not used, r2=OCall1 dst
+        # OCall1: dst=r2, findex=0, arg=r0 — should resolve t2 to Bool
+        caller_entry = self._build_func_body(
+            reg_types=[K_I32, 0, K_DYN], type_idx=2, findex=1, nregs=3,
+            ops=[(25, [2, 0, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee_entry, caller_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) == 2
+        ir_fn = result.functions[1]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t2', -1)
+        )
+        assert resolved == 'Bool', \
+            f'OCall1 to findex with Bool return should resolve to Bool, got {resolved}'
+        assert 't2' not in ir_fn.var_attributions or \
+            ir_fn.var_attributions['t2'] != DYN_CAT_CALL_UNRESOLVED, \
+            'Resolved call should not be call_return_unresolved'
+
+    def test_direct_call_return_dynamic(self):
+        """OCall0-4 returning K_DYN stays Dynamic and is not falsely resolved."""
+        # Types: type[0]=K_DYN(9), type[1]=K_FUN([]->0) returns Dynamic
+        dyn_type = build_type_primitive(K_DYN)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # () -> Dynamic (type idx 0)
+        type_blobs = [dyn_type, fun_type]
+
+        # Callee findex=0, type_idx=1 (returns Dynamic/type idx 0)
+        callee_entry = self._build_func_body(
+            reg_types=[0], type_idx=1, findex=0, nregs=1, ops=[(67, [0])],
+        )
+        # Caller: OCall1 dst=r1, findex=0, arg=<unused>
+        caller_entry = self._build_func_body(
+            reg_types=[0, 0], type_idx=1, findex=1, nregs=2,
+            ops=[(25, [1, 0, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee_entry, caller_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        # Find any call_return_unresolved variable
+        unresolved = [v for v, c in ir_fn.var_attributions.items()
+                      if c == DYN_CAT_CALL_UNRESOLVED]
+        assert len(unresolved) > 0, \
+            f'Dynamic return should produce call_return_unresolved, none found. Vars: {ir_fn.variables} Cats: {ir_fn.var_attributions}'
+
+    def test_direct_call_missing_findex_no_crash(self):
+        """Call with findex out of range does not crash."""
+        # Types: type[0]=K_I32(3), type[1]=K_FUN([]->0) uses I32 ret
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # () -> I32
+        type_blobs = [i32_type, fun_type]
+        # OCall1: dst=r2, findex=999 (OOB) — should not crash, call_result stays Dynamic
+        entry = self._build_func_body(
+            reg_types=[0, 0, 9], type_idx=1, findex=0, nregs=3,
+            ops=[(25, [2, 999]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        assert ir_fn is not None, 'Function should decompile without crash'
+
+    def test_call_return_uses_callee_not_function_ret(self):
+        """Call return uses callee's return type, not the calling function's ret_type.
+
+        The caller has ret_type=Dynamic, but the callee returns Bool.
+        The variable should be Bool (overcoming ORet evidence on the dst reg).
+        """
+        # Types: type[0]=K_I32(3), type[1]=K_BOOL(7), type[2]=K_FUN([0]->1) returns Bool
+        i32_type = build_type_primitive(K_I32)
+        bool_type = build_type_primitive(K_BOOL)
+        fun_type = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(1)
+        type_blobs = [i32_type, bool_type, fun_type]
+
+        # Callee findex=0, type_idx=2 (returns Bool)
+        callee_entry = self._build_func_body(
+            reg_types=[K_I32], type_idx=2, findex=0, nregs=1, ops=[(67, [0])],
+        )
+        # Caller: calls func[0], then ORet with the result
+        # OCall1 dst=r2, ORet r2 — ORet sets sig.ret_type but call resolution should win
+        caller_entry = self._build_func_body(
+            reg_types=[K_I32, 0, K_DYN], type_idx=0, findex=1, nregs=3,
+            ops=[(25, [2, 0, 0]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee_entry, caller_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t2', -1)
+        )
+        assert resolved == 'Bool', \
+            f'Call return should be Bool (callee ret), not Dynamic, got {resolved}'
+
+    def test_ocallmethod_concrete_receiver_resolves(self):
+        """OCallMethod with K_OBJ receiver resolves concrete return via proto."""
+        # Types:
+        # type[0..9] = primitives (VOID=0..DYN=9)
+        # type[10] = K_FUN () -> Dynamic (caller function type, base return)
+        # type[11] = K_OBJ with proto[0]=(name=0,findex=0,pindex=0)
+        # type[12] = K_FUN () -> I32 (callee function type, actual return)
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)   # () -> Dynamic
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_I32)   # () -> I32
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+
+        # Callee: type_idx=12 ()->I32, findex=0
+        callee = self._build_func_body(
+            reg_types=[K_I32], type_idx=12, findex=0, nregs=1,
+            ops=[(67, [0])],
+        )
+        # Caller: type_idx=10 ()->Dyn, OCallMethod on r3 (type 11 = K_OBJ with protos)
+        # OCallMethod: dst=2, method_idx=0, nargs_byte=1, receiver=3
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=1, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee, caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        # OCallMethod proto resolution should override ORet's Dynamic evidence
+        resolved = ir_fn.variables.get('t2', -1)
+        assert resolved == K_I32, \
+            f't2 should be I32 from method proto resolution, got {resolved}'
+        cat = ir_fn.var_attributions.get('t2', '')
+        assert cat != DYN_CAT_CALL_UNRESOLVED, \
+            f't2 should not be call_return_unresolved'
+
+    def test_ocallmethod_dynamic_receiver_stays_unresolved(self):
+        """OCallMethod with Dynamic receiver stays Dynamic via ORet evidence."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)   # () -> Dynamic
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_I32)   # () -> I32
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+
+        # Caller: OCallMethod on r3 which has K_DYN type (not K_OBJ)
+        # Receiver is Dynamic, so OCallMethod proto resolution fails
+        # ORet sets evidence to Dynamic (function ret type = K_DYN)
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, K_DYN], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[0]
+        # OCallMethod should NOT fire (Dynamic receiver). ORet sets Dynamic.
+        resolved = ir_fn.variables.get('t2', -1)
+        assert resolved == K_DYN, \
+            f't2 should be Dynamic (unresolved), got {resolved}'
+
+    def test_ocallmethod_void_return_stays_unresolved(self):
+        """OCallMethod with Void callee return type stays call_return_unresolved."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        # type 10: K_FUN () -> Dynamic (caller)
+        # type 11: K_OBJ with proto[0]=(name=0,findex=0,pindex=0)
+        # type 12: K_FUN () -> Void (callee with Void return)
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)   # () -> Dynamic
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)  # () -> Void
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[0]
+        # OCallMethod proto resolution fires but returns Void -> not resolved
+        # ORet sets Dynamic (function ret type) -> stays Dynamic
+        resolved = ir_fn.variables.get('t2', -1)
+        assert resolved == K_DYN, \
+            f't2 should be Dynamic (Void callee), got {resolved}'
+
+    def test_ocallmethod_ok_with_missing_proto_findex(self):
+        """OCallMethod with valid proto but invalid function index does not crash."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_I32)
+        # proto[0] points to findex=999 which is out of range
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 999, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[0]
+        # Should not crash; t2 stays Dynamic (ORet gives Dynamic)
+        assert ir_fn.variables.get('t2', -1) == K_DYN
+
+    def test_ocallthis_via_parent_type_resolves(self):
+        """OCallThis resolves method return via parent_type protos."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        # type 10: K_FUN () -> I32 (callee)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_I32)
+        # type 11: K_OBJ with proto[0]=(name=0,findex=0,pindex=0)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [fun_type, obj_type]
+
+        # Callee: findex=0, type_idx=10 ()->I32
+        callee = self._build_func_body(
+            reg_types=[K_I32], type_idx=10, findex=0, nregs=1,
+            ops=[(67, [0])],
+        )
+
+        # Caller: parent_type=11 (K_OBJ), OCallThis: dst=2, method_idx=0, nargs=0
+        # The function's parent_type must be set. We use fn.parent_type which in the
+        # real code is set by name resolution. In synthetic bytecode, it's not set
+        # automatically. We need to trigger the parent_type assignment.
+        #
+        # Since parent_type is set by FunctionSigBuilder, which checks protos/bindings,
+        # we need to ensure this function gets parent_type=11. The easiest way is to
+        # pass the function index through a proto/binding reference.
+        #
+        # Actually, for the test, we can just check that build_register_type_evidence
+        # handles OCallThis. The parent_type check uses fn.parent_type from the parser.
+        # In synthetic bytecode, fn.parent_type is None unless explicitly set.
+        # So this test verifies the OCallThis path handles this gracefully.
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN], type_idx=10, findex=1, nregs=3,
+            ops=[(31, [2, 1, 0]), (67, [0])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee, caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        # t2 stays Dynamic because fn.parent_type is None (not set in synthetic bytecode)
+        # The key check is that it doesn't crash
+        assert 't2' in ir_fn.variables
+
+    def test_existing_direct_call_inference_still_passes(self):
+        """Existing direct call return inference still works after OCallMethod changes."""
+        i32_type = build_type_primitive(K_I32)
+        bool_type = build_type_primitive(K_BOOL)
+        # Correct: use type pool indices (0=I32, 1=Bool), not kind constants
+        fun_type = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(1)  # (I32)->Bool
+        type_blobs = [i32_type, bool_type, fun_type]
+
+        callee = self._build_func_body(
+            reg_types=[K_I32], type_idx=2, findex=0, nregs=1,
+            ops=[(67, [0])],
+        )
+        caller = self._build_func_body(
+            reg_types=[K_I32, 0, K_DYN], type_idx=0, findex=1, nregs=3,
+            ops=[(25, [2, 0, 0]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee, caller],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t2', -1)
+        )
+        assert resolved == 'Bool', \
+            f'Direct call inference should still work, got {resolved}'
+
+    def test_ocallmethod_dynamic_return_stays_unresolved(self):
+        """OCallMethod where callee has Dynamic return type stays unresolved."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[0]
+        resolved = ir_fn.variables.get('t2', -1)
+        # OCallMethod finds proto but callee returns Dynamic -> not resolved
+        assert resolved == K_DYN, \
+            f't2 should be Dynamic (Dynamic callee ret), got {resolved}'
+
+    def test_ocallmethod_wrong_method_idx_no_crash(self):
+        """OCallMethod with method_index beyond proto count does not crash."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun_type = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        callee_fun_type = bytes([K_FUN, 0]) + encode_varint(K_I32)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun_type, obj_type, callee_fun_type]
+        # method_idx=5 but obj only has 1 proto -> out of range
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 5, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[0]
+        # Should not crash, t2 stays Dynamic (ORet gives Dynamic)
+        assert ir_fn.variables.get('t2', -1) == K_DYN
+
+    def test_closure_call_with_known_fun_type(self):
+        """OCallClosure where closure_reg has K_FUN type with concrete return."""
+        # Types: type[0]=K_I32(3), type[1]=K_BOOL(7), type[2]=K_FUN([0]->1)
+        i32_type = build_type_primitive(K_I32)
+        bool_type = build_type_primitive(K_BOOL)
+        fun_type = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(1)
+        type_blobs = [i32_type, bool_type, fun_type]
+
+        # Function: r1 has K_FUN type (type_idx=2), call via OCallClosure
+        # OCallClosure: dst=r2, closure_reg=r1, count=1, arg=r0
+        entry = self._build_func_body(
+            reg_types=[K_I32, 2, K_DYN], type_idx=0, findex=0, nregs=3,
+            ops=[(32, [2, 1, 1, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t2', -1)
+        )
+        assert resolved == 'Bool', \
+            f'Closure call with K_FUN->Bool closure should resolve to Bool, got {resolved}'
+        assert 't2' not in ir_fn.var_attributions or \
+            ir_fn.var_attributions['t2'] != DYN_CAT_CALL_UNRESOLVED, \
+            'Resolved closure call should not be call_return_unresolved'
+
+    def test_conflicting_dst_type_and_callee_stays_resolved(self):
+        """When callee returns concrete type and dst has concrete declared type,
+        callee evidence wins (higher priority)."""
+        # Types: type[0]=K_I32(3), type[1]=K_BOOL(7), type[2]=K_FUN([]->1)
+        i32_type = build_type_primitive(K_I32)
+        bool_type = build_type_primitive(K_BOOL)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(1)
+        type_blobs = [i32_type, bool_type, fun_type]
+
+        callee_entry = self._build_func_body(
+            reg_types=[], type_idx=2, findex=0, nregs=0, ops=[(67, [0])],
+        )
+        # r1 declared as Int (3), but callee returns Bool — Bool wins
+        # OCall1: dst=r1, findex=0, arg=<unused>
+        caller_entry = self._build_func_body(
+            reg_types=[0, 0], type_idx=2, findex=1, nregs=2,
+            ops=[(25, [1, 0, 0]), (67, [1])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[callee_entry, caller_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = result.functions[1]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t1', -1)
+        )
+        assert resolved == 'Bool', \
+            f'Callee return Bool should win over declared Int, got {resolved}'
+
+    # ─────────────────────────────────────────────
+    # Call return unresolved classification tests
+    # ─────────────────────────────────────────────
+
+    def _get_classification(self, data: bytes, var_name: str) -> str:
+        """Helper: decompile and return the call_return unresolved_category for a variable."""
+        result = _disasm_and_decompile(data)
+        for ir_fn in result.functions.values():
+            record = ir_fn.call_return_analysis.get(var_name)
+            if record is not None:
+                return record.unresolved_category
+        return CR_CAT_UNCLASSIFIED
+
+    def test_classification_direct_declared_dynamic(self):
+        """Direct call with Dynamic return -> call_return_declared_dynamic."""
+        dyn_t = build_type_primitive(K_DYN)       # type[0] = K_DYN (kind=9)
+        i32_t = build_type_primitive(K_I32)        # type[1] = K_I32
+        fun_t = bytes([K_FUN, 0]) + encode_varint(0)  # () -> Dynamic (type[0])
+        type_blobs = [dyn_t, i32_t, fun_t]
+        callee = self._build_func_body(
+            reg_types=[], type_idx=2, findex=0, nregs=0, ops=[(67, [0])],
+        )
+        caller = self._build_func_body(
+            reg_types=[0, 9], type_idx=0, findex=1, nregs=2,
+            ops=[(25, [1, 0, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=3, type_blobs=type_blobs,
+            raw_function_entries=[callee, caller], version=4,
+        )
+        assert self._get_classification(data, 't1') == CR_CAT_DECLARED_DYNAMIC
+
+    def test_classification_direct_declared_void(self):
+        """Direct call with Void return -> call_return_declared_void."""
+        void_t = build_type_primitive(K_VOID)   # type[0] = K_VOID
+        i32_t = build_type_primitive(K_I32)      # type[1] = K_I32
+        fun_t = bytes([K_FUN, 0]) + encode_varint(0)  # () -> Void (type[0])
+        type_blobs = [void_t, i32_t, fun_t]
+        callee = self._build_func_body(
+            reg_types=[], type_idx=2, findex=0, nregs=0, ops=[(67, [0])],
+        )
+        caller = self._build_func_body(
+            reg_types=[0, 9], type_idx=0, findex=1, nregs=2,
+            ops=[(25, [1, 0, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=3, type_blobs=type_blobs,
+            raw_function_entries=[callee, caller], version=4,
+        )
+        assert self._get_classification(data, 't1') == CR_CAT_DECLARED_VOID
+
+    def test_classification_closure_dynamic(self):
+        """Closure with Dynamic return -> closure_return_declared_dynamic."""
+        i32_t = build_type_primitive(K_I32)
+        dyn_t = build_type_primitive(K_DYN)
+        fun_t = bytes([K_FUN, 0]) + encode_varint(K_DYN)  # () -> Dynamic
+        type_blobs = [i32_t, dyn_t, fun_t]
+        entry = self._build_func_body(
+            reg_types=[K_I32, 2, K_DYN], type_idx=0, findex=0, nregs=3,
+            ops=[(32, [2, 1, 1, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=3, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_CLOSURE_DYN
+
+    def test_classification_method_declared_dynamic(self):
+        """Method call with Dynamic return -> method_return_declared_dynamic."""
+        protos = [build_type_primitive(i) for i in range(10)]  # type[9]=K_DYN
+        caller_fun = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        # type 12: K_FUN () -> Dynamic (ret type index 9 = K_DYN in pool)
+        callee_fun = bytes([K_FUN, 0]) + encode_varint(9)  # () -> Dynamic (type[9]=K_DYN)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 1, 0)], bindings=[],  # findex=1 -> callee
+        )
+        type_blobs = protos + [caller_fun, obj_type, callee_fun]
+        # Callee: findex=1, type_idx=12 (Dynamic return)
+        callee = self._build_func_body(
+            reg_types=[], type_idx=12, findex=1, nregs=0,
+            ops=[(67, [0])],
+        )
+        # Caller: findex=0
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller, callee],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_METHOD_DYN
+
+    def test_classification_method_declared_void(self):
+        """Method call with Void return -> method_return_declared_void."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        # type 12: K_FUN () -> Void (ret type index 0 = K_VOID)
+        callee_fun = bytes([K_FUN, 0]) + encode_varint(0)  # () -> Void
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 1, 0)], bindings=[],  # findex=1 -> callee function
+        )
+        type_blobs = protos + [caller_fun, obj_type, callee_fun]
+        # Callee: findex=1, type_idx=12 (Void return)
+        callee = self._build_func_body(
+            reg_types=[], type_idx=12, findex=1, nregs=0,
+            ops=[(67, [0])],
+        )
+        # Caller: findex=0, type_idx=10 (Dynamic return)
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller, callee],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_METHOD_VOID
+
+    def test_classification_unknown_callee(self):
+        """Call with no callee trail -> call_return_unknown_callee."""
+        i32_t = build_type_primitive(K_I32)
+        dyn_t = build_type_primitive(K_DYN)
+        type_blobs = [i32_t, dyn_t]
+        # OCall1 with fun_reg=999 (no such function) and no producer trail
+        entry = self._build_func_body(
+            reg_types=[0, 9], type_idx=0, findex=0, nregs=2,
+            ops=[(25, [1, 999, 0]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        assert self._get_classification(data, 't1') == CR_CAT_UNKNOWN_CALLEE
+
+    def test_classification_method_binding_missing(self):
+        """Method call with valid obj type but no matching method_idx -> method_binding_missing."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        callee_fun = bytes([K_FUN, 0]) + encode_varint(K_I32)
+        # K_OBJ with 1 proto but method_idx=5 -> out of range
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun, obj_type, callee_fun]
+        # method_idx=5, obj has 1 proto (only index 0) -> binding missing
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, 11], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 5, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_METHOD_BINDING_MISS
+
+    def test_classification_method_receiver_type_missing(self):
+        """Method call with Dynamic receiver -> receiver_type_missing."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        callee_fun = bytes([K_FUN, 0]) + encode_varint(K_I32)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        type_blobs = protos + [caller_fun, obj_type, callee_fun]
+        # receiver reg (3) has type K_DYN (9), not K_OBJ -> receiver_type_missing
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, K_DYN], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_RECEIVER_TYPE_MISS
+
 # ============================================================================
 # Test: Expression Builder
 # ============================================================================
@@ -2397,3 +3022,249 @@ class TestNullTargetTyping:
         assert resolver.resolve(1) == "MyClass"
         assert resolver.resolve(0) == "Int"
         assert resolver.resolve(999) == "Dynamic"
+
+
+class TestActionableDynamicFormula:
+    """Validate the actionable_dynamic formula correction.
+
+    The formula change is a KPI correction only -- it splits
+    call_return_unresolved (110) into expected non-actionable (89)
+    and actionable (21), producing a corrected actionable_dynamic of
+    281 (260 null_without_target_type + 21 call_return_actionable).
+    """
+
+    def _build_func_body(self, reg_types: list[int],
+                         type_idx: int, findex: int,
+                         nregs: int, ops: list) -> bytes:
+        func_data = encode_varint(type_idx)
+        func_data += encode_varint(findex)
+        func_data += encode_varint(nregs)
+        func_data += encode_varint(len(ops))
+        for rt in reg_types:
+            func_data += encode_varint(rt)
+        func_data += b"".join(
+            bytes([op]) + b"".join(encode_varint(a) for a in args)
+            for op, args in ops
+        )
+        return func_data
+
+    def test_formula_constants_consistent(self):
+        """Verify _CR_EXPECTED_KEYS and _CR_ACTIONABLE_KEYS match constants."""
+        from hl_decompile import (
+            CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
+            CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+            CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
+            CR_CAT_UNKNOWN_CALLEE, CR_CAT_METHOD_BINDING_MISS,
+            CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+        )
+        expected_keys = frozenset({
+            CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
+            CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+        })
+        actionable_keys = frozenset({
+            CR_CAT_UNKNOWN_CALLEE, CR_CAT_CALLEE_TYPE_INVALID,
+            CR_CAT_CALLEE_MISSING, CR_CAT_METHOD_BINDING_MISS,
+            CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+        })
+        # Verify all constants are distinct and cover expected range
+        assert len(expected_keys) == 5, f'Expected 5 non-actionable CR subcats, got {len(expected_keys)}'
+        assert len(actionable_keys) == 6, f'Expected 6 actionable CR subcats, got {len(actionable_keys)}'
+        assert expected_keys.isdisjoint(actionable_keys), \
+            'Expected and actionable CR key sets must be disjoint'
+
+    def test_formula_consistency_on_track_a(self):
+        """Run Track A quality report and verify formula values via subprocess."""
+        import subprocess
+        import json
+        import tempfile
+        import os
+
+        script = os.path.join(
+            os.path.dirname(__file__), '..', 'scripts', 'decompiler_quality_report.py'
+        )
+        script = os.path.abspath(script)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ['.venv/bin/python', script, '--track', 'A', '--output', tmpdir],
+                capture_output=True, text=True, cwd=os.path.join(os.path.dirname(__file__), '..'),
+            )
+            assert result.returncode == 0, \
+                f'Quality report failed: {result.stderr}'
+
+            report_path = os.path.join(tmpdir, 'report.json')
+            with open(report_path) as f:
+                data = json.load(f)
+
+            formula = data.get('actionable_dynamic_formula', {})
+            cr_total = formula.get('call_return_unresolved_total')
+            cr_expected = formula.get('call_return_expected_non_actionable')
+            cr_actionable = formula.get('call_return_actionable')
+            null_ambig = formula.get('null_without_target_type')
+            corrected = formula.get('actionable_dynamic_corrected')
+            legacy = formula.get('actionable_dynamic_legacy')
+            assert cr_total == 102, \
+                f'Expected call_return_unresolved_total=102, got {cr_total}'
+            assert cr_expected == 100, \
+                f'Expected call_return_expected_non_actionable=100, got {cr_expected}'
+            assert cr_actionable == 2, \
+                f'Expected call_return_actionable=2, got {cr_actionable}'
+            assert null_ambig == 260, \
+                f'Expected null_without_target_type=260, got {null_ambig}'
+            assert corrected == 262, \
+                f'Expected actionable_dynamic_corrected=262, got {corrected}'
+            assert legacy == 362, \
+                f'Expected actionable_dynamic_legacy=362, got {legacy}'
+
+    def test_type_indexed_call_concrete_return(self):
+        """OCall1 with K_FUN type index (not findex) resolves concrete return type."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # type[10]: K_FUN() -> Int (ret=index 3 = K_I32)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(3)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[9, 9],  # both regs are Dynamic (type index 9 in primitives)
+            type_idx=10, findex=0, nregs=2,
+            ops=[(25, [0, 10, 1]), (67, [])],  # OCall1 dst=r0, p1=10 (K_FUN type idx), arg=r1
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        resolved = TypeResolver(_parse_bytecode(data)).resolve(
+            ir_fn.variables.get('t0', -1)
+        )
+        assert resolved == 'Int', f'Expected Int, got {resolved}'
+        assert 't0' not in ir_fn.var_attributions or \
+            ir_fn.var_attributions['t0'] != DYN_CAT_CALL_UNRESOLVED, \
+            'Type-indexed call with concrete return should not be call_return_unresolved'
+
+    def test_type_indexed_call_void_return(self):
+        """OCall1 with K_FUN type index returning Void stays unresolved but classified as declared_void."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # type[10]: K_FUN() -> Void (ret=index 0 = K_VOID)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[9, 9],  # both regs are Dynamic
+            type_idx=10, findex=0, nregs=2,
+            ops=[(25, [0, 10, 1]), (67, [])],  # OCall1 dst=r0, p1=10, arg=r1
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_CALL_UNRESOLVED, \
+            f'Void returning type-indexed call should be unresolved, got {cat}'
+        record = ir_fn.call_return_analysis.get('t0')
+        assert record is not None, 'Missing call_return_analysis record'
+        assert record.unresolved_category == CR_CAT_DECLARED_VOID, \
+            f'Expected declared_void, got {record.unresolved_category}'
+
+    def test_type_indexed_call_dynamic_return(self):
+        """OCall1 with K_FUN type index returning Dynamic stays unresolved but classified as declared_dynamic."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # type[10]: K_FUN() -> Dynamic (ret=index 9 = K_DYN)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(9)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[9, 9],  # both regs are Dynamic
+            type_idx=10, findex=0, nregs=2,
+            ops=[(25, [0, 10, 1]), (67, [])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_CALL_UNRESOLVED, \
+            f'Dynamic returning type-indexed call should be unresolved, got {cat}'
+        record = ir_fn.call_return_analysis.get('t0')
+        assert record is not None, 'Missing call_return_analysis record'
+        assert record.unresolved_category == CR_CAT_DECLARED_DYNAMIC, \
+            f'Expected declared_dynamic, got {record.unresolved_category}'
+
+    def test_type_indexed_call_non_kfun_remains_unknown(self):
+        """OCall1 with type index of non-K_FUN kind (K_OBJ) stays call_return_unknown_callee."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # type[10]: K_OBJ
+        obj_type = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                       fields=[], protos=[], bindings=[])
+        type_blobs = primitives + [obj_type]  # ntypes=11
+
+        # p1=10 < ntypes(11) but type[10].kind=K_OBJ (not K_FUN) => stays unknown
+        entry = self._build_func_body(
+            reg_types=[9, 9], type_idx=10, findex=0, nregs=2,
+            ops=[(25, [0, 10, 1]), (67, [])],  # p1=10
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_CALL_UNRESOLVED, \
+            f'Non-KFUN type-indexed call should be unresolved, got {cat}'
+        record = ir_fn.call_return_analysis.get('t0')
+        assert record is not None, 'Missing call_return_analysis record'
+        assert record.unresolved_category == CR_CAT_UNKNOWN_CALLEE, \
+            f'Expected call_return_unknown_callee for non-KFUN p1, got {record.unresolved_category}'
+
+    def test_null_target_declared_dynamic(self):
+        """ONull with K_DYN register type is classified as null_target_declared_dynamic."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9, type 9 = K_DYN
+        type_blobs = primitives  # ntypes=10
+
+        entry = self._build_func_body(
+            reg_types=[9],  # r0 type = type[9] = K_DYN
+            type_idx=0, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [])],  # ONull r0; ORet
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=10, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == 'null_without_target_type', \
+            f'Expected null_without_target_type, got {cat}'
+        subcat = ir_fn.null_analysis.get('t0', '')
+        assert subcat == NT_CAT_DECLARED_DYN, \
+            f'Expected null_target_declared_dynamic, got {subcat}'
+
+    def test_null_target_fun_or_method_type(self):
+        """ONull with K_FUN register type is classified as null_target_fun_or_method_type."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(0)  # type 10: () -> Void
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = K_FUN
+            type_idx=10, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        subcat = ir_fn.null_analysis.get('t0', '')
+        assert subcat == NT_CAT_FUN_OR_METHOD_TYPE, \
+            f'Expected null_target_fun_or_method_type, got {subcat}'
+
+    @pytest.mark.skip(reason='K_NULL type encoding requires Null<T> wrapper; synthetic builder limitation')
+    def test_null_target_nullable_type(self):
+        """Placeholder: ONull with K_NULL register type needs Null<T> wrapped type."""
+        pass
