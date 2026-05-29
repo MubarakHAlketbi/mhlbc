@@ -81,6 +81,7 @@ DYN_CAT_EVIDENCE_MISSING = "instruction_evidence_missing"  # register has no use
 DYN_CAT_CALL_UNRESOLVED = "call_return_unresolved"    # call return type cannot be resolved
 DYN_CAT_VIRTUAL_UNSUPPORTED = "virtual_type_unsupported"  # K_VIRTUAL: anonymous struct without safe representation
 DYN_CAT_FUN_UNSUPPORTED    = "function_type_unsupported"  # K_FUN/K_METHOD that still can't be represented
+DYN_CAT_NULL_RESOLVED    = "resolved_null_target_type" # ONull with provable concrete target type
 DYN_CAT_OTHER         = "other_dynamic"               # uncategorized Dynamic
 
 # Opcode ranges for type propagation
@@ -823,7 +824,30 @@ def build_register_type_evidence(
         elif op == 5:    # OString
             evidence[args[0]] = _K_DYN
         elif op == 6:    # ONull
-            evidence[args[0]] = _K_DYN
+            # Default: set evidence to Dynamic.
+            # But if the register's declared type is a concrete nullable-compatible
+            # type (Obj, Struct, Bytes, Null, Ref, Virtual, Abstract, Array),
+            # preserve the register type so the variable declaration stays concrete
+            # and the null assignment is validated against the real type.
+            reg_idx = args[0]
+            if reg_idx < len(reg_types):
+                raw_type = reg_types[reg_idx]
+                if 0 <= raw_type < len(parser.types):
+                    kind = parser.types[raw_type].kind
+                    # Nullable-compatible kinds where the real type is more useful than Dynamic
+                    if kind in (K_OBJ, K_STRUCT, K_BYTES, K_NULL, K_REF,
+                                K_VIRTUAL, K_ABSTRACT, K_ARRAY, K_TYPE):
+                        # Don't add evidence; let the natural register type stand
+                        pass
+                    elif kind == K_DYN:
+                        evidence[reg_idx] = raw_type
+                    else:
+                        # Non-nullable primitives still get Dynamic evidence
+                        evidence[reg_idx] = _K_DYN
+                else:
+                    evidence[reg_idx] = _K_DYN
+            else:
+                evidence[args[0]] = _K_DYN
         elif op == 0 and len(args) >= 2:  # OMov
             src_type = evidence.get(args[1])
             if src_type is not None:
@@ -902,6 +926,9 @@ def _categorize_dynamic_attributions(
     For each variable whose type resolves to "Dynamic", determines the root cause
     category. Only includes variables where type resolution produces "Dynamic".
 
+    Also tracks variables where an ONull-defined register has a concrete
+    (non-Dynamic) register type — these are counted as resolved_null_target_type.
+
     Returns:
         Dict[var_name -> category_string]  (only for Dynamic-typed variables)
     """
@@ -970,6 +997,21 @@ def _categorize_dynamic_attributions(
         )
         attributions[vname] = category
 
+    # Track resolved nulls: variables written by ONull whose register type
+    # is a concrete nullable-compatible type (not Dynamic). These were previously
+    # categorized as null_without_target_type but are now resolved by the
+    # register type evidence fix in build_register_type_evidence.
+    for vname, vtype_idx in variables.items():
+        if vname in attributions:
+            continue  # already categorized as Dynamic
+        # Check if this variable is written by ONull
+        reg_idx = _var_name_to_reg(vname)
+        if reg_idx is not None and reg_idx in instr_dst_info:
+            if instr_dst_info[reg_idx] == 6:  # ONull
+                resolved = type_resolver.resolve(vtype_idx)
+                if resolved != "Dynamic":
+                    attributions[vname] = DYN_CAT_NULL_RESOLVED
+
     return attributions
 
 
@@ -1026,9 +1068,9 @@ def _determine_dynamic_category(
 
 
 def _var_name_to_reg(vname: str) -> Optional[int]:
-    """Extract register index from a variable name like p0, t1, u2, r3.
+    """Extract register index from a variable name like p0, t1, u2, r3, v4.
     Returns None if the name doesn't encode a register index."""
-    if vname.startswith(("p", "t", "u", "r")) and vname[1:].isdigit():
+    if vname.startswith(("p", "t", "u", "r", "v")) and vname[1:].isdigit():
         return int(vname[1:])
     return None
 

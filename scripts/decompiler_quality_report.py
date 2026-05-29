@@ -1181,6 +1181,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             'call_return_unresolved': 'Call return type unresolvable',
             'virtual_type_unsupported': 'K_VIRTUAL anonymous struct (no safe structural representation)',
             'function_type_unsupported': 'K_FUN/K_METHOD that still resolves to Dynamic',
+            'resolved_null_target_type': 'ONull with proven concrete target type (register type evidence)',
             'other_dynamic': 'Uncategorized Dynamic',
         }
         if dynamic_type_kind_breakdown:

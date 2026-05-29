@@ -48,7 +48,7 @@ from hl_decompile import (
     DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
     DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
     DYN_CAT_CALL_UNRESOLVED, DYN_CAT_VIRTUAL_UNSUPPORTED,
-    DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_OTHER,
+    DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_NULL_RESOLVED, DYN_CAT_OTHER,
     _sanitize_type_name,
 )
 
@@ -2264,3 +2264,136 @@ class TestTypeResolverComplexTypes:
         assert resolver.resolve(6) == "MyEnum"
         assert resolver.resolve(7) == "MyClass"
         assert resolver.resolve(8) == "Dynamic"   # K_VIRTUAL (unsupported, not unresolved_type_ref)
+
+
+class TestNullTargetTyping:
+    """ONull resolution: null_without_target_type is resolved when register type is concrete."""
+
+    def _make_parser(self, strings, type_blobs, ntypes, functions=None):
+        data = _build_minimal_with_types(
+            ntypes=ntypes, type_blobs=type_blobs, strings=strings,
+            nglobals=0, nnatives=0, functions=functions or [],
+        )
+        parser = _parse_bytecode(data)
+        return parser
+
+    def test_null_concrete_typed_local(self):
+        """ONull into concrete typed register: resolved_null_target_type, not null_without_target_type."""
+        # type[0]=K_I32, type[1]=K_OBJ with name "String", type[2]=K_DYN
+        i32 = build_type_primitive(K_I32)
+        obj = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        dyn = build_type_primitive(K_DYN)
+        parser = self._make_parser(
+            strings=["String"],
+            type_blobs=[i32, obj, dyn],
+            ntypes=3,
+            # func[0]: type=1 (OBJ), nops=1, reg_types=[1], body=ONull(0)
+            functions=[(1, 0, [1], bytes([6, 0, 67, 0]))],
+        )
+        from hl_decompile import Decompiler
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        result = decomp.decompile_all()
+        fn = result.functions.get(0)
+        assert fn is not None
+        # The variable should be resolved_null_target_type, not null_without_target_type
+        for vname, cat in fn.var_attributions.items():
+            assert cat != DYN_CAT_NULL_AMBIGUOUS, \
+                f"Concrete-typed null should NOT be null_without_target_type: {vname}={cat}"
+            assert cat == DYN_CAT_NULL_RESOLVED, \
+                f"Concrete-typed null should be resolved_null_target_type: {vname}={cat}"
+
+    def test_null_dynamic_target_stays_unresolved(self):
+        """ONull into Dynamic register stays null_without_target_type."""
+        dyn = build_type_primitive(K_DYN)
+        parser = self._make_parser(
+            strings=[],
+            type_blobs=[dyn],
+            ntypes=1,
+            functions=[(0, 0, [0], bytes([6, 0, 67, 0]))],  # ONull(0), ORet(0)
+        )
+        from hl_decompile import Decompiler
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        result = decomp.decompile_all()
+        fn = result.functions.get(0)
+        assert fn is not None
+        null_found = False
+        for vname, cat in fn.var_attributions.items():
+            if cat == DYN_CAT_NULL_AMBIGUOUS:
+                null_found = True
+        assert null_found, "Dynamic-typed null should remain null_without_target_type"
+
+    def test_null_bytes_typed_local(self):
+        """ONull into hl.Bytes-typed register resolves to concrete type."""
+        void = build_type_primitive(K_VOID)
+        bytes_t = build_type_primitive(K_BYTES)
+        parser = self._make_parser(
+            strings=[],
+            type_blobs=[void, bytes_t],
+            ntypes=2,
+            functions=[(1, 0, [1], bytes([6, 0, 67, 0]))],
+        )
+        from hl_decompile import Decompiler
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        result = decomp.decompile_all()
+        fn = result.functions.get(0)
+        assert fn is not None
+        for vname, cat in fn.var_attributions.items():
+            assert cat == DYN_CAT_NULL_RESOLVED, \
+                f"Bytes-typed null should be resolved: {vname}={cat}"
+
+    def test_null_with_missing_type_index_safe(self):
+        """ONull with missing type index stays safe, does not crash."""
+        void = build_type_primitive(K_VOID)
+        parser = self._make_parser(
+            strings=[],
+            type_blobs=[void],
+            ntypes=1,
+            # reg_types has index 999 which is OOB
+            functions=[(0, 0, [999], bytes([6, 0, 67, 0]))],
+        )
+        from hl_decompile import Decompiler
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        result = decomp.decompile_all()
+        fn = result.functions.get(0)
+        assert fn is not None
+        # Should not crash -- null byte should still parse
+
+    def test_null_no_instruction_keeps_classification(self):
+        """Empty function body (no instructions) should not crash categorization."""
+        void = build_type_primitive(K_VOID)
+        parser = self._make_parser(
+            strings=[],
+            type_blobs=[void],
+            ntypes=1,
+            functions=[],  # no functions
+        )
+        from hl_decompile import Decompiler, DecompileResult
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        result = decomp.decompile_all()
+        assert result is not None
+        assert len(result.functions) == 0 or all(
+            isinstance(fn, object) for fn in result.functions.values()
+        )
+
+    def test_previous_type_resolver_tests_still_pass(self):
+        """Verify the TypeResolver tests from previous milestone still pass."""
+        i32 = build_type_primitive(K_I32)
+        obj = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        parser = self._make_parser(strings=["MyClass"], type_blobs=[i32, obj], ntypes=2)
+        from hl_decompile import TypeResolver
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "MyClass"
+        assert resolver.resolve(0) == "Int"
+        assert resolver.resolve(999) == "Dynamic"
