@@ -1,6 +1,28 @@
 # Session Tracking
 
-## Session 29 — May 29, 2026
+## Session 30 — May 29, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 512 passed, 3 skipped. Gates 1-6 complete. g6.0-21-gc8366c9, clean working tree.
+- Session 29 closed with 4 milestones: signature-aware register naming, dead register pruning, ORet/OThrow/ORethrow src capture, register type evidence.
+- Dynamic Type Attribution and TypeResolver Accuracy — **COMPLETE**
+  - **8 Dynamic categories** defined: genuine_dynamic_kind, invalid_type_index_dynamic, unresolved_type_ref, null_without_target_type, string_or_bytes_ambiguous, instruction_evidence_missing, call_return_unresolved, other_dynamic.
+  - **`_categorize_dynamic_attributions()`** function post-hoc categorizes variable declarations that resolve to Dynamic.
+  - **`var_attributions: Dict[str, str]`** added to IRFunction — stores per-variable Dynamic category.
+  - **TypeResolver.resolve()** normalized OOB type indices to "Dynamic" instead of `type[N]`.
+  - **Safe propagation improvements**: ONot→Bool, arithmetic binary (7-19) when same numeric type, ONeg numeric propagation, ORet fills return register from sig.ret_type.
+  - **Quality report updated**: `analyze_dynamic_attributions()`, per-fixture and aggregate breakdown table, actionable_dynamic metric, report top-problems update.
+  - **10 new tests** in TestDynamicAttribution covering all categories + propagation.
+  - **522 passed, 3 skipped** (+10 tests, 0 regressions).
+- **Track A results:**
+  - Dynamic type refs (regex): 2786 (was 2695, +91 from OOB normalization)
+  - Actionable dynamic: 1099
+  - genuine_dynamic_kind: 631, null_without_target_type: 462, unresolved_type_ref: 371, call_return_unresolved: 266
+  - invalid_type_index_dynamic: 0, string_or_bytes_ambiguous: 0, instruction_evidence_missing: 0
+- **Track B sample (200 funcs):** 0 errors, Dynamic attribution tracked.
+- **Awaiting Sato's direction.**
+
+
 - Start: New session initialized. Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh from g6.0-20-g1bcc58b, 498/3.
 - **M1: Signature-aware register naming** `d08d538` — FunctionSig built before VariableMapper, sig.has_this/prams drive naming, no hardcoded this/ret for static funcs. +4 tests. 502 pass.

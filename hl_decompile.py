@@ -76,6 +76,22 @@ HLOOP_NAMES = {
     K_GUID: "GUID", K_HLAST: "Any",
 }
 
+# Dynamic attribution categories (used for quality reporting)
+DYN_CAT_GENUINE       = "genuine_dynamic_kind"        # type kind K_DYN or K_DYNOBJ
+DYN_CAT_INVALID_IDX   = "invalid_type_index_dynamic"  # type index OOB/garbage -> normalized to Dynamic
+DYN_CAT_UNRESOLVED_REF = "unresolved_type_ref"        # valid index but TypeResolver can't produce useful type
+DYN_CAT_NULL_AMBIGUOUS = "null_without_target_type"   # ONull / null-derived without safe target type
+DYN_CAT_STRING_BYTES  = "string_or_bytes_ambiguous"   # OString/OBytes without safe Haxe type mapping
+DYN_CAT_EVIDENCE_MISSING = "instruction_evidence_missing"  # register has no useful evidence, fallback to garbage type
+DYN_CAT_CALL_UNRESOLVED = "call_return_unresolved"    # call return type cannot be resolved
+DYN_CAT_OTHER         = "other_dynamic"               # uncategorized Dynamic
+
+# Opcode ranges for type propagation
+_ARITHMETIC_BINARY_OPS = frozenset(range(7, 20))   # OAdd..OXor (dst=a op b)
+_ARITHMETIC_UNARY_OPS  = {20, 21}                  # ONeg (20), ONot (21)
+_INCR_DECR_OPS         = {22, 23}                  # OIncr, ODecr
+_CALL_OPS              = frozenset(range(24, 33))  # OCall0..OCallClosure
+_CONVERSION_OPS        = frozenset(range(59, 66))  # OToDyn..OToVirtual
 
 # ============================================================================
 # Data Structures — Intermediate Representation (IR)
@@ -221,6 +237,7 @@ class IRFunction:
     variables: Dict[str, int]      # var_name → type_idx
     raw_regnames: Dict[int, str]   # reg → assigned var name
     errors: List[str] = field(default_factory=list)
+    var_attributions: Dict[str, str] = field(default_factory=dict)  # var_name → Dynamic category
 
 
 @dataclass
@@ -758,6 +775,8 @@ class VariableMapper:
 
 # Type-kind constants for type evidence
 _K_I32 = 3
+_K_I64 = 4
+_K_F32 = 5
 _K_F64 = 6
 _K_BOOL = 7
 _K_DYN = 9
@@ -776,10 +795,13 @@ def build_register_type_evidence(
       2. OString->Dynamic (type index 9)
       3. OMov propagation: dst register inherits src register's type
       4. Conversion ops: toDyn->Dynamic, toInt->I32, etc.
-      5. Function header reg_types -- only if the index is valid
-      6. Signature params -- from sig.params
+      5. Arithmetic binary: both operands same concrete numeric type -> result same type
+      6. ONot -> Bool, ONeg -> same numeric type as source
+      7. ORet: returned register gets function return type
+      8. Function header reg_types -- only if the index is valid
+      9. Signature params -- from sig.params
 
-    Does NOT infer from arithmetic, calls, or field access (deferred).
+    Does NOT infer from calls or field access (deferred).
     """
     evidence: Dict[int, int] = {}
 
@@ -816,6 +838,34 @@ def build_register_type_evidence(
         elif op == 62 and len(args) >= 1:  # toInt
             evidence[args[0]] = _K_I32
 
+        # Arithmetic binary ops (7-19): dst = a op b -> same type as operands
+        elif op in _ARITHMETIC_BINARY_OPS and len(args) >= 3:
+            a_type = _get_evidence_or_reg_type(args[1], evidence, reg_types, parser)
+            b_type = _get_evidence_or_reg_type(args[2], evidence, reg_types, parser)
+            if a_type is not None and b_type is not None and a_type == b_type:
+                # Only propagate if both operands have the same concrete numeric type
+                if a_type in (_K_I32, _K_F64, _K_I64, _K_F32):
+                    evidence[args[0]] = a_type
+
+        # ONeg (20): dst = -src -> same type as source
+        elif op == 20 and len(args) >= 2:
+            src_type = _get_evidence_or_reg_type(args[1], evidence, reg_types, parser)
+            if src_type is not None and src_type in (_K_I32, _K_F64, _K_I64, _K_F32):
+                evidence[args[0]] = src_type
+
+        # ONot (21): dst = !src -> Bool
+        elif op == 21 and len(args) >= 2:
+            evidence[args[0]] = _K_BOOL
+
+        # ORet (67): returned register gets function return type
+        elif op == 67 and len(args) >= 1:
+            ret_type = sig.ret_type
+            if ret_type >= 0:
+                dst_reg = args[0]
+                # Only set if no stronger evidence exists
+                if dst_reg not in evidence:
+                    evidence[dst_reg] = ret_type
+
     for reg_idx in range(len(reg_types)):
         if reg_idx not in evidence:
             rt = reg_types[reg_idx]
@@ -823,6 +873,167 @@ def build_register_type_evidence(
                 evidence[reg_idx] = rt
 
     return evidence
+
+
+def _get_evidence_or_reg_type(
+    reg_idx: int,
+    evidence: Dict[int, int],
+    reg_types: List[int],
+    parser: Any,
+) -> Optional[int]:
+    """Get the best known type for a register, checking evidence first then reg_types."""
+    if reg_idx in evidence:
+        return evidence[reg_idx]
+    if 0 <= reg_idx < len(reg_types):
+        rt = reg_types[reg_idx]
+        if rt >= 0 and (rt <= 24 or (parser and 0 < rt < len(parser.types))):
+            return rt
+    return None
+
+
+def _categorize_dynamic_attributions(
+    variables: Dict[str, int],
+    reg_type_evidence: Dict[int, int],
+    instructions: List[Instruction],
+    reg_types: List[int],
+    sig: 'FunctionSig',
+    type_resolver: 'TypeResolver',
+    parser: Any,
+) -> Dict[str, str]:
+    """Post-hoc categorization of why each variable ended up with Dynamic type.
+
+    For each variable whose type resolves to "Dynamic", determines the root cause
+    category. Only includes variables where type resolution produces "Dynamic".
+
+    Returns:
+        Dict[var_name -> category_string]  (only for Dynamic-typed variables)
+    """
+    attributions: Dict[str, str] = {}
+
+    # Build: for each instruction, track which dst register is set and by what opcode
+    instr_dst_info: Dict[int, int] = {}  # reg_idx -> opcode that writes to it (first write)
+    for instr in instructions:
+        # Determine dst register based on opcode
+        dst_reg = None
+        args = instr.args
+        if not args:
+            continue
+        op = instr.opcode
+        if op == 0:  # OMov
+            dst_reg = args[0]
+        # Constants: args[0] is dst
+        elif op in (1, 2, 3, 4, 5, 6):
+            dst_reg = args[0]
+        # Arithmetic binary: args[0] is dst
+        elif op in _ARITHMETIC_BINARY_OPS:
+            dst_reg = args[0]
+        # Unary arithmetic: args[0] is dst
+        elif op in _ARITHMETIC_UNARY_OPS:
+            dst_reg = args[0]
+        # Conversions: args[0] is dst
+        elif op in _CONVERSION_OPS:
+            dst_reg = args[0]
+        # Calls: args[0] is dst
+        elif op in _CALL_OPS:
+            dst_reg = args[0]
+        # OField: args[0] is dst
+        elif op in (38, 42):
+            dst_reg = args[0]
+        # OGetThis: args[0] is dst
+        elif op == 40:
+            dst_reg = args[0]
+        # OGetGlobal: args[0] is dst
+        elif op == 36:
+            dst_reg = args[0]
+        # Closures: args[0] is dst
+        elif op in (33, 34, 35):
+            dst_reg = args[0]
+        # Type ops: args[0] is dst
+        elif op in (82, 83, 84, 85, 86):
+            dst_reg = args[0]
+        # ORef, OUnref: args[0] is dst
+        elif op in (87, 88):
+            dst_reg = args[0]
+        # OMakeEnum: args[0] is dst
+        elif op == 90:
+            dst_reg = args[0]
+
+        if dst_reg is not None and dst_reg not in instr_dst_info:
+            instr_dst_info[dst_reg] = op
+
+    for vname, vtype_idx in variables.items():
+        resolved = type_resolver.resolve(vtype_idx)
+        if resolved != "Dynamic":
+            continue
+
+        # Determine the category
+        category = _determine_dynamic_category(
+            vname, vtype_idx, reg_type_evidence, instructions,
+            reg_types, sig, type_resolver, parser, instr_dst_info
+        )
+        attributions[vname] = category
+
+    return attributions
+
+
+def _determine_dynamic_category(
+    vname: str,
+    type_idx: int,
+    reg_type_evidence: Dict[int, int],
+    instructions: List[Instruction],
+    reg_types: List[int],
+    sig: 'FunctionSig',
+    type_resolver: 'TypeResolver',
+    parser: Any,
+    instr_dst_info: Dict[int, int],
+) -> str:
+    """Determine why a single variable has Dynamic type."""
+
+    # 1. Check if type_idx itself is out of bounds or negative
+    if type_idx < 0 or (parser and type_idx >= len(parser.types)):
+        return DYN_CAT_INVALID_IDX
+
+    # 2. Check instruction-level evidence FIRST (overrides type-kind attribution)
+    reg_idx = _var_name_to_reg(vname)
+    if reg_idx is not None and reg_idx in instr_dst_info:
+        op = instr_dst_info[reg_idx]
+        if op == 5:  # OString
+            return DYN_CAT_STRING_BYTES
+        if op == 4:  # OBytes
+            return DYN_CAT_STRING_BYTES
+        if op == 6:  # ONull
+            return DYN_CAT_NULL_AMBIGUOUS
+        if op in _CALL_OPS:
+            return DYN_CAT_CALL_UNRESOLVED
+
+    # 3. Check if the type kind is genuinely K_DYN or K_DYNOBJ
+    if parser and 0 <= type_idx < len(parser.types):
+        t = parser.types[type_idx]
+        if t.kind in (K_DYN, K_DYNOBJ):
+            return DYN_CAT_GENUINE
+
+    # 4. Check if the type kind resolves to Dynamic via HLOOP_NAMES
+    if parser and 0 <= type_idx < len(parser.types):
+        t = parser.types[type_idx]
+        kind_name = HLOOP_NAMES.get(t.kind)
+        if kind_name == "Dynamic":
+            # K_FUN, K_OBJ, K_VIRTUAL, K_ABSTRACT, K_METHOD all map to "Dynamic"
+            return DYN_CAT_UNRESOLVED_REF
+
+    # 5. Check if evidence was missing (fallback to reg_types)
+    if reg_idx is not None and reg_idx not in reg_type_evidence:
+        return DYN_CAT_EVIDENCE_MISSING
+
+    # 6. Fallback to unresolved type reference
+    return DYN_CAT_UNRESOLVED_REF
+
+
+def _var_name_to_reg(vname: str) -> Optional[int]:
+    """Extract register index from a variable name like p0, t1, u2, r3.
+    Returns None if the name doesn't encode a register index."""
+    if vname.startswith(("p", "t", "u", "r")) and vname[1:].isdigit():
+        return int(vname[1:])
+    return None
 
 
 # ============================================================================
@@ -1960,7 +2171,8 @@ class TypeResolver:
             return self._cache[type_idx]
 
         if type_idx >= len(self.parser.types):
-            return f"type[{type_idx}]"
+            # Normalize invalid indices to Dynamic (diagnostic preserved in reporting)
+            return "Dynamic"
 
         t = self.parser.types[type_idx]
         kind = t.kind
@@ -2777,6 +2989,7 @@ class Decompiler:
                 variables={},
                 raw_regnames={},
                 errors=["no instructions"],
+                var_attributions={},
             )
 
         # Step 1: Build function signature FIRST (before variable mapping)
@@ -2831,6 +3044,12 @@ class Decompiler:
                     else:
                         variables[rname] = reg_types[reg_idx]
 
+        # Step 7: Compute Dynamic type attributions (quality reporting)
+        var_attributions = _categorize_dynamic_attributions(
+            variables, reg_type_evidence, instructions, reg_types, sig,
+            self.type_resolver, self.parser,
+        )
+
         # Override name from the function data
         fn_name = func.name or sig.name
 
@@ -2844,6 +3063,7 @@ class Decompiler:
             variables=variables,
             raw_regnames=reg_names,
             errors=[],
+            var_attributions=var_attributions,
         )
 
         return ir_fn

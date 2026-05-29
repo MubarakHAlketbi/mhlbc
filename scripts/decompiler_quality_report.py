@@ -48,6 +48,9 @@ from hl_disasm import Disassembler
 from hl_decompile import (
     Decompiler, HaxeWriter, TypeResolver, DecompileResult,
     IRFunction, IRStmt,
+    DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
+    DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
+    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_OTHER,
 )
 
 # ============================================================================
@@ -391,6 +394,32 @@ def analyze_structured_flow(
         "structured_if_count": if_count,
         "structured_while_count": while_count,
         "unstructured_goto_fallback": "not_measured",
+    }
+
+
+def analyze_dynamic_attributions(
+    result: DecompileResult,
+) -> Dict[str, Any]:
+    """Aggregate Dynamic type attribution categories from decompiled functions.
+
+    Returns a dict with:
+    - total_dynamic: total count of Dynamic variable declarations (matches regex-based count)
+    - actionable_dynamic: total_dynamic - genuine_dynamic_kind - invalid_type_index_dynamic
+    - category_breakdown: dict mapping each category name to its count
+    """
+    category_counts: Dict[str, int] = defaultdict(int)
+    for ir_fn in result.functions.values():
+        for category in ir_fn.var_attributions.values():
+            category_counts[category] += 1
+
+    total_dynamic = sum(category_counts.values())
+    benign = category_counts.get(DYN_CAT_GENUINE, 0) + category_counts.get(DYN_CAT_INVALID_IDX, 0)
+    actionable_dynamic = max(0, total_dynamic - benign)
+
+    return {
+        "total_dynamic": total_dynamic,
+        "actionable_dynamic": actionable_dynamic,
+        "category_breakdown": dict(category_counts),
     }
 
 
@@ -800,6 +829,7 @@ def run_track_a() -> Dict[str, Any]:
         cls_metrics = analyze_class_level(parser, result)
         src_metrics = analyze_source_text(sources)
         name_metrics = analyze_name_resolution(parser, result, sources)
+        dyn_metrics = analyze_dynamic_attributions(result)
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
         flow_metrics = analyze_structured_flow(result)
 
@@ -808,6 +838,7 @@ def run_track_a() -> Dict[str, Any]:
             "class_level": cls_metrics,
             "source_text_analysis": src_metrics,
             "name_resolution": name_metrics,
+            "dynamic_attribution": dyn_metrics,
             "fidelity": fidelity,
             "structured_flow": flow_metrics,
             "output_files": len(sources),
@@ -922,6 +953,11 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
     # Structured flow metrics
     flow_metrics = analyze_structured_flow(result)
     inventory["structured_flow"] = flow_metrics
+
+    # Dynamic attribution
+    if result:
+        dyn_metrics = analyze_dynamic_attributions(result)
+        inventory["dynamic_attribution"] = dyn_metrics
 
     return inventory
 
@@ -1049,32 +1085,65 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         total_null_all = 0
         total_field_all = 0
         total_dynamic_all = 0
+        total_actionable_dynamic = 0
+        dynamic_category_counts: Dict[str, int] = defaultdict(int)
         total_if_all = 0
         total_while_all = 0
 
-        for fname, fd in track_a["fixtures"].items():
-            total_funcs += fd["function_level"]["total_functions"]
-            total_emitted += fd["function_level"]["functions_emitted"]
-            patterns = fd["source_text_analysis"].get("fallback_patterns", {})
-            total_goto_all += patterns.get("raw_goto_comments", 0)
-            total_label_all += patterns.get("raw_label_comments", 0)
-            total_null_all += patterns.get("nullcheck", 0)
-            total_field_all += fd["name_resolution"]["unresolved_field_name_instances"]
-            total_dynamic_all += fd["name_resolution"]["dynamic_type_references"]
-            sf = fd.get("structured_flow", {})
-            total_if_all += sf.get("structured_if_count", 0)
-            total_while_all += sf.get("structured_while_count", 0)
+        for fname, fd in track_a['fixtures'].items():
+            total_funcs += fd['function_level']['total_functions']
+            total_emitted += fd['function_level']['functions_emitted']
+            patterns = fd['source_text_analysis'].get('fallback_patterns', {})
+            total_goto_all += patterns.get('raw_goto_comments', 0)
+            total_label_all += patterns.get('raw_label_comments', 0)
+            total_null_all += patterns.get('nullcheck', 0)
+            total_field_all += fd['name_resolution']['unresolved_field_name_instances']
+            total_dynamic_all += fd['name_resolution']['dynamic_type_references']
+            dyn_attr = fd.get('dynamic_attribution', {})
+            total_actionable_dynamic += dyn_attr.get('actionable_dynamic', 0)
+            for cat, count in dyn_attr.get('category_breakdown', {}).items():
+                dynamic_category_counts[cat] += count
+            sf = fd.get('structured_flow', {})
+            total_if_all += sf.get('structured_if_count', 0)
+            total_while_all += sf.get('structured_while_count', 0)
 
-        md_lines.append(f"- **Total functions:** {total_funcs}")
-        md_lines.append(f"- **Total emitted:** {total_emitted}")
-        md_lines.append(f"- **Raw goto comments (preserved):** {total_goto_all}")
-        md_lines.append(f"- **Raw label comments (preserved):** {total_label_all}")
-        md_lines.append(f"- **Structured if statements:** {total_if_all}")
-        md_lines.append(f"- **Structured while statements:** {total_while_all}")
-        md_lines.append(f"- **Nullcheck comments:** {total_null_all}")
-        md_lines.append(f"- **Unresolved field names (fN):** {total_field_all}")
-        md_lines.append(f"- **Dynamic type refs:** {total_dynamic_all}")
-        md_lines.append("")
+        md_lines.append(f'- **Total functions:** {total_funcs}')
+        md_lines.append(f'- **Total emitted:** {total_emitted}')
+        md_lines.append(f'- **Raw goto comments (preserved):** {total_goto_all}')
+        md_lines.append(f'- **Raw label comments (preserved):** {total_label_all}')
+        md_lines.append(f'- **Structured if statements:** {total_if_all}')
+        md_lines.append(f'- **Structured while statements:** {total_while_all}')
+        md_lines.append(f'- **Nullcheck comments:** {total_null_all}')
+        md_lines.append(f'- **Unresolved field names (fN):** {total_field_all}')
+        md_lines.append(f'- **Dynamic type refs (regex):** {total_dynamic_all}')
+        md_lines.append(f'- **Actionable dynamic refs:** {total_actionable_dynamic}')
+        md_lines.append('')
+
+        # Dynamic category breakdown
+        if dynamic_category_counts:
+            md_lines.append('#### Dynamic Type Attribution Breakdown')
+            md_lines.append('')
+            md_lines.append('| Category | Count | Description |')
+            md_lines.append('|----------|-------|-------------|')
+            _DYNAMIC_DESCRIPTIONS = {
+                'genuine_dynamic_kind': 'Type kind K_DYN or K_DYNOBJ (genuine HL Dynamic)',
+                'invalid_type_index_dynamic': 'Invalid/garbage type index normalized to Dynamic',
+                'unresolved_type_ref': 'Valid type index but TypeResolver cannot produce useful type',
+                'null_without_target_type': 'ONull / null-derived without safe target type',
+                'string_or_bytes_ambiguous': 'OString/OBytes without safe Haxe type mapping',
+                'instruction_evidence_missing': 'Register has no evidence, fell back to garbage',
+                'call_return_unresolved': 'Call return type unresolvable',
+                'other_dynamic': 'Uncategorized Dynamic',
+            }
+            for cat in sorted(dynamic_category_counts.keys(),
+                              key=lambda c: -dynamic_category_counts[c]):
+                desc = _DYNAMIC_DESCRIPTIONS.get(cat, cat)
+                md_lines.append(f'| {cat} | {dynamic_category_counts[cat]} | {desc} |')
+            md_lines.append('')
+            md_lines.append(
+                '> Actionable dynamic = total - genuine_dynamic_kind'
+                f' - invalid_type_index_dynamic = {total_actionable_dynamic}')
+            md_lines.append('')
 
     # ── Track B ─────────────────────────────────────────────────────────────
     if track_b:

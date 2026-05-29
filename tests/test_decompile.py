@@ -43,6 +43,9 @@ from hl_decompile import (
     K_VOID, K_I32, K_F64, K_BOOL, K_DYN, K_OBJ, K_STRUCT, K_FUN, K_METHOD,
     K_ENUM, K_ABSTRACT, K_REF, K_NULL, K_PACKED, K_BYTES, K_ARRAY, K_TYPE,
     K_DYNOBJ, K_HLAST,
+    DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
+    DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
+    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_OTHER,
 )
 
 
@@ -790,6 +793,232 @@ class TestRegisterTypePropagation:
         assert r1_name != "p1", "used-only reg should NOT be 'p1'"
 
 
+class TestDynamicAttribution:
+    """Test Dynamic type categorization in decompiler output."""
+
+    def _make_kfun_type(self, arg_type_indices: list[int],
+                        ret_type_idx: int = 0) -> bytes:
+        data = bytes([K_FUN, len(arg_type_indices)])
+        for a in arg_type_indices:
+            data += encode_varint(a)
+        data += encode_varint(ret_type_idx)
+        return data
+
+    def _build_func_body(self, reg_types: list[int],
+                         type_idx: int, findex: int,
+                         nregs: int, ops: list) -> bytes:
+        func_data = encode_varint(type_idx)
+        func_data += encode_varint(findex)
+        func_data += encode_varint(nregs)
+        func_data += encode_varint(len(ops))
+        for rt in reg_types:
+            func_data += encode_varint(rt)
+        func_data += b"".join(
+            bytes([op]) + b"".join(encode_varint(a) for a in args)
+            for op, args in ops
+        )
+        return func_data
+
+    def test_genuine_dynamic_kind(self):
+        """Register with K_DYN reg_type (from header, no instruction evidence) gets genuine_dynamic_kind."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # 0-9 primitives
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # ()->Void
+        type_blobs = primitives + [fun_type]  # type 10 = fun
+        # OJTrue r0, 0 — jump reads r0 but doesn't write, r0 gets reg_type K_DYN (no instruction evidence)
+        ops = [(44, [0, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN],  # reg 0 type = type[9] = K_DYN
+            type_idx=10, findex=0, nregs=1, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        # u0 is used-only register with reg_type K_DYN (no instruction evidence)
+        cat = ir_fn.var_attributions.get('u0', '')
+        assert cat == DYN_CAT_GENUINE, f'Expected genuine_dynamic_kind, got {cat}'
+
+    def test_invalid_type_index_dynamic(self):
+        """Register with invalid type index (no such type in pool) gets invalid_type_index_dynamic."""
+        # Use a minimal pool where type index 9 (K_DYN) doesn't exist
+        i32_type = build_type_primitive(K_I32)  # type 0
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # type 1
+        # OInt r0=42, ONull r1 (r1 gets evidence _K_DYN=9 which is OOB), ORet r0
+        ops = [(1, [0, 0]), (6, [1]), (67, [0])]
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_DYN],
+            type_idx=1, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        # r1 (t1) has evidence _K_DYN=9 but type pool has only 0-1: invalid_type_index
+        cat = ir_fn.var_attributions.get('t1', '')
+        assert cat == DYN_CAT_INVALID_IDX, f'Expected invalid_type_index_dynamic, got {cat}'
+
+    def test_omov_propagation_categorized(self):
+        """OMov propagation preserves type and category."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(1, [0, 0]), (0, [1, 0]), (67, [1])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_DYN],
+            type_idx=10, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        assert ir_fn.variables.get('t0') == K_I32
+        assert ir_fn.variables.get('t1') == K_I32
+        assert 't0' not in ir_fn.var_attributions
+        assert 't1' not in ir_fn.var_attributions
+
+    def test_null_is_dynamic_not_string(self):
+        """ONull produces Dynamic with null_without_target_type category."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(1, [0, 0]), (6, [1]), (67, [0])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_DYN],
+            type_idx=10, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t1', '')
+        assert cat == DYN_CAT_NULL_AMBIGUOUS, f'Expected null_without_target_type, got {cat}'
+
+    def test_string_is_dynamic_ambiguous(self):
+        """OString produces Dynamic with string_or_bytes_ambiguous category."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(5, [0, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN], type_idx=10, findex=0, nregs=1, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            strings=['hello'], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_STRING_BYTES, f'Expected string_or_bytes_ambiguous, got {cat}'
+
+    def test_bytes_is_bytes_not_string(self):
+        """OBytes produces hl.Bytes (K_BYTES), not String or Dynamic."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(4, [0, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN], type_idx=10, findex=0, nregs=1, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry], version=5,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        assert ir_fn.variables.get('t0') == 8, \
+            f'OBytes should produce type 8 (K_BYTES), got {ir_fn.variables.get("t0")}'
+        assert 't0' not in ir_fn.var_attributions
+
+    def test_onot_produces_bool(self):
+        """ONot produces Bool type evidence."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(1, [0, 0]), (21, [1, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_DYN], type_idx=10, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        assert ir_fn.variables.get('t1') == K_BOOL
+
+    def test_arithmetic_binary_preserves_type(self):
+        """OAdd with both Int operands produces Int result."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(1, [0, 0]), (1, [1, 0]), (7, [2, 0, 1]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN], type_idx=10, findex=0, nregs=3, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            ints=[10, 20], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        assert ir_fn.variables.get('t2') == K_I32, \
+            f'OAdd should produce I32, got {ir_fn.variables.get("t2")}'
+
+    def test_type_n_leakage_prevented(self):
+        """Invalid type indices do not produce 'type[N]' in Haxe output."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(1, [0, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, 999],
+            type_idx=10, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser)
+        src = writer.write_function(ir_fn)
+        assert 'type[' not in src
+
+    def test_call_return_unresolved(self):
+        """Call return type not available produces call_return_unresolved."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        fun_type = bytes([K_FUN, 0]) + encode_varint(0)
+        type_blobs = primitives + [fun_type]
+        ops = [(24, [0, 1]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_I32], type_idx=10, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[func_entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_CALL_UNRESOLVED, \
+            f'OCall0 should produce call_return_unresolved, got {cat}'
 # ============================================================================
 # Test: Expression Builder
 # ============================================================================
