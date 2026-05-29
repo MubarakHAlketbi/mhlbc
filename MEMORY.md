@@ -1,26 +1,14 @@
 # Session Tracking
 
 ## Session 29 — May 29, 2026
-- Start: New session initialized on Discord OmniDecomp thread.
-- Model: deepseek/deepseek-v4-flash via OpenRouter.
-- Project state: 498 passed, 3 skipped. Gates 1-6 complete. g6.0-20-g1bcc58b, clean working tree.
-- Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh.
-- **Milestone 1: Signature-aware register naming** (commit `d08d538`)
-  - Build FunctionSig before VariableMapper; sig.has_this/prams drive naming
-  - No hardcoded "this"/"ret" for static funcs; param names from sig.params
-  - Backward compat via optional sig= param
-  - Tests: +4 integration, 502 pass
-- **Milestone 2: Bare Register Emission Audit + Dead Register Pruning** (commit `8b87dd8`)
-  - Dead register declarations pruned (0 defs AND 0 uses -> no 'var rN:')
-  - _build_condition uses mapped reg_names instead of raw 'r{reg}' format
-  - _get_src_regs fixed for binary jump ops (op 46-57) — captures both operands
-  - VariableMapper iterates full_reg_range (max defs/uses key) not just nregs
-  - Quality report: added rN_context_classification breakdown + r0-9 tracking
-  - r10+ bare_register_ref: 4540 -> 0 (-99.2% reduction)
-  - r0-9 remaining: 19-21/fixture (single-register ORet returns — not covered by _get_src_regs for op 67)
-  - Track A: 7/7 fixtures, 0 errors, 0 unknown opcodes
-  - Tests: +2 (dead_register_no_variable_declaration, live_high_register_still_appears), 504 passed, 3 skipped
-- Awaiting Sato's review.
+- Start: New session initialized. Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh from g6.0-20-g1bcc58b, 498/3.
+- **M1: Signature-aware register naming** `d08d538` — FunctionSig built before VariableMapper, sig.has_this/prams drive naming, no hardcoded this/ret for static funcs. +4 tests. 502 pass.
+- **M2: Dead register pruning + _build_condition fix + _get_src_regs range** `8b87dd8` — r10+ 4540→0. r0-9 19-21→0 after ORet fix in M3. Quality report: context classification. +2 tests. 504 pass.
+- **M3: ORet/OThrow/ORethrow src capture** `8506ecd` — _get_src_regs for ops 67-69. r0-9 bare_ref→0. +3 tests. 507 pass.
+- **M4: Register type evidence + uN prefix** `1fe24a3` — build_register_type_evidence() provides concrete types (Int, Float, Bool) over garbage header data. pN→uN for used-only non-param. +5 tests. 512 pass.
+- **Track A final**: 7/7, 0 errors, 0 unknown opcodes, r10+=0, r0-9=0. Dynamic types 2,695.
+- **Session closed.**
 
 ## Session 28 — May 28, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
