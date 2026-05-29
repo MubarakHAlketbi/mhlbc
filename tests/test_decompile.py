@@ -560,6 +560,75 @@ class TestSignatureAwareRegisterNaming:
         # With no params, regs are locals named by lifetime
         assert r0 in ("t0", "v0", "r0"), f"unexpected reg0 name: {r0}"
 
+    def test_dead_register_no_variable_declaration(self):
+        """Dead register (no defs, no uses) should NOT be emitted as 'var rN'."""
+        # Build a function with nregs=4 but only 2 regs are alive
+        i32_type = build_type_primitive(K_I32)
+        fun_type = self._make_kfun_type([], 0)
+        # OInt r0=42, ORet r0 — regs 1,2,3 are dead
+        ops = [
+            (1, [0, 0]),   # OInt r0, @0 (int pool index 0)
+            (67, [0]),     # ORet r0
+        ]
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32, K_I32, K_I32],
+            type_idx=1, findex=0, nregs=4,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        emitted = writer = HaxeWriter(TypeResolver(p := _parse_bytecode(data)), p)
+        src = emitted.write_function(ir_fn)
+        # Check output — dead regs should not appear as variables or in body
+        assert "var r1" not in src, f"dead reg r1 should not be declared: {src}"
+        assert "var r2" not in src, f"dead reg r2 should not be declared: {src}"
+        assert "var r3" not in src, f"dead reg r3 should not be declared: {src}"
+        # Live reg (r0 / t0) should appear in body but NOT as a var (it's a local)
+        # Since r0 = t0 (single def), no var declaration needed
+        assert "t0 = " in src or "this = " in src, f"live reg should be used: {src}"
+
+    def test_live_high_register_still_appears(self):
+        """Register with defs/uses beyond nregs appears with mapped name."""
+        # Function with nregs=2 but instructions reference reg 5
+        i32_type = build_type_primitive(K_I32)
+        fun_type = self._make_kfun_type([1], 0)  # 1 param (I32) -> Void
+        # OInt r5=42, ORet r5 — reg 5 is alive, beyond nregs=2
+        ops = [
+            (1, [5, 0]),   # OInt r5=42 (int pool @0)
+            (67, [5]),     # ORet r5
+        ]
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32],
+            type_idx=1, findex=0, nregs=2,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        # Reg 5 has 1 def and 1 use (OInt writes r5, ORet reads r5)
+        r5_name = ir_fn.raw_regnames.get(5, "?")
+        # Single-def → t5 (lifetime naming)
+        assert r5_name.startswith("t") or r5_name.startswith("v"), f"reg 5 should be mapped name, got '{r5_name}'"
+        assert r5_name != "r5", f"reg 5 should not be raw 'r5': {r5_name}"
+        # Verify reg 0 (param) is correctly named from sig
+        r0_name = ir_fn.raw_regnames.get(0, "?")
+        assert r0_name == "p0", f"reg 0 should be 'p0', got '{r0_name}'"
+
 
 # ============================================================================
 # Test: Expression Builder

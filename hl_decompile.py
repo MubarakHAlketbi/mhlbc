@@ -458,12 +458,15 @@ class RegisterLiveness:
         if 44 <= op <= 58:
             if op == 58:  # OJAlways — no reg source
                 return srcs
-            if len(args) >= 2:
+            # Binary comparison ops (46-57): capture both operands
+            if op in range(46, 58):  # OJNull through OJNotEq
+                if len(args) >= 2:
+                    return [args[0], args[1]]
+                return []
+            # Unary conditional ops (44-45): OJTrue, OJFalse — single operand
+            if len(args) >= 1:
                 return [args[0]]
-            if len(args) >= 3:
-                return [args[0], args[1]]
-            if args:
-                return [args[0]]
+            return []
 
         # Conversions: dst, src
         if op in (22, 23, 59, 60, 61, 62, 63, 64, 65) and len(args) >= 2:
@@ -569,6 +572,11 @@ class VariableMapper:
         Without a sig (backward compat), falls back to the old hardcoded
         reg0='this', reg1='ret' behavior.
 
+        The mapping covers all registers referenced in defs or uses,
+        including any that exceed nregs (the declared register count).
+        This prevents raw "rN" fallback names in expression builder output
+        when instructions reference registers beyond the header-declared count.
+
         Args:
             defs: Register → list of definition instruction indices.
             uses: Register → list of use instruction indices.
@@ -579,6 +587,18 @@ class VariableMapper:
         reg_to_name: Dict[int, str] = {}
         used_names: Set[str] = set()
         nregs = len(self.reg_types)
+
+        # Determine the full register range: at least nregs, but extend to
+        # cover any register referenced in defs or uses (instructions may
+        # reference registers beyond the declared count).
+        max_reg = nregs - 1 if nregs > 0 else -1
+        for r in defs:
+            if r > max_reg:
+                max_reg = r
+        for r in uses:
+            if r > max_reg:
+                max_reg = r
+        full_range = max_reg + 1
 
         # Build reverse mapping from assign list
         assign_reg_to_var: Dict[int, str] = {}
@@ -636,7 +656,7 @@ class VariableMapper:
                         named_regs.add(i)
 
             # Name remaining registers (locals/temps)
-            for r in range(nregs):
+            for r in range(full_range):
                 if r in named_regs:
                     continue
                 if r in assign_reg_to_var:
@@ -684,7 +704,7 @@ class VariableMapper:
                 used_names.add("ret")
                 named_regs.add(1)
 
-            for r in range(nregs):
+            for r in range(full_range):
                 if r in named_regs:
                     continue
                 if r in assign_reg_to_var:
@@ -1414,10 +1434,12 @@ class ControlStructurer:
     def __init__(self, instructions: List[Instruction],
                  cfg: List[BasicBlock],
                  parser: Any,
+                 reg_names: Optional[Dict[int, str]] = None,
                  logger: Optional[VerboseLogger] = None):
         self.instructions = instructions
         self.cfg = cfg
         self.parser = parser
+        self.reg_names = reg_names or {}
         self._logger = logger
         self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
             lambda tag, msg, level=INFO: None)
@@ -1686,7 +1708,8 @@ class ControlStructurer:
             return None
         op = instr.opcode
         cond_reg = instr.args[0]
-        var = IRVar(f"r{cond_reg}", reg=cond_reg)
+        cond_name = self.reg_names.get(cond_reg, f"r{cond_reg}")
+        var = IRVar(cond_name, reg=cond_reg)
 
         # Mapping: opcode → Haxe comparison strings
         _COND_OPS = {
@@ -1713,7 +1736,9 @@ class ControlStructurer:
                 return IRExpr("!", [var])
 
         if op_str is not None and len(instr.args) >= 2:
-            b_var = IRVar(f"r{instr.args[1]}", reg=instr.args[1])
+            b_reg = instr.args[1]
+            b_name = self.reg_names.get(b_reg, f"r{b_reg}")
+            b_var = IRVar(b_name, reg=b_reg)
             return IRExpr(op_str, [var, b_var])
 
         return var
@@ -2693,18 +2718,32 @@ class Decompiler:
 
         # Step 5: Control flow structuring
         cfg = self.disasm.build_cfg(func_idx) if self.disasm else []
-        structurer = ControlStructurer(instructions, cfg, self.parser, self.logger)
+        structurer = ControlStructurer(instructions, cfg, self.parser,
+                                       reg_names=reg_names,
+                                       logger=self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
 
         # Step 6: Variable declarations from register types
-        # Skip registers that are already declared in the function signature
-        # (this, ret legacy placeholder, and param registers)
+        # Only declare variables for registers that are actually live
+        # (have at least one def or use in the instruction stream).
+        # Dead registers (no defs, no uses) produce pure noise as declarations.
         sig_param_names: Set[str] = {pname for pname, _ in sig.params}
         skip_names: Set[str] = {"this", "ret"} | sig_param_names
+
+        # Determine which registers are actually live
+        alive_regs: Set[int] = set()
+        for r, r_defs in defs.items():
+            if r_defs:
+                alive_regs.add(r)
+        for r, r_uses in uses.items():
+            if r_uses:
+                alive_regs.add(r)
+
         variables: Dict[str, int] = {}
         for reg_idx, rname in reg_names.items():
             if rname not in skip_names and reg_idx < len(reg_types):
-                variables[rname] = reg_types[reg_idx]
+                if reg_idx in alive_regs:
+                    variables[rname] = reg_types[reg_idx]
 
         # Override name from the function data
         fn_name = func.name or sig.name

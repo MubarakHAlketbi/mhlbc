@@ -252,9 +252,18 @@ def analyze_source_text(
         "unresolved_field": r"\bf\d+\b",  # f0, f1, etc.
         "unresolved_register": r"\br\d{2,}\b",  # r10, r100 etc (r0-r9 is normal)
         "bare_register_ref": r"\br\d{2,}\b",
+        "bare_register_ref_0_9": r"\br\d\b",   # r0-r9 refs
         "control_flow_switch": r"\bswitch\s*\(",  # OSwitch usage
         "raw_expression_fallback": r"// \[.*\]",  # IRStmt __str__ fallback patterns
     }
+
+    # Context classification for bare r10+ references
+    # Separate from the raw-count patterns above — classifies each occurrence
+    # by where it appears in the emitted source line.
+    rN_context_classification: Dict[str, int] = Counter()
+    rN_context_classification_0_9: Dict[str, int] = Counter()
+
+    _rn_pattern = re.compile(r"\br(\d+)\b")
 
     total_fallback_counts: Dict[str, int] = Counter()
     per_file_counts: Dict[str, Dict[str, int]] = {}
@@ -278,6 +287,28 @@ def analyze_source_text(
             if count > 0:
                 total_fallback_counts[pattern_name] += count
                 file_counts[pattern_name] = count
+
+        # Context classification for rN references
+        # Classifies each rN occurrence by what surrounds it on the line.
+        for line in lines:
+            for m in _rn_pattern.finditer(line):
+                rnum = int(m.group(1))
+                col = m.start()
+                line_stripped = line.strip()
+                # Determine context
+                if line_stripped.startswith("var ") and "r" + str(rnum) in line_stripped:
+                    ctx = "declaration"
+                elif line_stripped.startswith("//"):
+                    ctx = "comment"
+                elif line_stripped.startswith("r" + str(rnum) + " ="):
+                    ctx = "assign_lhs"
+                else:
+                    ctx = "expr_or_other"
+                # Separate by digit count
+                if rnum >= 10:
+                    rN_context_classification[ctx] += 1
+                else:
+                    rN_context_classification_0_9[ctx] += 1
 
         # Empty method body detection
         empty_bodies += len(re.findall(
@@ -321,6 +352,9 @@ def analyze_source_text(
         # Legacy aliases (equal to new names)
         "goto_fallback": total_fallback_counts.get("raw_goto_comments", 0),
         "label_marker": total_fallback_counts.get("raw_label_comments", 0),
+        # Context classification for rN references
+        "rN_context_classification": dict(rN_context_classification),
+        "rN_context_classification_0_9": dict(rN_context_classification_0_9),
     }
     return result
 
