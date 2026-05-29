@@ -5,7 +5,20 @@
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Project state: 498 passed, 3 skipped. Gates 1-6 complete. g6.0-20-g1bcc58b, clean working tree.
 - Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh.
-- Awaiting Sato's instruction.
+- **Signature-aware register naming implemented:**
+  - Build FunctionSig before VariableMapper (moved from step 6 to step 1 in _decompile_function)
+  - Added optional `sig` parameter to VariableMapper.__init__()
+  - `sig.has_this` controls reg0 naming (no hardcoded 'this' for static funcs)
+  - `sig.params` drives parameter register names (p0, p1...) instead of register-indexed
+  - Debug assign names (_varN) still override sig names (correct priority)
+  - Variable declarations skip param names (no duplicate `var p0: Int;`)
+  - Backward compat: no sig = old reg0="this"+reg1="ret" behavior
+  - Farever: 0 fake "ret" refs, 0 static-func fake "this"
+  - Track A: 7/7 fixtures pass, 0 errors, 0 unknown opcodes
+  - Tests: 502 passed, 3 skipped (+4)
+  - Files: hl_decompile.py, tests/test_decompile.py
+  - Commit: `d08d538`
+- Awaiting Sato's review.
 
 ## Session 28 — May 28, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
