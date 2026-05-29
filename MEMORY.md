@@ -5,19 +5,21 @@
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Project state: 498 passed, 3 skipped. Gates 1-6 complete. g6.0-20-g1bcc58b, clean working tree.
 - Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh.
-- **Signature-aware register naming implemented:**
-  - Build FunctionSig before VariableMapper (moved from step 6 to step 1 in _decompile_function)
-  - Added optional `sig` parameter to VariableMapper.__init__()
-  - `sig.has_this` controls reg0 naming (no hardcoded 'this' for static funcs)
-  - `sig.params` drives parameter register names (p0, p1...) instead of register-indexed
-  - Debug assign names (_varN) still override sig names (correct priority)
-  - Variable declarations skip param names (no duplicate `var p0: Int;`)
-  - Backward compat: no sig = old reg0="this"+reg1="ret" behavior
-  - Farever: 0 fake "ret" refs, 0 static-func fake "this"
-  - Track A: 7/7 fixtures pass, 0 errors, 0 unknown opcodes
-  - Tests: 502 passed, 3 skipped (+4)
-  - Files: hl_decompile.py, tests/test_decompile.py
-  - Commit: `d08d538`
+- **Milestone 1: Signature-aware register naming** (commit `d08d538`)
+  - Build FunctionSig before VariableMapper; sig.has_this/prams drive naming
+  - No hardcoded "this"/"ret" for static funcs; param names from sig.params
+  - Backward compat via optional sig= param
+  - Tests: +4 integration, 502 pass
+- **Milestone 2: Bare Register Emission Audit + Dead Register Pruning** (commit `8b87dd8`)
+  - Dead register declarations pruned (0 defs AND 0 uses -> no 'var rN:')
+  - _build_condition uses mapped reg_names instead of raw 'r{reg}' format
+  - _get_src_regs fixed for binary jump ops (op 46-57) — captures both operands
+  - VariableMapper iterates full_reg_range (max defs/uses key) not just nregs
+  - Quality report: added rN_context_classification breakdown + r0-9 tracking
+  - r10+ bare_register_ref: 4540 -> 0 (-99.2% reduction)
+  - r0-9 remaining: 19-21/fixture (single-register ORet returns — not covered by _get_src_regs for op 67)
+  - Track A: 7/7 fixtures, 0 errors, 0 unknown opcodes
+  - Tests: +2 (dead_register_no_variable_declaration, live_high_register_still_appears), 504 passed, 3 skipped
 - Awaiting Sato's review.
 
 ## Session 28 — May 28, 2026
