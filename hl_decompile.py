@@ -17,6 +17,7 @@ Pipeline:
 Headless: no PyQt6 dependency. Used by both cli.py and app.py.
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import (List, Optional, Dict, Tuple, Set, Any, Union)
 
@@ -68,12 +69,6 @@ HLOOP_NAMES = {
     K_VOID: "Void", K_UI8: "Int", K_UI16: "Int",
     K_I32: "Int", K_I64: "haxe.Int64", K_F32: "Single", K_F64: "Float",
     K_BOOL: "Bool", K_BYTES: "hl.Bytes", K_DYN: "Dynamic",
-    K_FUN: "Dynamic", K_OBJ: "Dynamic", K_ARRAY: "Array",
-    K_TYPE: "Any",
-    K_VIRTUAL: "Dynamic",
-    K_DYNOBJ: "Dynamic", K_ABSTRACT: "Dynamic",
-    K_METHOD: "Dynamic", K_STRUCT: "Struct",
-    K_GUID: "GUID", K_HLAST: "Any",
 }
 
 # Dynamic attribution categories (used for quality reporting)
@@ -84,6 +79,8 @@ DYN_CAT_NULL_AMBIGUOUS = "null_without_target_type"   # ONull / null-derived wit
 DYN_CAT_STRING_BYTES  = "string_or_bytes_ambiguous"   # OString/OBytes without safe Haxe type mapping
 DYN_CAT_EVIDENCE_MISSING = "instruction_evidence_missing"  # register has no useful evidence, fallback to garbage type
 DYN_CAT_CALL_UNRESOLVED = "call_return_unresolved"    # call return type cannot be resolved
+DYN_CAT_VIRTUAL_UNSUPPORTED = "virtual_type_unsupported"  # K_VIRTUAL: anonymous struct without safe representation
+DYN_CAT_FUN_UNSUPPORTED    = "function_type_unsupported"  # K_FUN/K_METHOD that still can't be represented
 DYN_CAT_OTHER         = "other_dynamic"               # uncategorized Dynamic
 
 # Opcode ranges for type propagation
@@ -1012,13 +1009,13 @@ def _determine_dynamic_category(
         if t.kind in (K_DYN, K_DYNOBJ):
             return DYN_CAT_GENUINE
 
-    # 4. Check if the type kind resolves to Dynamic via HLOOP_NAMES
+    # 4. Check for explicitly unsupported complex types
     if parser and 0 <= type_idx < len(parser.types):
         t = parser.types[type_idx]
-        kind_name = HLOOP_NAMES.get(t.kind)
-        if kind_name == "Dynamic":
-            # K_FUN, K_OBJ, K_VIRTUAL, K_ABSTRACT, K_METHOD all map to "Dynamic"
-            return DYN_CAT_UNRESOLVED_REF
+        if t.kind == K_VIRTUAL:
+            return DYN_CAT_VIRTUAL_UNSUPPORTED
+        if t.kind in (K_FUN, K_METHOD):
+            return DYN_CAT_FUN_UNSUPPORTED
 
     # 5. Check if evidence was missing (fallback to reg_types)
     if reg_idx is not None and reg_idx not in reg_type_evidence:
@@ -2148,6 +2145,25 @@ class FunctionSigBuilder:
         )
 
 
+def _sanitize_type_name(name: str) -> str:
+    """Sanitize a type name for safe Haxe-like output.
+
+    - Handles dotted paths (packages): pkg.Class → pkg.Class
+    - Strips null/empty names
+    - Replaces invalid Haxe identifier characters
+    - Preserves deterministic output
+    """
+    if not name or not name.strip():
+        return "Dynamic"
+    # Replace spaces, hyphens, and other invalid chars with underscores
+    cleaned = re.sub(r'[^a-zA-Z0-9_.]', '_', name.strip())
+    # Remove leading/trailing underscores and dots
+    cleaned = cleaned.strip('_.')
+    if not cleaned:
+        return "Dynamic"
+    return cleaned
+
+
 # ============================================================================
 # Type Resolver
 # ============================================================================
@@ -2184,51 +2200,67 @@ class TypeResolver:
     def _resolve_kind(self, kind: int, t: dict, type_idx: int) -> str:
         """Resolve a single type kind to its Haxe name."""
 
-        # Object/Struct types — check before primitive fallback since they
-        # have names that should be resolved from the string pool
-        if kind == K_OBJ or kind == K_STRUCT:
+        # Named types (resolve from string pool)
+        if kind in (K_OBJ, K_STRUCT, K_ENUM, K_ABSTRACT):
             name_idx = t.name
             if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
-                return self.parser.strings[name_idx]
-            return f"Class{type_idx}"
+                raw_name = self.parser.strings[name_idx]
+                return _sanitize_type_name(raw_name)
+            # Named types without valid names
+            if kind in (K_OBJ, K_STRUCT):
+                return f"Class{type_idx}"
+            if kind == K_ENUM:
+                return f"Enum{type_idx}"
+            if kind == K_ABSTRACT:
+                return f"Abstract{type_idx}"
 
-        # Enum types
-        if kind == K_ENUM:
-            name_idx = t.name
-            if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
-                return self.parser.strings[name_idx]
-            return f"Enum{type_idx}"
-
-# Abstract types
-        if kind == K_ABSTRACT:
-            name_idx = t.name
-            if name_idx is not None and 0 <= name_idx < len(self.parser.strings):
-                return self.parser.strings[name_idx]
-            return t.name if t.name is not None else f"Abstract{type_idx}"
-
-        # Primitive types (no payload beyond kind byte)
-        name = HLOOP_NAMES.get(kind)
-        if name is not None:
-            return name
-
-        # Wrapper types (HREF, HNULL, HPACKED)
-        if kind in (K_REF, K_NULL, K_PACKED):
-            inner = t.inner if t.inner is not None else -1
-            inner_str = self.resolve(inner)
-            if kind == K_REF:
-                return f"hl.Ref<{inner_str}>"
-            if kind == K_NULL:
-                return f"Null<{inner_str}>"
-            if kind == K_PACKED:
-                return f"hl.Packed<{inner_str}>"
-
-        # Fun/Method types
+        # Fun/Method types: (args) -> ret
         if kind in (K_FUN, K_METHOD):
             args_list = t.args
             ret = t.ret if t.ret is not None else K_VOID
             arg_strs = [self.resolve(a) for a in args_list]
             ret_str = self.resolve(ret)
             return f"({', '.join(arg_strs)}) -> {ret_str}"
+
+        # Wrapper types: Null<T>, hl.Ref<T>, hl.Packed<T>
+        if kind in (K_NULL, K_REF, K_PACKED):
+            inner = t.inner if t.inner is not None else -1
+            inner_str = self.resolve(inner)
+            if kind == K_NULL:
+                return f"Null<{inner_str}>"
+            if kind == K_REF:
+                return f"hl.Ref<{inner_str}>"
+            if kind == K_PACKED:
+                return f"hl.Packed<{inner_str}>"
+
+        # Array type (no element-type evidence, use generic name)
+        if kind == K_ARRAY:
+            return "Array"
+
+        # Type metatype (dynamic/any type reference)
+        if kind == K_TYPE:
+            return "Any"
+
+        # Dynamic Object (boxed Dynamic)
+        if kind == K_DYNOBJ:
+            return "Dynamic"
+
+        # Anonymous structural type (kept as Dynamic; categorized as virtual_type_unsupported)
+        if kind == K_VIRTUAL:
+            return "Dynamic"
+
+        # GUID wrapper type
+        if kind == K_GUID:
+            return "GUID"
+
+        # LAST (alias for Any/Void in code-generation contexts)
+        if kind == K_HLAST:
+            return "Any"
+
+        # Primitive types via HLOOP_NAMES (Void, Int, Float, Bool, Bytes, Dynamic)
+        name = HLOOP_NAMES.get(kind)
+        if name is not None:
+            return name
 
         return f"type[{type_idx}]"
 

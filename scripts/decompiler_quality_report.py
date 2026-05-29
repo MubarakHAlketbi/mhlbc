@@ -399,6 +399,7 @@ def analyze_structured_flow(
 
 def analyze_dynamic_attributions(
     result: DecompileResult,
+    parser: HLParser,
 ) -> Dict[str, Any]:
     """Aggregate Dynamic type attribution categories from decompiled functions.
 
@@ -406,20 +407,38 @@ def analyze_dynamic_attributions(
     - total_dynamic: total count of Dynamic variable declarations (matches regex-based count)
     - actionable_dynamic: total_dynamic - genuine_dynamic_kind - invalid_type_index_dynamic
     - category_breakdown: dict mapping each category name to its count
+    - type_kind_breakdown: dict mapping each category to {type_kind_name: count}
     """
     category_counts: Dict[str, int] = defaultdict(int)
+    # category -> type_kind_name -> count
+    type_kind_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+
     for ir_fn in result.functions.values():
-        for category in ir_fn.var_attributions.values():
+        for vname, category in ir_fn.var_attributions.items():
             category_counts[category] += 1
+            # Get the type_idx for this variable
+            type_idx = ir_fn.variables.get(vname, -1)
+            if 0 <= type_idx < len(parser.types):
+                t = parser.types[type_idx]
+                kind_name = KIND_NAMES.get(t.kind, f"k{t.kind}")
+            else:
+                kind_name = "invalid_idx"
+            type_kind_breakdown[category][kind_name] += 1
 
     total_dynamic = sum(category_counts.values())
     benign = category_counts.get(DYN_CAT_GENUINE, 0) + category_counts.get(DYN_CAT_INVALID_IDX, 0)
     actionable_dynamic = max(0, total_dynamic - benign)
 
+    # Convert nested defaultdicts to regular dicts
+    type_kind_breakdown_out = {}
+    for cat, kinds in type_kind_breakdown.items():
+        type_kind_breakdown_out[cat] = dict(sorted(kinds.items(), key=lambda x: -x[1]))
+
     return {
         "total_dynamic": total_dynamic,
         "actionable_dynamic": actionable_dynamic,
         "category_breakdown": dict(category_counts),
+        "type_kind_breakdown": type_kind_breakdown_out,
     }
 
 
@@ -829,7 +848,7 @@ def run_track_a() -> Dict[str, Any]:
         cls_metrics = analyze_class_level(parser, result)
         src_metrics = analyze_source_text(sources)
         name_metrics = analyze_name_resolution(parser, result, sources)
-        dyn_metrics = analyze_dynamic_attributions(result)
+        dyn_metrics = analyze_dynamic_attributions(result, parser)
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
         flow_metrics = analyze_structured_flow(result)
 
@@ -956,7 +975,7 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
 
     # Dynamic attribution
     if result:
-        dyn_metrics = analyze_dynamic_attributions(result)
+        dyn_metrics = analyze_dynamic_attributions(result, parser)
         inventory["dynamic_attribution"] = dyn_metrics
 
     return inventory
@@ -1087,6 +1106,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         total_dynamic_all = 0
         total_actionable_dynamic = 0
         dynamic_category_counts: Dict[str, int] = defaultdict(int)
+        dynamic_type_kind_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
         total_if_all = 0
         total_while_all = 0
 
@@ -1103,6 +1123,9 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             total_actionable_dynamic += dyn_attr.get('actionable_dynamic', 0)
             for cat, count in dyn_attr.get('category_breakdown', {}).items():
                 dynamic_category_counts[cat] += count
+            for cat, kinds in dyn_attr.get('type_kind_breakdown', {}).items():
+                for kind_name, cnt in kinds.items():
+                    dynamic_type_kind_breakdown[cat][kind_name] += cnt
             sf = fd.get('structured_flow', {})
             total_if_all += sf.get('structured_if_count', 0)
             total_while_all += sf.get('structured_while_count', 0)
@@ -1133,6 +1156,8 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 'string_or_bytes_ambiguous': 'OString/OBytes without safe Haxe type mapping',
                 'instruction_evidence_missing': 'Register has no evidence, fell back to garbage',
                 'call_return_unresolved': 'Call return type unresolvable',
+                'virtual_type_unsupported': 'K_VIRTUAL anonymous struct (no safe structural representation)',
+                'function_type_unsupported': 'K_FUN/K_METHOD that still resolves to Dynamic',
                 'other_dynamic': 'Uncategorized Dynamic',
             }
             for cat in sorted(dynamic_category_counts.keys(),
@@ -1144,6 +1169,36 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 '> Actionable dynamic = total - genuine_dynamic_kind'
                 f' - invalid_type_index_dynamic = {total_actionable_dynamic}')
             md_lines.append('')
+
+        # Dynamic category type kind sub-breakdown
+        _DYNAMIC_DESCRIPTIONS = {
+            'genuine_dynamic_kind': 'Type kind K_DYN or K_DYNOBJ (genuine HL Dynamic)',
+            'invalid_type_index_dynamic': 'Invalid/garbage type index normalized to Dynamic',
+            'unresolved_type_ref': 'Valid type index but TypeResolver cannot produce useful type',
+            'null_without_target_type': 'ONull / null-derived without safe target type',
+            'string_or_bytes_ambiguous': 'OString/OBytes without safe Haxe type mapping',
+            'instruction_evidence_missing': 'Register has no evidence, fell back to garbage',
+            'call_return_unresolved': 'Call return type unresolvable',
+            'virtual_type_unsupported': 'K_VIRTUAL anonymous struct (no safe structural representation)',
+            'function_type_unsupported': 'K_FUN/K_METHOD that still resolves to Dynamic',
+            'other_dynamic': 'Uncategorized Dynamic',
+        }
+        if dynamic_type_kind_breakdown:
+            md_lines.append('#### Dynamic Category Type Kind Breakdown')
+            md_lines.append('')
+            md_lines.append('For each Dynamic category, what type kinds contribute:')
+            md_lines.append('')
+            for cat in sorted(dynamic_category_counts.keys(),
+                              key=lambda c: -dynamic_category_counts[c]):
+                kinds = dynamic_type_kind_breakdown.get(cat, {})
+                if not kinds:
+                    continue
+                cat_desc = _DYNAMIC_DESCRIPTIONS.get(cat, cat)
+                md_lines.append(f'- **{cat}** ({cat_desc}):')
+                for kind_name, cnt in sorted(kinds.items(), key=lambda x: -x[1]):
+                    pct = 100.0 * cnt / dynamic_category_counts[cat] if dynamic_category_counts[cat] else 0
+                    md_lines.append(f'  - {kind_name}: {cnt} ({pct:.1f}%)')
+                md_lines.append('')
 
     # ── Track B ─────────────────────────────────────────────────────────────
     if track_b:

@@ -32,6 +32,8 @@ from tests.hl_helper import (
     build_type_constructors_pool, build_globals_pool, build_natives_pool,
     build_function_entry, build_functions_pool, build_opcode_sequence,
     build_function_body,
+    build_type_wrapper, build_type_virtual, build_type_abstract,
+    build_type_enum,
 )
 from hl_disasm import Disassembler, Instruction, OpcodeDecoder, JumpResolver
 from hl_decompile import (
@@ -42,10 +44,12 @@ from hl_decompile import (
     Decompiler,
     K_VOID, K_I32, K_F64, K_BOOL, K_DYN, K_OBJ, K_STRUCT, K_FUN, K_METHOD,
     K_ENUM, K_ABSTRACT, K_REF, K_NULL, K_PACKED, K_BYTES, K_ARRAY, K_TYPE,
-    K_DYNOBJ, K_HLAST,
+    K_DYNOBJ, K_HLAST, K_VIRTUAL, K_GUID,
     DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
     DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
-    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_OTHER,
+    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_VIRTUAL_UNSUPPORTED,
+    DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_OTHER,
+    _sanitize_type_name,
 )
 
 
@@ -2037,3 +2041,226 @@ class TestORethrowHandler:
         assert "comment" not in ops_seen or not any(
             "UNKNOWN" in str(s) for s in fn.body), (
             "ORethrow should NOT produce UNKNOWN comment")
+
+
+class TestTypeResolverComplexTypes:
+    """TypeResolver produces correct Haxe-like names for all complex type kinds."""
+
+    def _make_parser(self, strings, type_blobs, ntypes, functions=None):
+        """Build bytecode and return parsed parser."""
+        data = _build_minimal_with_types(
+            ntypes=ntypes,
+            type_blobs=type_blobs,
+            strings=strings,
+            nglobals=0,
+            nnatives=0,
+            functions=functions or [],
+        )
+        return _parse_bytecode(data)
+
+    def test_kobj_resolves_class_name(self):
+        """K_OBJ with valid name resolves to sanitized class name."""
+        # type[0]=K_I32 (primitive), type[1]=K_OBJ name_si=0 ("MyClass")
+        i32 = build_type_primitive(K_I32)
+        obj = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        parser = self._make_parser(strings=["MyClass"], type_blobs=[i32, obj], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "MyClass"
+
+    def test_kobj_missing_name(self):
+        """K_OBJ without valid name returns Class{N}."""
+        i32 = build_type_primitive(K_I32)
+        obj = build_type_objlike(K_OBJ, name_si=-1, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        parser = self._make_parser(strings=[], type_blobs=[i32, obj], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "Class1"
+
+    def test_kstruct_resolves_struct_name(self):
+        """K_STRUCT with valid name resolves to sanitized struct name."""
+        i32 = build_type_primitive(K_I32)
+        sct = build_type_objlike(K_STRUCT, name_si=0, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        parser = self._make_parser(strings=["MyStruct"], type_blobs=[i32, sct], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "MyStruct"
+
+    def test_kenum_resolves_enum_name(self):
+        """K_ENUM with valid name resolves to enum name."""
+        i32 = build_type_primitive(K_I32)
+        enum_t = build_type_enum(name_si=0, global_si=0, constructs=[])
+        parser = self._make_parser(strings=["Color"], type_blobs=[i32, enum_t], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "Color"
+
+    def test_kabstract_resolves_abstract_name(self):
+        """K_ABSTRACT with valid name resolves to abstract name."""
+        i32 = build_type_primitive(K_I32)
+        ab_t = build_type_abstract(name_si=0)
+        parser = self._make_parser(strings=["MyAbstract"], type_blobs=[i32, ab_t], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "MyAbstract"
+
+    def test_kabstract_missing_name(self):
+        """K_ABSTRACT without valid name returns Abstract{N} (not an int)."""
+        i32 = build_type_primitive(K_I32)
+        ab_t = build_type_abstract(name_si=9999)  # out-of-bounds name index
+        parser = self._make_parser(strings=[], type_blobs=[i32, ab_t], ntypes=2)
+        resolver = TypeResolver(parser)
+        resolved = resolver.resolve(1)
+        assert resolved == "Abstract1", f"Expected Abstract1, got {resolved}"
+
+    def test_kfun_resolves_function_type(self):
+        """K_FUN resolves to (args) -> ret, not Dynamic."""
+        # K_FUN with 1 arg (Int), returning Void
+        i32 = build_type_primitive(K_I32)       # type[0]
+        void = build_type_primitive(K_VOID)      # type[1]
+        fun = build_type_funlike(K_FUN, [0], 1)  # type[2] = (Int) -> Void
+        parser = self._make_parser(strings=[], type_blobs=[i32, void, fun], ntypes=3)
+        resolver = TypeResolver(parser)
+        resolved = resolver.resolve(2)
+        assert resolved == "(Int) -> Void", f"Expected '(Int) -> Void', got {resolved}"
+
+    def test_kmethod_resolves_function_type(self):
+        """K_METHOD resolves to (args) -> ret, not Dynamic."""
+        i32 = build_type_primitive(K_I32)
+        void = build_type_primitive(K_VOID)
+        mtd = build_type_funlike(K_METHOD, [0, 1], 1)  # (Int, Int) -> Void
+        parser = self._make_parser(strings=[], type_blobs=[i32, void, mtd], ntypes=3)
+        resolver = TypeResolver(parser)
+        resolved = resolver.resolve(2)
+        # K_METHOD with 2 args: (Int, Int) -> Void
+        assert resolved == "(Int, Void) -> Void", f"Expected '(Int, Void) -> Void', got {resolved}"
+
+    def test_kfun_with_dynamic_arg(self):
+        """K_FUN with Dynamic arg still produces function type (not plain Dynamic)."""
+        dyn = build_type_primitive(K_DYN)       # type[0]
+        void = build_type_primitive(K_VOID)      # type[1]
+        fun = build_type_funlike(K_FUN, [0], 1)  # type[2] = (Dynamic) -> Void
+        parser = self._make_parser(strings=[], type_blobs=[dyn, void, fun], ntypes=3)
+        resolver = TypeResolver(parser)
+        resolved = resolver.resolve(2)
+        assert resolved == "(Dynamic) -> Void", f"Expected '(Dynamic) -> Void', got {resolved}"
+
+    def test_kvirtual_resolves_to_dynamic(self):
+        """K_VIRTUAL resolves to Dynamic (no safe structural representation)."""
+        i32 = build_type_primitive(K_I32)
+        virt = build_type_virtual([(0, 0)])  # K_VIRTUAL with 1 field (name_idx=0, type_idx=0)
+        parser = self._make_parser(strings=["field1"], type_blobs=[i32, virt], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "Dynamic"
+
+    def test_kdynobj_resolves_to_dynamic(self):
+        """K_DYNOBJ resolves to Dynamic."""
+        dynobj = build_type_primitive(K_DYNOBJ)
+        i32 = build_type_primitive(K_I32)
+        parser = self._make_parser(strings=[], type_blobs=[dynobj, i32], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(0) == "Dynamic"
+
+    def test_karray_resolves_to_array(self):
+        """K_ARRAY resolves to 'Array'."""
+        arr = build_type_primitive(K_ARRAY)
+        parser = self._make_parser(strings=[], type_blobs=[arr], ntypes=1)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(0) == "Array"
+
+    def test_ktype_resolves_to_any(self):
+        """K_TYPE resolves to 'Any'."""
+        typ = build_type_primitive(K_TYPE)
+        parser = self._make_parser(strings=[], type_blobs=[typ], ntypes=1)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(0) == "Any"
+
+    def test_knull_with_concrete_inner(self):
+        """K_NULL with concrete inner type resolves to Null<T>."""
+        i32 = build_type_primitive(K_I32)       # type[0]
+        null_t = build_type_wrapper(K_NULL, 0)  # type[1] = Null<Int>
+        parser = self._make_parser(strings=[], type_blobs=[i32, null_t], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "Null<Int>"
+
+    def test_kref_with_concrete_inner(self):
+        """K_REF with concrete inner type resolves to hl.Ref<T>."""
+        i32 = build_type_primitive(K_I32)      # type[0]
+        ref_t = build_type_wrapper(K_REF, 0)   # type[1] = hl.Ref<Int>
+        parser = self._make_parser(strings=[], type_blobs=[i32, ref_t], ntypes=2)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(1) == "hl.Ref<Int>"
+
+    def test_oob_type_index_resolves_to_dynamic(self):
+        """Out-of-bounds type index still resolves to Dynamic."""
+        i32 = build_type_primitive(K_I32)
+        parser = self._make_parser(strings=[], type_blobs=[i32], ntypes=1)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(999) == "Dynamic"
+        assert resolver.resolve(-1) == "Dynamic"
+
+    def test_sanitize_preserves_dotted_path(self):
+        """_sanitize_type_name preserves valid dotted package paths."""
+        assert _sanitize_type_name("hl.types.ArrayDyn") == "hl.types.ArrayDyn"
+        assert _sanitize_type_name("haxe.Exception") == "haxe.Exception"
+        assert _sanitize_type_name("Std") == "Std"
+
+    def test_sanitize_strips_invalid_chars(self):
+        """_sanitize_type_name strips invalid Haxe identifier characters."""
+        assert _sanitize_type_name("bad-name!") == "bad_name"
+        assert _sanitize_type_name(" spaces ") == "spaces"
+        assert _sanitize_type_name("") == "Dynamic"
+
+    def test_obj_name_with_invalid_chars(self):
+        """K_OBJ with name containing invalid chars is sanitized."""
+        invalid_name = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                          fields=[], protos=[], bindings=[])
+        parser = self._make_parser(strings=["bad-name!"], type_blobs=[invalid_name], ntypes=1)
+        resolver = TypeResolver(parser)
+        assert resolver.resolve(0) == "bad_name"
+
+    def test_dynamic_attribution_virtual_category(self):
+        """K_VIRTUAL types are categorized as virtual_type_unsupported, not unresolved_type_ref."""
+        i32 = build_type_primitive(K_I32)        # type[0]
+        virt = build_type_virtual([(0, 0)])       # type[1]
+        fun = build_type_funlike(K_FUN, [1], 0)   # type[2] = (Dynamic) -> Int, arg is K_VIRTUAL
+        parser = self._make_parser(
+            strings=["field1"],
+            type_blobs=[i32, virt, fun],
+            ntypes=3,
+            functions=[(2, 0, [1, 0], bytes([67]))],  # func[0]: type=2 (K_FUN), reg_types=[virt, i32], body=ORet
+        )
+        resolver = TypeResolver(parser)
+        # type[1] (K_VIRTUAL) should resolve to Dynamic
+        assert resolver.resolve(1) == "Dynamic"
+        # type[2] (K_FUN with K_VIRTUAL arg) should resolve to function type
+        resolved = resolver.resolve(2)
+        assert "Dynamic" in resolved and "->" in resolved
+
+    def test_ghost_unresolved_type_ref_gone(self):
+        """No type kind should produce 'unresolved_type_ref' anymore."""
+        i32 = build_type_primitive(K_I32)
+        void = build_type_primitive(K_VOID)
+        arr = build_type_primitive(K_ARRAY)
+        dyn = build_type_primitive(K_DYN)
+        dynobj = build_type_primitive(K_DYNOBJ)
+        abst = build_type_abstract(name_si=0)
+        enum_t = build_type_enum(name_si=1, global_si=0, constructs=[])
+        obj = build_type_objlike(K_OBJ, name_si=2, super_si=0, global_si=0,
+                                  fields=[], protos=[], bindings=[])
+        virt = build_type_virtual([])
+
+        parser = self._make_parser(
+            strings=["MyAbstract", "MyEnum", "MyClass"],
+            type_blobs=[i32, void, arr, dyn, dynobj, abst, enum_t, obj, virt],
+            ntypes=9,
+        )
+        resolver = TypeResolver(parser)
+        # None of these should resolve to plain "Dynamic" except K_DYN and K_DYNOBJ and K_VIRTUAL
+        assert resolver.resolve(0) == "Int"       # K_I32
+        assert resolver.resolve(1) == "Void"      # K_VOID
+        assert resolver.resolve(2) == "Array"     # K_ARRAY
+        assert resolver.resolve(3) == "Dynamic"   # K_DYN (genuine)
+        assert resolver.resolve(4) == "Dynamic"   # K_DYNOBJ (genuine)
+        assert resolver.resolve(5) == "MyAbstract"
+        assert resolver.resolve(6) == "MyEnum"
+        assert resolver.resolve(7) == "MyClass"
+        assert resolver.resolve(8) == "Dynamic"   # K_VIRTUAL (unsupported, not unresolved_type_ref)

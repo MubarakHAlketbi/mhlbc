@@ -1,5 +1,14 @@
 # Session Tracking
 
+## Session 31 — May 29, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-28-g72fb3d0, clean working tree.
+- Project state: 522 passed, 3 skipped. Gates 1-6 complete.
+- Previous session: Session 30 completed Dynamic Type Attribution + TypeResolver Accuracy.
+- Last commit: 72fb3d0 — Dynamic Type Attribution + TypeResolver OOB normalization + safe propagation.
+- Awaiting Sato's direction.
+
 ## Session 30 — May 29, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
