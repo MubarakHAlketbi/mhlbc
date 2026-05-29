@@ -6,8 +6,36 @@
 - Version: g6.0-28-g72fb3d0, clean working tree.
 - Project state: 522 passed, 3 skipped. Gates 1-6 complete.
 - Previous session: Session 30 completed Dynamic Type Attribution + TypeResolver Accuracy.
-- Last commit: 72fb3d0 — Dynamic Type Attribution + TypeResolver OOB normalization + safe propagation.
-- Awaiting Sato's direction.
+- **Milestone 1: Complex TypeResolver Coverage — COMPLETE**
+  - Root cause: HLOOP_NAMES had entries for K_FUN/K_VIRTUAL/K_ABSTRACT/etc. shadowing TypeResolver handlers
+  - **Fix:** Stripped complex types from HLOOP_NAMES; reordered _resolve_kind so all explicit handlers (OBJ/STRUCT/ENUM/ABSTRACT/FUN/METHOD/VIRTUAL/etc.) run before HLOOP_NAMES
+  - **Fix:** Added _sanitize_type_name() helper; fixed K_ABSTRACT fallback returning int instead of Abstract{N}
+  - **New categories:** DYN_CAT_VIRTUAL_UNSUPPORTED, DYN_CAT_FUN_UNSUPPORTED
+  - **Categorization:** _determine_dynamic_category now uses explicit kind checks instead of HLOOP_NAMES
+  - **Report:** added type_kind_breakdown sub-breakdown by type kind per Dynamic category
+  - **21 new tests** in TestTypeResolverComplexTypes
+  - **Results:** unresolved_type_ref 371→0, actionable_dynamic 1099→1001, K_FUN recovered=98, K_VIRTUAL reclassified=273
+  - Commit: ca17dd2 — "TypeResolver: resolve valid complex type refs"
+  - 543 passed, 3 skipped (+21, 0 regressions)
+
+- **Milestone 2: Null Target Typing — COMPLETE**
+  - Root cause: build_register_type_evidence unconditionally set ONull dst to Dynamic evidence, overriding concrete register types
+  - **Fix:** build_register_type_evidence ONull handler now preserves concrete nullable-compatible types (OBJ/BYTES/NULL/REF/etc.) instead of forcing Dynamic
+  - **Fix:** _var_name_to_reg added "v" prefix for multi-write variable support — 197 previously miscategorized vars now correctly attributed
+  - **New category:** DYN_CAT_NULL_RESOLVED for nulls with proven concrete target type
+  - **Tracking:** _categorize_dynamic_attributions now tracks resolved nul ls via post-pass
+  - **Metric formula fixed:** actionable_dynamic excludes resolved_null, virtual_unsupported, fun_unsupported, string_or_bytes
+  - actionable = null_without_target_type + call_return_unresolved only
+  - **6 new tests** in TestNullTargetTyping
+  - **Results:** null_without_target_type 462→260 (corrected after v-prefix fix), resolved_null_target_type=385, call_return_unresolved=294, genuine=385, virtual_unsupported=273
+  - final actionable_dynamic: **554** (260 null + 294 call_return)
+  - Commits: ca17bb7 (null fix), 576efd0 (metric formula)
+  - **549 passed, 3 skipped** (+6, 0 regressions)
+
+- **Track A:** 7/7, errors=0, unknown opcodes=0, bare r10+=0, bare r0-r9=0
+- **Final Dynamic baseline:** total 1604, actionable 554, null_without_target_type 260, call_return_unresolved 294
+- **Farever Track B (sample=200):** 0 errors, 40 nulls resolved, 33 null_without_target_type remaining
+- **Session closed.**
 
 ## Session 30 — May 29, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
