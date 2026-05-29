@@ -480,6 +480,14 @@ class RegisterLiveness:
         if op == 71 and args:
             return [args[0]]
 
+        # ORet: return value register
+        if op == 67 and args:
+            return [args[0]]
+
+        # OThrow / ORethrow: thrown value register
+        if op in (68, 69) and args:
+            return [args[0]]
+
         # OTrap: handler_offset, dummy_dst
         if op == 72:
             return srcs

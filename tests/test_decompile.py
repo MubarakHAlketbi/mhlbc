@@ -317,6 +317,33 @@ class TestRegisterLiveness:
         defs = RegisterLiveness.compute(instrs, nregs=3)
         assert defs.get(2) == [0]
 
+    def test_oret_src_use(self):
+        """ORet r3 → r3 captured as a source register (use)."""
+        instrs = [
+            Instruction(0, 67, "ORet", [3], 0, 1),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=4)
+        assert 3 in uses, "ORet arg should be a use"
+        assert uses[3] == [0]
+
+    def test_othrow_src_use(self):
+        """OThrow r2 → r2 captured as a source register (use)."""
+        instrs = [
+            Instruction(0, 68, "OThrow", [2], 0, 1),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=4)
+        assert 2 in uses, "OThrow arg should be a use"
+        assert uses[2] == [0]
+
+    def test_orethrow_src_use(self):
+        """ORethrow r1 → r1 captured as a source register (use)."""
+        instrs = [
+            Instruction(0, 69, "ORethrow", [1], 0, 1),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=4)
+        assert 1 in uses, "ORethrow arg should be a use"
+        assert uses[1] == [0]
+
 
 # ============================================================================
 # Test: Variable Mapping
