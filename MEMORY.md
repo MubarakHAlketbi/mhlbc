@@ -1,20 +1,5 @@
 # Session Tracking
 
-## Session 29 — May 29, 2026
-- Start: New session initialized on Discord OmniDecomp thread.
-- Model: deepseek/deepseek-v4-flash via OpenRouter.
-- Project state: 498 passed, 3 skipped. Gates 1-6 complete. g6.0-18-g7d4927a, clean working tree.
-- **ChatGPT Director introduced** — project-level orchestrator with own workspace at /opt/data/workspace/. Agent is the Director's eyes and hands on the repo (no direct filesystem access).
-- **Working agreement established** between Director and Agent:
-  - Director plans, writes tagged task instructions, reviews deliverables
-  - Agent executes, reports results with hard evidence (test counts, diffs, metric deltas)
-  - Agent does not commit without Director instruction (exception: trivial doc fixes)
-  - Blockers reported immediately with exact location + attempted fix
-  - Deadlock escalates to Sato
-  - Director cannot `git log`/`pytest`/`cat` directly — Agent fetches repo state on request
-- **Session type:** Orientation / initialization. No code changes, no tests run.
-- **Session closed (Sato: /stop).**
-
 ## Session 28 — May 28, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
