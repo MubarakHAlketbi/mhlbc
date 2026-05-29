@@ -50,7 +50,8 @@ from hl_decompile import (
     IRFunction, IRStmt,
     DYN_CAT_GENUINE, DYN_CAT_INVALID_IDX, DYN_CAT_UNRESOLVED_REF,
     DYN_CAT_NULL_AMBIGUOUS, DYN_CAT_STRING_BYTES, DYN_CAT_EVIDENCE_MISSING,
-    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_OTHER,
+    DYN_CAT_CALL_UNRESOLVED, DYN_CAT_VIRTUAL_UNSUPPORTED,
+    DYN_CAT_FUN_UNSUPPORTED, DYN_CAT_NULL_RESOLVED, DYN_CAT_OTHER,
 )
 
 # ============================================================================
@@ -405,7 +406,10 @@ def analyze_dynamic_attributions(
 
     Returns a dict with:
     - total_dynamic: total count of Dynamic variable declarations (matches regex-based count)
-    - actionable_dynamic: total_dynamic - genuine_dynamic_kind - invalid_type_index_dynamic
+    - actionable_dynamic: total_dynamic minus categories that are either
+      already resolved (resolved_null_target_type), explicitly unsupported
+      (virtual_type_unsupported, function_type_unsupported), genuinely Dynamic
+      (genuine_dynamic_kind), or invalid (invalid_type_index_dynamic)
     - category_breakdown: dict mapping each category name to its count
     - type_kind_breakdown: dict mapping each category to {type_kind_name: count}
     """
@@ -426,7 +430,17 @@ def analyze_dynamic_attributions(
             type_kind_breakdown[category][kind_name] += 1
 
     total_dynamic = sum(category_counts.values())
-    benign = category_counts.get(DYN_CAT_GENUINE, 0) + category_counts.get(DYN_CAT_INVALID_IDX, 0)
+
+    # Non-actionable categories: genuinely unimprovable or already resolved
+    NON_ACTIONABLE = frozenset({
+        DYN_CAT_GENUINE,          # genuine HL Dynamic, cannot change
+        DYN_CAT_INVALID_IDX,      # garbage type indices, not resolvable
+        DYN_CAT_NULL_RESOLVED,    # already resolved to concrete type
+        DYN_CAT_VIRTUAL_UNSUPPORTED,  # anonymous structs, explicitly unsupported
+        DYN_CAT_FUN_UNSUPPORTED,  # function types that still resolve to Dynamic
+        DYN_CAT_STRING_BYTES,     # OString/OBytes without Haxe mapping
+    })
+    benign = sum(cnt for cat, cnt in category_counts.items() if cat in NON_ACTIONABLE)
     actionable_dynamic = max(0, total_dynamic - benign)
 
     # Convert nested defaultdicts to regular dicts
@@ -1166,8 +1180,9 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append(f'| {cat} | {dynamic_category_counts[cat]} | {desc} |')
             md_lines.append('')
             md_lines.append(
-                '> Actionable dynamic = total - genuine_dynamic_kind'
-                f' - invalid_type_index_dynamic = {total_actionable_dynamic}')
+                '> Actionable dynamic (excludes genuine, invalid_idx,'
+                ' resolved_null, virtual_unsupported)'
+                f' = {total_actionable_dynamic}')
             md_lines.append('')
 
         # Dynamic category type kind sub-breakdown
@@ -1181,7 +1196,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             'call_return_unresolved': 'Call return type unresolvable',
             'virtual_type_unsupported': 'K_VIRTUAL anonymous struct (no safe structural representation)',
             'function_type_unsupported': 'K_FUN/K_METHOD that still resolves to Dynamic',
-            'resolved_null_target_type': 'ONull with proven concrete target type (register type evidence)',
+            'resolved_null_target_type': 'ONull with proven concrete target type (non-actionable, already resolved)',
             'other_dynamic': 'Uncategorized Dynamic',
         }
         if dynamic_type_kind_breakdown:
