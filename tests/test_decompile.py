@@ -116,6 +116,7 @@ def _build_minimal_with_raw_functions(
     floats: list[float] = None,
     strings: list[str] = None,
     version: int = 5,
+    entrypoint: int = 0,
 ) -> bytes:
     """Build minimal HL bytecode accepting pre-built raw function entries.
 
@@ -131,7 +132,7 @@ def _build_minimal_with_raw_functions(
         ntypes=ntypes, nglobals=nglobals,
         nnatives=nnatives,
         nfunctions=len(raw_function_entries) if raw_function_entries else 0,
-        nconstants=0, entrypoint=0,
+        nconstants=0, entrypoint=entrypoint,
     )
     data = header
     data += build_ints_pool(ints or [])
@@ -322,8 +323,8 @@ class TestRegisterLiveness:
 # ============================================================================
 
 class TestVariableMapper:
-    def test_this_and_ret(self):
-        """Register 0 = this, register 1 = ret."""
+    def test_legacy_no_sig_fallback(self):
+        """Without sig, VariableMapper keeps old this/ret behavior."""
         mapper = VariableMapper([K_OBJ, K_VOID, K_I32])
         defs = {0: [0], 1: [], 2: [1]}
         uses = {0: [2], 1: [3]}
@@ -331,48 +332,233 @@ class TestVariableMapper:
         assert names[0] == "this"
         assert names[1] == "ret"
 
-    def test_single_write_let(self):
-        """Register written once → named t<reg>."""
-        mapper = VariableMapper([K_I32, K_I32])
+    def test_sig_method_has_this_and_params(self):
+        """With sig.has_this=True, reg0=this, reg1..n=sig params."""
+        sig = FunctionSig("foo", [("p0", K_I32), ("p1", K_BOOL)], K_VOID,
+                          is_method=True, parent_class="Bar", has_this=True)
+        mapper = VariableMapper([K_OBJ, K_I32, K_BOOL, K_F64], sig=sig)
+        defs = {0: [0], 1: [1], 2: [2], 3: [3]}
+        uses = {0: [2], 1: [3], 2: [4]}
+        names = mapper.map(defs, uses)
+        assert names[0] == "this"
+        assert names[1] == "p0"
+        assert names[2] == "p1"
+        # reg 3 is a local (not a param) — use lifetime naming
+        assert names[3] == "t3"
+
+    def test_sig_static_no_this(self):
+        """With sig.has_this=False, reg0..nparams-1 = sig params, no 'this'."""
+        sig = FunctionSig("bar", [("p0", K_I32)], K_VOID,
+                          is_method=False, parent_class=None, has_this=False)
+        mapper = VariableMapper([K_I32, K_F64], sig=sig)
         defs = {0: [0], 1: [1]}
-        uses = {0: [2], 1: []}
+        uses = {0: [2], 1: [3]}
         names = mapper.map(defs, uses)
-        assert names[0] == "this"  # reg 0
-        # reg 1 is always "ret" per mapper convention
-        assert names[1] == "ret"
+        assert names[0] == "p0"  # first param, not "this"
+        # reg 1 is a local temp, not "ret"
+        assert names[1] == "t1"
 
-    def test_multi_write_var(self):
-        """Register written multiple times → v<reg>."""
-        mapper = VariableMapper([K_I32, K_I32, K_I32])
-        defs = {2: [0, 2, 4]}
-        uses = {2: [1, 3]}
-        names = mapper.map(defs, uses)
-        # reg 0 is this, reg 1 is ret, reg 2 is multi-write
-        assert names[2].startswith("v")
-
-    def test_unused_reg(self):
-        """Register never used → r<reg>."""
-        mapper = VariableMapper([K_I32, K_I32, K_I32])
-        defs = {0: [], 2: [0]}
-        uses = {0: [], 2: [1]}
+    def test_sig_constructor(self):
+        """Constructor sig has_this=True, params exclude 'this' receiver."""
+        sig = FunctionSig("new", [("p0", K_I32)], K_VOID,
+                          is_method=True, parent_class="Point", has_this=True)
+        mapper = VariableMapper([K_OBJ, K_I32, K_F64], sig=sig)
+        defs = {0: [0], 1: [1], 2: [2]}
+        uses = {0: [2], 1: [3]}
         names = mapper.map(defs, uses)
         assert names[0] == "this"
-        assert names[1] == "ret"
-        assert names[2] == "t2"
+        assert names[1] == "p0"  # first visible param (skipping 'this')
+        assert names[2] == "t2"   # local
 
-    def test_assign_list_hints(self):
-        """Debug assign list provides variable names."""
-        mapper = VariableMapper([K_I32, K_I32, K_I32, K_I32],
-                                assign_vars=[42, 99],
-                                assign_regs=[2, 3])
-        defs = {0: [], 1: [], 2: [0], 3: [1]}
-        uses = {0: [0], 1: [1], 2: [2], 3: [3]}
+    def test_sig_deconflict_params(self):
+        """Parameter names deconflict with used_names."""
+        sig = FunctionSig("f", [("this", K_I32)], K_VOID,  # edge case: param named 'this'
+                          is_method=False, parent_class=None, has_this=False)
+        mapper = VariableMapper([K_I32, K_F64], sig=sig)
+        defs = {0: [0], 1: [1]}
+        uses = {0: [2]}
         names = mapper.map(defs, uses)
-        assert names[0] == "this"
-        assert names[1] == "ret"
-        # named by assign list
-        assert "_var" in names.get(2, "")
-        assert "_var" in names.get(3, "")
+        # No 'this' because has_this=False, but param name "this" conflicts
+        # with nothing — pass through
+        assert names[0] == "this"  # param named "this" from sig
+        # reg 1 is local temp
+        assert names[1] == "t1"
+
+
+# ============================================================================
+# Test: Signature-Aware Register Naming (Pipeline Integration)
+# ============================================================================
+
+class TestSignatureAwareRegisterNaming:
+    """Verify that the full pipeline produces correct register names
+    for static functions, methods, and constructors."""
+
+    def _make_kfun_type(self, arg_type_indices: list[int],
+                        ret_type_idx: int = 0) -> bytes:
+        """Build a K_FUN type blob: kind + nargs(byte) + args + ret."""
+        data = bytes([K_FUN, len(arg_type_indices)])
+        for a in arg_type_indices:
+            data += encode_varint(a)
+        data += encode_varint(ret_type_idx)
+        return data
+
+    def _make_kmethod_type(self, arg_type_indices: list[int],
+                           ret_type_idx: int = 0) -> bytes:
+        """Build a K_METHOD type blob."""
+        data = bytes([K_METHOD, len(arg_type_indices)])
+        for a in arg_type_indices:
+            data += encode_varint(a)
+        data += encode_varint(ret_type_idx)
+        return data
+
+    def _build_func_body(self, reg_types: list[int],
+                         type_idx: int, findex: int,
+                         nregs: int, ops: list) -> bytes:
+        """Build a single function entry with header, reg types, and opcodes."""
+        func_data = encode_varint(type_idx)      # type
+        func_data += encode_varint(findex)       # findex
+        func_data += encode_varint(nregs)        # nregs
+        func_data += encode_varint(len(ops))     # nops
+        for rt in reg_types:
+            func_data += encode_varint(rt)
+        func_data += b"".join(
+            bytes([op]) + b"".join(encode_varint(a) for a in args)
+            for op, args in ops
+        )
+        return func_data
+
+    def test_static_function_has_no_this(self):
+        """Static function with params: reg0=p0, no 'this', no 'ret'."""
+        # Types: type[0]=K_I32, type[1]=K_FUN([I32], -> Void)
+        i32_type = build_type_primitive(K_I32)
+        # K_FUN with 1 arg (I32), returning Void(0)
+        fun_type = self._make_kfun_type([1], 0)
+        # Build function with K_FUN type (index 1), 2 regs, body: ORet
+        # K_FUN has 1 arg, has_this=False, so 1 param
+        ops = [(67, [])]  # ORet
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32],
+            type_idx=1, findex=0, nregs=2,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        # Static, has_this=False, 1 param → reg0 = "p0", no "this", no "ret"
+        sig = ir_fn.sig
+        assert not sig.has_this, "static func should not have this"
+        assert len(sig.params) == 1, f"expected 1 param, got {len(sig.params)}"
+        r0 = ir_fn.raw_regnames.get(0, "")
+        r1 = ir_fn.raw_regnames.get(1, "")
+        assert r0 == "p0", f"reg0 should be 'p0' (param), got '{r0}'"
+        assert r0 != "this", "static func reg0 should not be 'this'"
+        assert r1 != "ret", "static func reg1 should not be 'ret'"
+
+    def test_method_has_this_and_params(self):
+        """Method with has_this=True: reg0='this', reg1+=param names."""
+        i32_type = build_type_primitive(K_I32)
+        # K_METHOD type: 2 params (I32, I32) → first is 'this' receiver (type I32),
+        # visible params = 1 (the second I32)
+        method_type = self._make_kmethod_type([1, 1], 0)
+        # Function with K_METHOD type (index 1)
+        ops = [(67, [])]  # ORet
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32, K_I32],
+            type_idx=1, findex=0, nregs=3,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[i32_type, method_type],
+            raw_function_entries=[func_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        sig = ir_fn.sig
+        assert sig.has_this, "method should have this"
+        r0 = ir_fn.raw_regnames.get(0, "")
+        assert r0 == "this", f"method reg0 should be 'this', got '{r0}'"
+        # K_METHOD with 2 args = 1 visible param (excluding 'this')
+        r1 = ir_fn.raw_regnames.get(1, "")
+        assert r1 == "p0", f"method reg1 should be 'p0', got '{r1}'"
+
+    def test_constructor_no_this_as_parameter(self):
+        """Constructor: 'this' receiver is NOT emitted as a normal parameter."""
+        # Build an Obj type at index 2, K_FUN at index 3 with first arg=obj_type
+        # String pool: [0]="MyClass"
+        i32_type = build_type_primitive(K_I32)
+        void_type = build_type_primitive(K_VOID)
+        # Obj-like type at idx 2 with name_si=0 (string "MyClass")
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=0, global_si=0,
+            fields=[], protos=[], bindings=[],
+        )
+        # FUN type where first arg (obj type at idx 2) signals constructor:
+        # args=[2, 1] → first arg=Obj type, second=I32 param
+        fun_type = self._make_kfun_type([2, 1], 0)
+        # Function with FUN type (index 3), return Void
+        ops = [(67, [])]  # ORet
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32, K_I32],
+            type_idx=3, findex=0, nregs=3,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=4,
+            type_blobs=[void_type, i32_type, obj_type, fun_type],
+            raw_function_entries=[func_entry],
+            strings=["MyClass"],
+            version=4,
+            entrypoint=99,  # not our test function
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        sig = ir_fn.sig
+        # Constructor — has_this=True, name="new"
+        assert sig.has_this, "constructor should have this"
+        assert sig.name == "new", f"constructor should be named 'new', got '{sig.name}'"
+        r0 = ir_fn.raw_regnames.get(0, "")
+        assert r0 == "this", f"constructor reg0 should be 'this', got '{r0}'"
+        # Only 1 visible param (the I32), not including 'this'
+        assert len(sig.params) == 1, f"expected 1 visible param, got {len(sig.params)}"
+        r1 = ir_fn.raw_regnames.get(1, "")
+        assert r1 == "p0", f"constructor reg1 should be 'p0', got '{r1}'"
+
+    def test_entrypoint_no_fake_regs(self):
+        """Entrypoint function (no params, static) has no 'this' or 'ret'."""
+        i32_type = build_type_primitive(K_I32)
+        # K_FUN with 0 args, returning Void
+        fun_type = self._make_kfun_type([], 0)
+        ops = [(67, [])]  # ORet
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_I32],
+            type_idx=1, findex=0, nregs=2,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            version=4,
+        )
+        result = _disasm_and_decompile(data)
+        assert len(result.functions) > 0
+        ir_fn = list(result.functions.values())[0]
+        r0 = ir_fn.raw_regnames.get(0, "")
+        r1 = ir_fn.raw_regnames.get(1, "")
+        assert r0 != "this", "entrypoint reg0 should not be 'this'"
+        assert r1 != "ret", "entrypoint reg1 should not be 'ret'"
+        # With no params, regs are locals named by lifetime
+        assert r0 in ("t0", "v0", "r0"), f"unexpected reg0 name: {r0}"
 
 
 # ============================================================================

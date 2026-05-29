@@ -1,5 +1,12 @@
 # Session Tracking
 
+## Session 29 — May 29, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Project state: 498 passed, 3 skipped. Gates 1-6 complete. g6.0-20-g1bcc58b, clean working tree.
+- Previous Session 29 commit (`c89dac6`) was reverted (`1bcc58b`). Starting fresh.
+- Awaiting Sato's instruction.
+
 ## Session 28 — May 28, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

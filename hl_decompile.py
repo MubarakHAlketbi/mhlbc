@@ -550,14 +550,24 @@ class VariableMapper:
 
     def __init__(self, reg_types: List[int],
                  assign_vars: Optional[List[int]] = None,
-                 assign_regs: Optional[List[int]] = None):
+                 assign_regs: Optional[List[int]] = None,
+                 sig: Optional['FunctionSig'] = None):
         self.reg_types = reg_types
         self.assign_vars = assign_vars or []
         self.assign_regs = assign_regs or []
+        self.sig = sig
 
     def map(self, defs: Dict[int, List[int]],
             uses: Dict[int, List[int]]) -> Dict[int, str]:
         """Produce a mapping from register index → variable name.
+
+        When a FunctionSig is provided via __init__, uses signature-aware
+        naming: parameter registers get sig parameter names, 'this' is
+        assigned only for confirmed methods/constructors, and no hardcoded
+        'ret' slot is assumed.
+
+        Without a sig (backward compat), falls back to the old hardcoded
+        reg0='this', reg1='ret' behavior.
 
         Args:
             defs: Register → list of definition instruction indices.
@@ -580,28 +590,82 @@ class VariableMapper:
         # Name each register
         named_regs: Set[int] = set()
 
-        # Register 0: 'this' or return slot
-        if nregs > 0:
-            reg_to_name[0] = "this"
-            used_names.add("this")
-            named_regs.add(0)
+        if self.sig is not None:
+            # ── Signature-aware path ──────────────────────────────────────
+            has_this = self.sig.has_this
+            nparams = len(self.sig.params)
 
-        # Register 1: often return value slot
-        if nregs > 1:
-            reg_to_name[1] = "ret"
-            used_names.add("ret")
-            named_regs.add(1)
+            if has_this:
+                # reg 0 = 'this' (confirmed method/constructor receiver)
+                reg_to_name[0] = "this"
+                used_names.add("this")
+                named_regs.add(0)
+                # regs 1..nparams = params from signature
+                for i, (pname, _) in enumerate(self.sig.params):
+                    r = i + 1
+                    if r < nregs:
+                        # Check assign list override
+                        if r in assign_reg_to_var:
+                            name = assign_reg_to_var[r]
+                        else:
+                            name = pname  # 'p0', 'p1', etc. from sig
+                        # Deconflict
+                        base = name
+                        counter = 1
+                        while name in used_names:
+                            name = f"{base}_{counter}"
+                            counter += 1
+                        reg_to_name[r] = name
+                        used_names.add(name)
+                        named_regs.add(r)
+            else:
+                # Static function: regs 0..nparams-1 = params from signature
+                for i, (pname, _) in enumerate(self.sig.params):
+                    if i < nregs:
+                        if i in assign_reg_to_var:
+                            name = assign_reg_to_var[i]
+                        else:
+                            name = pname
+                        base = name
+                        counter = 1
+                        while name in used_names:
+                            name = f"{base}_{counter}"
+                            counter += 1
+                        reg_to_name[i] = name
+                        used_names.add(name)
+                        named_regs.add(i)
 
-        # Name remaining registers
-        for r in range(nregs):
-            if r in named_regs:
-                continue
-
-            # Check assign list for a hint
-            if r in assign_reg_to_var:
-                name = assign_reg_to_var[r]
-                # Deconflict
-                base = name
+            # Name remaining registers (locals/temps)
+            for r in range(nregs):
+                if r in named_regs:
+                    continue
+                if r in assign_reg_to_var:
+                    name = assign_reg_to_var[r]
+                    base = name
+                    counter = 1
+                    while name in used_names:
+                        name = f"{base}_{counter}"
+                        counter += 1
+                    reg_to_name[r] = name
+                    used_names.add(name)
+                    named_regs.add(r)
+                    continue
+                # Lifetime-based naming for locals
+                r_defs = defs.get(r, [])
+                r_uses = uses.get(r, [])
+                if not r_defs and not r_uses:
+                    reg_to_name[r] = f"r{r}"
+                    named_regs.add(r)
+                    continue
+                if not r_defs and r_uses:
+                    reg_to_name[r] = f"p{r}"
+                    named_regs.add(r)
+                    continue
+                if len(r_defs) <= 1:
+                    base = f"t{r}"
+                else:
+                    base = f"v{r}"
+                name = base
                 counter = 1
                 while name in used_names:
                     name = f"{base}_{counter}"
@@ -609,40 +673,53 @@ class VariableMapper:
                 reg_to_name[r] = name
                 used_names.add(name)
                 named_regs.add(r)
-                continue
+        else:
+            # ── Legacy path (no sig provided) ──────────────────────────────
+            if nregs > 0:
+                reg_to_name[0] = "this"
+                used_names.add("this")
+                named_regs.add(0)
+            if nregs > 1:
+                reg_to_name[1] = "ret"
+                used_names.add("ret")
+                named_regs.add(1)
 
-            # Use lifetime info
-            r_defs = defs.get(r, [])
-            r_uses = uses.get(r, [])
-
-            if not r_defs and not r_uses:
-                # Dead register — give it a placeholder
-                reg_to_name[r] = f"r{r}"
+            for r in range(nregs):
+                if r in named_regs:
+                    continue
+                if r in assign_reg_to_var:
+                    name = assign_reg_to_var[r]
+                    base = name
+                    counter = 1
+                    while name in used_names:
+                        name = f"{base}_{counter}"
+                        counter += 1
+                    reg_to_name[r] = name
+                    used_names.add(name)
+                    named_regs.add(r)
+                    continue
+                r_defs = defs.get(r, [])
+                r_uses = uses.get(r, [])
+                if not r_defs and not r_uses:
+                    reg_to_name[r] = f"r{r}"
+                    named_regs.add(r)
+                    continue
+                if not r_defs and r_uses:
+                    reg_to_name[r] = f"p{r}"
+                    named_regs.add(r)
+                    continue
+                if len(r_defs) <= 1:
+                    base = f"t{r}"
+                else:
+                    base = f"v{r}"
+                name = base
+                counter = 1
+                while name in used_names:
+                    name = f"{base}_{counter}"
+                    counter += 1
+                reg_to_name[r] = name
+                used_names.add(name)
                 named_regs.add(r)
-                continue
-
-            if not r_defs and r_uses:
-                # Only used (not defined) → parameter or captured
-                reg_to_name[r] = f"p{r}"
-                named_regs.add(r)
-                continue
-
-            # Written at least once
-            if len(r_defs) <= 1:
-                # Written only once: likely a let-binding
-                base = f"t{r}"
-            else:
-                # Written multiple times: mutable var
-                base = f"v{r}"
-
-            name = base
-            counter = 1
-            while name in used_names:
-                name = f"{base}_{counter}"
-                counter += 1
-            reg_to_name[r] = name
-            used_names.add(name)
-            named_regs.add(r)
 
         return reg_to_name
 
@@ -2596,34 +2673,38 @@ class Decompiler:
                 errors=["no instructions"],
             )
 
-        # Step 1: Liveness analysis
+        # Step 1: Build function signature FIRST (before variable mapping)
+        sig_builder = FunctionSigBuilder(self.parser, self.logger)
+        sig = sig_builder.build(func_idx)
+
+        # Step 2: Liveness analysis
         defs = RegisterLiveness.compute(instructions, nregs)
         uses = RegisterLiveness.compute_uses(instructions, nregs)
 
-        # Step 2: Variable mapping
+        # Step 3: Signature-aware variable mapping
         assign_vars = func.assign_vars
         assign_regs = func.assign_regs
-        var_mapper = VariableMapper(reg_types, assign_vars, assign_regs)
+        var_mapper = VariableMapper(reg_types, assign_vars, assign_regs, sig=sig)
         reg_names = var_mapper.map(defs, uses)
 
-        # Step 3: Build expression statements (instruction-indexed)
+        # Step 4: Build expression statements (instruction-indexed)
         expr_builder = ExprBuilder(self.parser, self.disasm, reg_names, self.logger)
         func_stmts = expr_builder.build_body_by_instruction(instructions, func_idx)
 
-        # Step 4: Control flow structuring
+        # Step 5: Control flow structuring
         cfg = self.disasm.build_cfg(func_idx) if self.disasm else []
         structurer = ControlStructurer(instructions, cfg, self.parser, self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
 
-        # Step 5: Variable declarations from register types
+        # Step 6: Variable declarations from register types
+        # Skip registers that are already declared in the function signature
+        # (this, ret legacy placeholder, and param registers)
+        sig_param_names: Set[str] = {pname for pname, _ in sig.params}
+        skip_names: Set[str] = {"this", "ret"} | sig_param_names
         variables: Dict[str, int] = {}
         for reg_idx, rname in reg_names.items():
-            if rname not in ("this", "ret") and reg_idx < len(reg_types):
+            if rname not in skip_names and reg_idx < len(reg_types):
                 variables[rname] = reg_types[reg_idx]
-
-        # Step 6: Function signature
-        sig_builder = FunctionSigBuilder(self.parser, self.logger)
-        sig = sig_builder.build(func_idx)
 
         # Override name from the function data
         fn_name = func.name or sig.name
