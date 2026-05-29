@@ -686,7 +686,7 @@ class VariableMapper:
                     named_regs.add(r)
                     continue
                 if not r_defs and r_uses:
-                    reg_to_name[r] = f"p{r}"
+                    reg_to_name[r] = f"u{r}"
                     named_regs.add(r)
                     continue
                 if len(r_defs) <= 1:
@@ -733,7 +733,7 @@ class VariableMapper:
                     named_regs.add(r)
                     continue
                 if not r_defs and r_uses:
-                    reg_to_name[r] = f"p{r}"
+                    reg_to_name[r] = f"u{r}"
                     named_regs.add(r)
                     continue
                 if len(r_defs) <= 1:
@@ -750,6 +750,79 @@ class VariableMapper:
                 named_regs.add(r)
 
         return reg_to_name
+
+
+# ============================================================================
+# Register Type Evidence Table
+# ============================================================================
+
+# Type-kind constants for type evidence
+_K_I32 = 3
+_K_F64 = 6
+_K_BOOL = 7
+_K_DYN = 9
+
+
+def build_register_type_evidence(
+    instructions: List[Instruction],
+    reg_types: List[int],
+    sig: 'FunctionSig',
+    parser: Any,
+) -> Dict[int, int]:
+    """Build a deterministic map of register index -> best known type index.
+
+    Evidence priority (highest wins):
+      1. Constant instructions: OInt->I32, OFloat->F64, OBool->Bool
+      2. OString->Dynamic (type index 9)
+      3. OMov propagation: dst register inherits src register's type
+      4. Conversion ops: toDyn->Dynamic, toInt->I32, etc.
+      5. Function header reg_types -- only if the index is valid
+      6. Signature params -- from sig.params
+
+    Does NOT infer from arithmetic, calls, or field access (deferred).
+    """
+    evidence: Dict[int, int] = {}
+
+    for i, (pname, ptype) in enumerate(sig.params):
+        reg = i + 1 if sig.has_this else i
+        if ptype >= 0:
+            evidence[reg] = ptype
+
+    for instr in instructions:
+        op = instr.opcode
+        args = instr.args
+        if not args:
+            continue
+        if op == 1:      # OInt
+            evidence[args[0]] = _K_I32
+        elif op == 2:    # OFloat
+            evidence[args[0]] = _K_F64
+        elif op == 3:    # OBool
+            evidence[args[0]] = _K_BOOL
+        elif op == 4:    # OBytes
+            evidence[args[0]] = 8  # K_BYTES
+        elif op == 5:    # OString
+            evidence[args[0]] = _K_DYN
+        elif op == 6:    # ONull
+            evidence[args[0]] = _K_DYN
+        elif op == 0 and len(args) >= 2:  # OMov
+            src_type = evidence.get(args[1])
+            if src_type is not None:
+                evidence[args[0]] = src_type
+        elif op in (59,) and len(args) >= 1:  # toDyn
+            evidence[args[0]] = _K_DYN
+        elif op in (60, 61) and len(args) >= 1:  # toSFloat, toUFloat
+            evidence[args[0]] = _K_F64
+        elif op == 62 and len(args) >= 1:  # toInt
+            evidence[args[0]] = _K_I32
+
+    for reg_idx in range(len(reg_types)):
+        if reg_idx not in evidence:
+            rt = reg_types[reg_idx]
+            if rt >= 0 and (rt <= 24 or (parser and 0 < rt < len(parser.types))):
+                evidence[reg_idx] = rt
+
+    return evidence
 
 
 # ============================================================================
@@ -2731,14 +2804,15 @@ class Decompiler:
                                        logger=self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
 
-        # Step 6: Variable declarations from register types
+        # Step 6: Register type evidence + variable declarations
+        reg_type_evidence = build_register_type_evidence(
+            instructions, reg_types, sig, self.parser,
+        )
+
         # Only declare variables for registers that are actually live
-        # (have at least one def or use in the instruction stream).
-        # Dead registers (no defs, no uses) produce pure noise as declarations.
         sig_param_names: Set[str] = {pname for pname, _ in sig.params}
         skip_names: Set[str] = {"this", "ret"} | sig_param_names
 
-        # Determine which registers are actually live
         alive_regs: Set[int] = set()
         for r, r_defs in defs.items():
             if r_defs:
@@ -2751,7 +2825,11 @@ class Decompiler:
         for reg_idx, rname in reg_names.items():
             if rname not in skip_names and reg_idx < len(reg_types):
                 if reg_idx in alive_regs:
-                    variables[rname] = reg_types[reg_idx]
+                    best_type = reg_type_evidence.get(reg_idx)
+                    if best_type is not None and best_type >= 0:
+                        variables[rname] = best_type
+                    else:
+                        variables[rname] = reg_types[reg_idx]
 
         # Override name from the function data
         fn_name = func.name or sig.name

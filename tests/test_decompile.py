@@ -657,6 +657,139 @@ class TestSignatureAwareRegisterNaming:
         assert r0_name == "p0", f"reg 0 should be 'p0', got '{r0_name}'"
 
 
+class TestRegisterTypePropagation:
+    """Test that register type evidence produces correct local declarations."""
+
+    def _make_kfun_type(self, arg_type_indices: list[int],
+                        ret_type_idx: int = 0) -> bytes:
+        data = bytes([K_FUN, len(arg_type_indices)])
+        for a in arg_type_indices:
+            data += encode_varint(a)
+        data += encode_varint(ret_type_idx)
+        return data
+
+    def _build_func_body(self, reg_types: list[int],
+                         type_idx: int, findex: int,
+                         nregs: int, ops: list) -> bytes:
+        func_data = encode_varint(type_idx)
+        func_data += encode_varint(findex)
+        func_data += encode_varint(nregs)
+        func_data += encode_varint(len(ops))
+        for rt in reg_types:
+            func_data += encode_varint(rt)
+        func_data += b"".join(
+            bytes([op]) + b"".join(encode_varint(a) for a in args)
+            for op, args in ops
+        )
+        return func_data
+
+    def test_oint_produces_int_declaration(self):
+        """OInt register produces 'Int' type in declaration."""
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)  # ()->Void
+        # OInt r0 @0, ORet — reg_types[0] might be garbage
+        ops = [(1, [0, 0]), (67, [])]
+        func_entry = self._build_func_body(
+            reg_types=[138],  # garbage type in header
+            type_idx=1, findex=0, nregs=1, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        # reg 0 should be Int (from OInt evidence), not type[138]
+        var_type = ir_fn.variables.get("t0", -1)
+        assert var_type == K_I32, f"t0 should be Int, got {var_type}"
+        writer = HaxeWriter(TypeResolver(p := _parse_bytecode(data)), p)
+        src = writer.write_function(ir_fn)
+        assert "Int" in src, f"Int type should appear: {src}"
+        assert "type[138]" not in src, f"garbage type should not appear: {src}"
+
+    def test_obool_produces_bool_declaration(self):
+        """OBool register produces 'Bool' type."""
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        ops = [(3, [0, 1]), (67, [])]  # OBool r0, true; ORet
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN], type_idx=1, findex=0, nregs=1, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        var_type = ir_fn.variables.get("t0", -1)
+        assert var_type == K_BOOL, f"t0 should be Bool, got {var_type}"
+
+    def test_omov_propagates_type(self):
+        """OMov propagates source register type to destination."""
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        # OInt r0=42, OMov r1=r0, ORet r1
+        ops = [(1, [0, 0]), (0, [1, 0]), (67, [1])]
+        func_entry = self._build_func_body(
+            reg_types=[K_DYN, K_DYN], type_idx=1, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        # r0 = Int (from OInt), r1 = Int (propagated from r0 via OMov)
+        r0_type = ir_fn.variables.get("t0", -1)
+        r1_type = ir_fn.variables.get("t1", -1)
+        assert r0_type == K_I32, f"r0 should be Int, got {r0_type}"
+        assert r1_type == K_I32, f"r1 should be Int (propagated), got {r1_type}"
+
+    def test_garbage_reg_type_falls_back(self):
+        """Register with garbage reg_type but no evidence gets Dynamic."""
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        # OInt r0, ORet — only r0 gets evidence
+        ops = [(1, [0, 0]), (67, [0])]
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, 999],  # reg 1 has garbage type 999
+            type_idx=1, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        # r0 = Int (from OInt), r1 = fallback to reg_types[1] = 999
+        # 999 is invalid, should not appear in variables
+        # (evidence only has r0, r1 has no evidence but is dead — no defs, no uses)
+        assert "r1" not in ir_fn.raw_regnames, "r1 should not appear (dead)"
+
+    def test_used_only_register_named_u_not_p(self):
+        """Used-only register gets 'uN' prefix, not 'pN'."""
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        # OInt r0=42, OCall0 r0, r1 (r1 is used-only, no def)
+        ops = [(1, [0, 0]), (24, [0, 1])]  # OCall0 dst=r0, fun_reg=r1
+        func_entry = self._build_func_body(
+            reg_types=[K_I32, K_DYN], type_idx=1, findex=0, nregs=2, ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=2, type_blobs=[i32_type, fun_type],
+            raw_function_entries=[func_entry],
+            ints=[42], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        r1_name = ir_fn.raw_regnames.get(1, "?")
+        assert r1_name.startswith("u"), f"used-only reg should use 'uN' prefix, got '{r1_name}'"
+        assert r1_name != "p1", "used-only reg should NOT be 'p1'"
+
+
 # ============================================================================
 # Test: Expression Builder
 # ============================================================================
