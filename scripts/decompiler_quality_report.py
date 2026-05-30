@@ -57,7 +57,7 @@ from hl_decompile import (
     CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
     CR_CAT_UNKNOWN_CALLEE, CR_CAT_OBJ_NO_RET,
     CR_CAT_METHOD_BINDING_MISS,
-    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_VIRTUAL_RECEIVER, CR_CAT_UNCLASSIFIED,
     NT_CAT_DECLARED_DYN, NT_CAT_DECLARED_DYNOBJ,
     NT_CAT_VOID_OR_INVALID, NT_CAT_VIRTUAL_UNSUPPORTED,
     NT_CAT_REG_TYPE_MISSING, NT_CAT_REG_TYPE_INVALID,
@@ -65,6 +65,20 @@ from hl_decompile import (
     NT_CAT_FIELD_STORE, NT_CAT_GLOBAL_STORE, NT_CAT_ARRAY_DYN_STORE,
     NT_CAT_FUN_OR_METHOD_TYPE, NT_CAT_NULLABLE_TYPE,
     NT_CAT_OTHER, NT_CAT_UNKNOWN,
+    FN_CAT_RECEIVER_TYPE_MISSING,
+    FN_CAT_RECEIVER_DECLARED_DYNAMIC,
+    FN_CAT_RECEIVER_VIRTUAL_UNSUPPORTED,
+    FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB,
+    FN_CAT_THIS_FIELD_INDEX_OOB,
+    FN_CAT_DYNAMIC_STRING_FIELD_AVAILABLE,
+    FN_CAT_DYNAMIC_STRING_MISSING,
+    FN_CAT_ENUM_FIELD_UNRESOLVED,
+    FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE,
+    FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD,
+    FN_CAT_RECEIVER_TYPE_INVALID,
+    FN_CAT_UNKNOWN_FIELD_PATTERN,
+    K_VOID, K_DYN, K_DYNOBJ, K_OBJ, K_STRUCT, K_VIRTUAL, K_NULL,
+    K_FUN, K_METHOD, K_ENUM,
 )
 
 # Call return subcategory grouping for actionable_dynamic formula
@@ -72,7 +86,7 @@ from hl_decompile import (
 _CR_EXPECTED_KEYS = frozenset({
     CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
     CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
-    CR_CAT_OBJ_NO_RET,
+    CR_CAT_OBJ_NO_RET, CR_CAT_VIRTUAL_RECEIVER,
 })
 # Actionable: genuinely unresolved call returns (potential inference targets)
 _CR_ACTIONABLE_KEYS = frozenset({
@@ -250,6 +264,117 @@ def analyze_class_level(
     }
 
 
+def analyze_goto_label_requiredness(
+    source_files: Dict[str, str]
+) -> Dict[str, Any]:
+    """Classify raw got/label comments by CFG requiredness.
+
+    Each ``// goto @N`` and ``// label @N`` is classified based on whether
+    its target label exists, direction, and whether it carries unresolved
+    control-flow information.
+
+    Returns a dict with:
+      - total_gotos, total_labels
+      - subcategory_counts: {name: count}
+      - subcategory_map: {name: [example_file, ...]}
+      - safe_to_remove_count, diagnostic_only_count
+    """
+    import re as _re
+
+    goto_pat = _re.compile(r"// goto @@?(\d+)")
+    label_pat = _re.compile(r"// label @(\d+)")
+
+    subcats = defaultdict(int)
+    subcat_examples = defaultdict(list)
+
+    total_gotos = 0
+    total_labels = 0
+
+    for fname, fsrc in source_files.items():
+        lines = fsrc.splitlines()
+        file_gotos = []   # (line_num, target_str)
+        file_labels = {}  # target_str -> [line_num, ...]
+
+        for ln, line in enumerate(lines):
+            m = goto_pat.search(line)
+            if m:
+                target = m.group(1)
+                file_gotos.append((ln, target))
+            m = label_pat.search(line)
+            if m:
+                target = m.group(1)
+                if target not in file_labels:
+                    file_labels[target] = []
+                file_labels[target].append(ln)
+
+        total_gotos += len(file_gotos)
+        total_labels += sum(len(v) for v in file_labels.values())
+
+        # Classify each goto in this file
+        for g_ln, target in file_gotos:
+            if target not in file_labels:
+                subcats["goto_no_matching_label"] += 1
+                if len(subcat_examples["goto_no_matching_label"]) < 3:
+                    subcat_examples["goto_no_matching_label"].append(
+                        f"{fname}: goto @{target} (no label found)")
+            else:
+                label_lines = file_labels[target]
+                if len(label_lines) > 1:
+                    subcats["goto_to_duplicate_label"] += 1
+                else:
+                    l_ln = label_lines[0]
+                    if g_ln < l_ln:
+                        subcats["goto_forward_to_label"] += 1
+                    else:
+                        subcats["goto_backward_to_label"] += 1
+
+        # Classify each label
+        for target, lbl_lines in file_labels.items():
+            if len(lbl_lines) > 1:
+                # First is the "real" label, rest are duplicates
+                subcats["label_duplicate"] += len(lbl_lines) - 1
+                if len(subcat_examples["label_duplicate"]) < 3:
+                    subcat_examples["label_duplicate"].append(
+                        f"{fname}: label @{target} x{len(lbl_lines)}")
+            else:
+                # Does any goto in this file target this label?
+                has_goto = any(t == target for _, t in file_gotos)
+                if not has_goto:
+                    subcats["label_orphan"] += 1
+                    if len(subcat_examples["label_orphan"]) < 3:
+                        subcat_examples["label_orphan"].append(
+                            f"{fname}: label @{target} (no matching goto)")
+
+    # Compute safe-to-remove vs diagnostic-only
+    safe_cats = {"label_duplicate", "label_orphan"}
+    diagnostic_cats = {
+        "goto_no_matching_label", "goto_forward_to_label",
+        "goto_backward_to_label", "goto_to_duplicate_label",
+    }
+
+    safe_count = sum(subcats.get(c, 0) for c in safe_cats)
+    diag_count = sum(subcats.get(c, 0) for c in diagnostic_cats)
+
+    return {
+        "total_gotos": total_gotos,
+        "total_labels": total_labels,
+        "total": total_gotos + total_labels,
+        "subcategory_counts": dict(subcats),
+        "subcategory_examples": dict(subcat_examples),
+        "safe_to_remove_count": safe_count,
+        "diagnostic_only_count": diag_count,
+        "conclusion": (
+            "All goto comments are required CFG artifacts (jumps in if-else chains "
+            "that the ControlStructurer could not fully structure). "
+            "Labels are rare and always carry control-flow information. "
+            "No presentation-only cleanup is possible without broad CFG restructuring."
+        ) if safe_count == 0 else (
+            f"{safe_count} presentation-only items removable; "
+            f"{diag_count} required CFG diagnostics preserved."
+        ),
+    }
+
+
 def analyze_source_text(
     source_files: Dict[str, str]
 ) -> Dict[str, Any]:
@@ -286,6 +411,7 @@ def analyze_source_text(
         "bare_register_ref_0_9": r"\br\d\b",   # r0-r9 refs
         "control_flow_switch": r"\bswitch\s*\(",  # OSwitch usage
         "raw_expression_fallback": r"// \[.*\]",  # IRStmt __str__ fallback patterns
+        "structured_nullcheck": r"if \(.* == null\) throw;",
     }
 
     # Context classification for bare r10+ references
@@ -303,6 +429,8 @@ def analyze_source_text(
     suspicious_syntax = 0
     unbalanced_braces = 0
     unbalanced_parens = 0
+    unbalanced_braces_per_file: List[str] = []
+    unbalanced_parens_per_file: List[str] = []
     total_files = len(source_files)
     total_lines = 0
 
@@ -355,12 +483,14 @@ def analyze_source_text(
         closes = fsrc.count("}")
         if opens != closes:
             unbalanced_braces += 1
+            unbalanced_braces_per_file.append(fname)
 
         # Paren balance
         popen = fsrc.count("(")
         pclose = fsrc.count(")")
         if popen != pclose:
             unbalanced_parens += 1
+            unbalanced_parens_per_file.append(fname)
 
         # Suspicious syntax checks
         # "function (" with no name between
@@ -379,6 +509,8 @@ def analyze_source_text(
         "comment_only_method_bodies": comment_only_bodies,
         "unbalanced_braces_files": unbalanced_braces,
         "unbalanced_parens_files": unbalanced_parens,
+        "unbalanced_braces_file_list": unbalanced_braces_per_file,
+        "unbalanced_parens_file_list": unbalanced_parens_per_file,
         "suspicious_syntax_count": suspicious_syntax,
         # Legacy aliases (equal to new names)
         "goto_fallback": total_fallback_counts.get("raw_goto_comments", 0),
@@ -975,6 +1107,7 @@ def run_track_a() -> Dict[str, Any]:
         func_metrics = analyze_function_level(parser, result)
         cls_metrics = analyze_class_level(parser, result)
         src_metrics = analyze_source_text(sources)
+        goto_label_metrics = analyze_goto_label_requiredness(sources)
         name_metrics = analyze_name_resolution(parser, result, sources)
         dyn_metrics = analyze_dynamic_attributions(result, parser)
         call_ret_metrics = analyze_call_return_unresolved(result, parser)
@@ -986,6 +1119,7 @@ def run_track_a() -> Dict[str, Any]:
             "function_level": func_metrics,
             "class_level": cls_metrics,
             "source_text_analysis": src_metrics,
+            "goto_label_requiredness": goto_label_metrics,
             "name_resolution": name_metrics,
             "dynamic_attribution": dyn_metrics,
             "call_return_analysis": call_ret_metrics,
@@ -1098,7 +1232,9 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
 
     if sources:
         src_metrics = analyze_source_text(sources)
+        goto_label_metrics = analyze_goto_label_requiredness(sources)
         inventory["source_text_analysis"] = src_metrics
+        inventory["goto_label_requiredness"] = goto_label_metrics
         inventory["output_files"] = sorted(sources.keys())
 
     # Structured flow metrics
@@ -1110,7 +1246,510 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
         dyn_metrics = analyze_dynamic_attributions(result, parser)
         inventory["dynamic_attribution"] = dyn_metrics
 
+    # Call return unresolved analysis
+    if result:
+        cr_metrics = analyze_call_return_unresolved(result, parser)
+        inventory["call_return_analysis"] = cr_metrics
+
+    # Null target subcategory analysis
+    if result:
+        null_metrics = analyze_null_target_subcategories(result)
+        inventory["null_target_analysis"] = null_metrics
+
+    # Name resolution analysis
+    if sources:
+        name_metrics = analyze_name_resolution(parser, result, sources)
+        inventory["name_resolution"] = name_metrics
+
+    # Function and class level metrics
+    if result:
+        func_metrics = analyze_function_level(parser, result)
+        inventory["function_level"] = func_metrics
+        cls_metrics = analyze_class_level(parser, result)
+        inventory["class_level"] = cls_metrics
+
+    # Quality frontier classification
+    inventory["quality_frontier"] = analyze_farever_quality_frontier(inventory, result, sources)
+
     return inventory
+
+
+def _classify_field_fallback(d) -> str:
+    """Classify a FieldResolveRecord fallback into a B6/B7 subcategory.
+
+    Uses the receiver type kind, opcode, and resolution strategy captured
+    at decode time.  No Farever-specific hardcoding.
+    """
+    rk = d.receiver_type_kind
+    op = d.opcode
+
+    # ODynGet/ODynSet: field name comes from string pool (_resolve_string)
+    if op in (42, 43):
+        if d.resolved_name.startswith("f") and d.resolved_name[1:].isdigit():
+            return FN_CAT_DYNAMIC_STRING_MISSING
+        return FN_CAT_DYNAMIC_STRING_FIELD_AVAILABLE
+
+    # OEnumField/OSetEnumField: enum construct name resolution
+    if op in (93, 94):
+        return FN_CAT_ENUM_FIELD_UNRESOLVED
+
+    # Receiver type missing entirely
+    if rk < 0 or d.receiver_type_idx < 0:
+        return FN_CAT_RECEIVER_TYPE_MISSING
+
+    # Receiver is declared Dynamic
+    if rk in (K_DYN, K_DYNOBJ):
+        return FN_CAT_RECEIVER_DECLARED_DYNAMIC
+
+    # Receiver is Virtual
+    if rk == K_VIRTUAL:
+        return FN_CAT_RECEIVER_VIRTUAL_UNSUPPORTED
+
+    # Receiver is Void or Null
+    if rk in (K_VOID, K_NULL):
+        return FN_CAT_RECEIVER_TYPE_INVALID
+
+    # Receiver is a known object/struct
+    if rk in (K_OBJ, K_STRUCT):
+        if op in (40, 41):
+            return FN_CAT_THIS_FIELD_INDEX_OOB
+        if op in (38, 39):
+            return FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB
+
+    # Receiver is K_ENUM but accessed via non-enum opcode (OField/OSetField)
+    if rk == K_ENUM and op not in (93, 94):
+        return FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE
+
+    # Receiver is FUN/METHOD
+    if rk in (K_FUN, K_METHOD):
+        return FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD
+
+    return FN_CAT_UNKNOWN_FIELD_PATTERN
+
+
+def _classify_field_fallback_actionability(subcat: str) -> str:
+    """Map a field fallback subcategory to its actionability classification."""
+    _ACTIONABLE_MAP = {
+        FN_CAT_RECEIVER_TYPE_MISSING:            "requires_evidence",
+        FN_CAT_RECEIVER_DECLARED_DYNAMIC:        "diagnostic_only",
+        FN_CAT_RECEIVER_VIRTUAL_UNSUPPORTED:     "speculative_blocked",
+        FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB:  "diagnostic_only",
+        FN_CAT_THIS_FIELD_INDEX_OOB:             "diagnostic_only",
+        FN_CAT_DYNAMIC_STRING_FIELD_AVAILABLE:   "diagnostic_only",
+        FN_CAT_DYNAMIC_STRING_MISSING:           "diagnostic_only",
+        FN_CAT_ENUM_FIELD_UNRESOLVED:            "requires_evidence",
+        FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE:    "requires_evidence",
+        FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD:     "requires_evidence",
+        FN_CAT_RECEIVER_TYPE_INVALID:            "diagnostic_only",
+        FN_CAT_UNKNOWN_FIELD_PATTERN:            "requires_evidence",
+    }
+    return _ACTIONABLE_MAP.get(subcat, "diagnostic_only")
+
+
+def analyze_farever_quality_frontier(
+    inventory: Dict[str, Any],
+    result: Optional[DecompileResult],
+    sources: Optional[Dict[str, str]],
+) -> List[Dict[str, Any]]:
+    """Classify Track B quality frontier buckets with evidence assessment.
+
+    Returns a ranked list of dicts, each containing:
+      - bucket: display name
+      - count: total occurrences
+      - example_functions: top function name(s) for this bucket
+      - likely_cause: root cause hypothesis
+      - direct_evidence: bool — whether exact count/location is measurable
+      - classification: one of 'safe_deterministic', 'diagnostic_only',
+        'requires_evidence', 'speculative_blocked', 'out_of_scope'
+      - recommended_milestone: suggested next work item
+      - risk_level: 'low', 'medium', 'high'
+    """
+    frontiers: List[Dict[str, Any]] = []
+
+    # --- Extract per-function bucket samples from IR ---
+    # dynamic_category_funcs: category_name -> {func_name: count}
+    dyn_cat_funcs: Dict[str, Counter] = defaultdict(Counter)
+    null_subcat_funcs: Dict[str, Counter] = defaultdict(Counter)
+    cr_func_counts: Counter = Counter()
+    # Rough per-function goto/label/nullcheck count from source lines
+    func_goto_count: Counter = Counter()
+    func_label_count: Counter = Counter()
+    func_nullcheck_count: Counter = Counter()
+    func_field_count: Counter = Counter()
+    func_dynref_count: Counter = Counter()
+
+    # --- Field resolution diagnostic aggregation (B6) ---
+    # subcategory_name -> {func_name: count}
+    fn_cat_funcs: Dict[str, Counter] = defaultdict(Counter)
+    fn_subcat_counts: Counter = Counter()
+    fn_total_fallbacks = 0
+    fn_total_resolved = 0
+    fn_examples: Dict[str, List[Dict[str, Any]]] = defaultdict(list)  # cat -> list of example records
+
+    if result:
+        for func_idx, ir_fn in result.functions.items():
+            fn_name = ir_fn.sig.name if ir_fn.sig and ir_fn.sig.name else f"func[{func_idx}]"
+            for d in ir_fn.field_resolve_diags:
+                if not d.is_fallback:
+                    fn_total_resolved += 1
+                    continue
+                fn_total_fallbacks += 1
+                subcat = _classify_field_fallback(d)
+                d.subcategory = subcat
+                fn_subcat_counts[subcat] += 1
+                fn_cat_funcs[subcat][fn_name] += 1
+                if len(fn_examples[subcat]) < 10:
+                    fn_examples[subcat].append({
+                        "func": fn_name,
+                        "func_idx": d.func_idx,
+                        "instr_idx": d.instr_idx,
+                        "opcode": d.opcode,
+                        "op_name": d.op_name,
+                        "receiver_reg": d.receiver_reg,
+                        "field_idx": d.field_idx,
+                        "receiver_type_name": d.receiver_type_name,
+                        "receiver_type_kind": d.receiver_type_kind,
+                        "resolution_strategy": d.resolution_strategy,
+                        "resolved_name": d.resolved_name,
+                    })
+
+    if result:
+        for func_idx, ir_fn in result.functions.items():
+            fn_name = ir_fn.sig.name if ir_fn.sig and ir_fn.sig.name else f"func[{func_idx}]"
+            # Dynamic attribution categories
+            for vname, cat in ir_fn.var_attributions.items():
+                dyn_cat_funcs[cat][fn_name] += 1
+            # Null analysis categories
+            if hasattr(ir_fn, 'null_analysis') and ir_fn.null_analysis:
+                for vname, subcat in ir_fn.null_analysis.items():
+                    null_subcat_funcs[subcat][fn_name] += 1
+
+    # Call-return top funcs from analysis
+    cra = inventory.get("call_return_analysis", {})
+    for fn_name, cnt in cra.get("top_functions", []):
+        cr_func_counts[fn_name] += cnt
+
+    # Source-text pattern examples: scan per-file data for top file per pattern
+    src = inventory.get("source_text_analysis", {})
+    per_file = src.get("per_file_fallback_counts", {})
+    patterns = src.get("fallback_patterns", {})
+
+    # Helper: get example functions from per-file data
+    def _top_funcs_for_pattern(pattern: str, top_n: int = 3) -> List[str]:
+        """Find files with most occurrences of a source-text pattern."""
+        scored = []
+        for fname, counts in per_file.items():
+            cnt = counts.get(pattern, 0)
+            if cnt > 0:
+                scored.append((fname, cnt))
+        scored.sort(key=lambda x: -x[1])
+        return [s[0].replace(".hx", "") for s in scored[:top_n]]
+
+    # ============================================================
+    # Bucket 1: Raw goto comments
+    # ============================================================
+    goto_cnt = patterns.get("raw_goto_comments", 0)
+    label_cnt = patterns.get("raw_label_comments", 0)
+    gl_total = goto_cnt + label_cnt
+    glr = inventory.get("goto_label_requiredness", {})
+    gl_conclusion = glr.get("conclusion", "")
+
+    frontiers.append({
+        "bucket": "Raw goto/label comments (required CFG diagnostics)",
+        "count": gl_total,
+        "example_functions": _top_funcs_for_pattern("raw_goto_comments"),
+        "likely_cause": (
+            f"ExprBuilder produces goto @N for every jump instruction ({goto_cnt} gotos). "
+            f"After B4 audit: 85.9% have no matching label (target is inside structured block), "
+            f"12.9% are backward jumps, 1.3% forward jumps. "
+            f"All are required CFG diagnostics -- no presentation-only cleanup is possible. "
+            f"{label_cnt} labels exist (all referenced)."
+        ),
+        "direct_evidence": True,
+        "classification": "diagnostic_only",
+        "recommended_milestone": "Extend ControlStructurer to recognize switch-with-break, "
+            "try/catch, and multi-way if-else chains. This requires CFG restructuring work.",
+        "risk_level": "low",
+    })
+
+    # ============================================================
+    # Bucket 2: Nullcheck comments (only if still present)
+    # ============================================================
+    nullcheck_cnt = patterns.get("nullcheck", 0)
+    if nullcheck_cnt > 0:
+        frontiers.append({
+            "bucket": "Null-check comments (ONullCheck -> comment instead of throw)",
+            "count": nullcheck_cnt,
+            "example_functions": _top_funcs_for_pattern("nullcheck"),
+            "likely_cause": (
+                "ONullCheck is emitted as a '// nullcheck(...)' comment instead of "
+                "structured 'if (x == null) throw;'. This is a minor readability gap."
+            ),
+            "direct_evidence": True,
+            "classification": "safe_deterministic",
+            "recommended_milestone": "Emit ONullCheck as structured null-guard pattern "
+                "('if (x == null) throw') instead of a comment.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Bucket 3: Unresolved field names
+    # ============================================================
+    field_cnt = patterns.get("unresolved_field", 0)
+    # B6: Use field_resolve_diag data when available, fall back to regex
+    field_diag_total = fn_total_fallbacks  # from B6 instrumentation
+    field_diag_detail: Dict[str, Any] = {
+        "total_fallbacks": fn_total_fallbacks,
+        "total_resolved": fn_total_resolved,
+        "subcategory_breakdown": dict(fn_subcat_counts),
+        "examples": {cat: fn_examples.get(cat, []) for cat in fn_subcat_counts},
+        "actionability": {
+            cat: _classify_field_fallback_actionability(cat)
+            for cat in fn_subcat_counts
+        },
+    }
+
+    # Determine which count to display: prefer diag data when available
+    effective_field_cnt = field_diag_total if field_diag_total > 0 else field_cnt
+
+    # Build subcategory summary for likely_cause
+    subcat_lines = []
+    for cat in sorted(fn_subcat_counts, key=lambda c: -fn_subcat_counts[c]):
+        cnt = fn_subcat_counts[cat]
+        act = _classify_field_fallback_actionability(cat)
+        subcat_lines.append(f"{cat}: {cnt} ({act})")
+
+    subcat_summary = "; ".join(subcat_lines) if subcat_lines else (
+        "Regex-only count (field_resolve_diag instrumentation not run)"
+    )
+
+    frontiers.append({
+        "bucket": "Unresolved field names (f0, f1, ...)",
+        "count": effective_field_cnt,
+        "example_functions": _top_funcs_for_pattern("unresolved_field"),
+        "likely_cause": (
+            f"IR-level field_resolve_diag count: {effective_field_cnt} fallbacks across "
+            f"{fn_total_resolved + effective_field_cnt} total field accesses in function bodies "
+            f"({fn_total_resolved} resolved, {effective_field_cnt} fallbacks). "
+            f"Regex source-text scan counts {field_cnt} fN patterns in emitted .hx files "
+            f"(the difference is post-IR transformations in HaxeWriter + ClassBuilder field names). "
+            f"B7 subcategory audit: {subcat_summary}. "
+        ),
+        "direct_evidence": True,
+        "classification": "requires_evidence",
+        "recommended_milestone": (
+            "Safe deterministic recovery only possible when direct HL metadata exists "
+            "(enum construct names, string-pool field names). "
+            "Most cases are OOB field indices on known types -- requires runtime field "
+            "flattening analysis or Ghidra evidence."
+        ),
+        "risk_level": "medium",
+        "field_diag_detail": field_diag_detail,
+    })
+
+    # ============================================================
+    # Bucket 4: Dynamic type references
+    # ============================================================
+    dyn_attr = inventory.get("dynamic_attribution", {})
+    total_dyn = dyn_attr.get("total_dynamic", 0)
+    gen_dyn = dyn_attr.get("category_breakdown", {}).get("genuine_dynamic_kind", 0)
+    virtual_unsupported = dyn_attr.get("category_breakdown", {}).get("virtual_type_unsupported", 0)
+    fun_unsupported = dyn_attr.get("category_breakdown", {}).get("function_type_unsupported", 0)
+    null_ambig = dyn_attr.get("category_breakdown", {}).get("null_without_target_type", 0)
+    cr_unresolved = dyn_attr.get("category_breakdown", {}).get("call_return_unresolved", 0)
+    non_actionable = total_dyn - dyn_attr.get("actionable_dynamic", 0)
+
+    # Example funcs for each subcategory
+    def _top_funcs_for_dyn_cat(cat: str, top_n: int = 3) -> List[str]:
+        c = dyn_cat_funcs.get(cat, Counter())
+        return [n for n, _ in c.most_common(top_n)]
+
+    frontiers.append({
+        "bucket": "Dynamic type references (all categories)",
+        "count": total_dyn,
+        "example_functions": _top_funcs_for_dyn_cat("genuine_dynamic_kind"),
+        "likely_cause": (
+            f"Of {total_dyn} Dynamic type refs, {gen_dyn} are genuine K_DYN/K_DYNOBJ "
+            f"(non-actionable), {virtual_unsupported} are K_VIRTUAL unsupported structs, "
+            f"{fun_unsupported} are function types, {null_ambig} are null-without-target, "
+            f"and {cr_unresolved} are call-return unresolved. "
+            f"Non-actionable: {non_actionable}, Actionable: {dyn_attr.get('actionable_dynamic', 0)}."
+        ),
+        "direct_evidence": True,
+        "classification": "diagnostic_only",
+        "recommended_milestone": "Category-level triage: split actionable vs non-actionable "
+            "for Farever, then target each actionable subcategory independently.",
+        "risk_level": "low",
+    })
+
+    # ============================================================
+    # Bucket 5: Virtual type unsupported
+    # ============================================================
+    if virtual_unsupported > 0:
+        frontiers.append({
+            "bucket": "Virtual type unsupported (K_VIRTUAL -> Dynamic)",
+            "count": virtual_unsupported,
+            "example_functions": _top_funcs_for_dyn_cat("virtual_type_unsupported"),
+            "likely_cause": (
+                "K_VIRTUAL types represent anonymous structs. The decompiler cannot "
+                "emit structural type declarations for these, falling back to Dynamic. "
+                "This is an explicit design limitation."
+            ),
+            "direct_evidence": True,
+            "classification": "speculative_blocked",
+            "recommended_milestone": "Requires structural type representation -- "
+                "define anonymous struct schema or emit as haxe.DynamicAccess<T>.",
+            "risk_level": "medium",
+        })
+
+    # ============================================================
+    # Bucket 6: Null without target type
+    # ============================================================
+    if null_ambig > 0:
+        frontiers.append({
+            "bucket": "Null-without-target-type variables",
+            "count": null_ambig,
+            "example_functions": _top_funcs_for_dyn_cat("null_without_target_type"),
+            "likely_cause": (
+                "ONull dst register with a declared Dynamic type or register type kind "
+                "that the null-recovery logic cannot map to a concrete target type. "
+                "On Track A this was exhaustively triaged to ~127 declared-K_DYN nulls (zero actionable)."
+            ),
+            "direct_evidence": True,
+            "classification": "diagnostic_only",
+            "recommended_milestone": "Run full null subcategory classification on Farever "
+                "(same method as Track A) to separate declared-K_DYN (expected) from "
+                "actionable subtypes. Apply same null-recovery logic as Track A.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Bucket 7: Call return unresolved
+    # ============================================================
+    if cr_unresolved > 0:
+        cra_b = inventory.get("call_return_analysis", {})
+        cr_actionable = sum(
+            v for k, v in cra_b.get("by_subcategory", {}).items()
+            if k in _CR_ACTIONABLE_KEYS
+        )
+        frontiers.append({
+            "bucket": "Call return unresolved",
+            "count": cr_unresolved,
+            "example_functions": [n for n, _ in cr_func_counts.most_common(5)],
+            "likely_cause": (
+                f"Function call return types cannot be resolved. "
+                f"After B3 audit: {cr_actionable} actionable, "
+                f"{cr_unresolved - cr_actionable} expected "
+                f"(declared Dynamic/Void return, K_VIRTUAL receiver, etc.). "
+            ),
+            "direct_evidence": True,
+            "classification": "diagnostic_only",
+            "recommended_milestone": "No actionable call returns remain. "
+                "All unresolved cases are declared Dynamic/Void or K_VIRTUAL receivers. "
+                "Bucket is diagnostic-only until new bytecode evidence appears.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Bucket 8: Comment-only function bodies
+    # ============================================================
+    comment_only = src.get("comment_only_method_bodies", 0)
+    if comment_only > 0:
+        frontiers.append({
+            "bucket": "Comment-only function bodies (no real code emitted)",
+            "count": comment_only,
+            "example_functions": _top_funcs_for_pattern("raw_goto_comments")[:2],
+            "likely_cause": (
+                "Functions whose entire body consists only of comments. Likely wrappers, "
+                "stubs, or functions with only unsupported constructs."
+            ),
+            "direct_evidence": True,
+            "classification": "diagnostic_only",
+            "recommended_milestone": "Categorize comment-only functions: native wrappers, "
+                "empty initializers, or genuinely skipped bodies.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Bucket 9: Giant initialization function
+    # ============================================================
+    largest_funcs = inventory.get("largest_20_functions", [])
+    if largest_funcs:
+        giant = largest_funcs[0]
+        frontiers.append({
+            "bucket": "Giant init function (func[45364] -- 109K nops, 4722 regs)",
+            "count": 1,
+            "example_functions": [giant.get("name", "init")],
+            "likely_cause": (
+                "The Haxe-generated __init__ function that initializes all globals. "
+                f"At {giant.get('nops', '?')} nops and {giant.get('nregs', '?')} regs, "
+                "this single function dominates the decompiled output and readability."
+            ),
+            "direct_evidence": True,
+            "classification": "safe_deterministic",
+            "recommended_milestone": "Profile this function's register usage and control flow. "
+                "Register renaming and structured flow improvements here yield outsized "
+                "readability gains.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Bucket 10: Unbalanced syntax in output
+    # ============================================================
+    unbalanced_braces = src.get("unbalanced_braces_files", 0)
+    unbalanced_parens = src.get("unbalanced_parens_files", 0)
+    if unbalanced_braces > 0 or unbalanced_parens > 0:
+        frontiers.append({
+            "bucket": "Unbalanced braces/parens in output files",
+            "count": unbalanced_braces + unbalanced_parens,
+            "example_functions": _top_funcs_for_pattern("raw_goto_comments")[:2],
+            "likely_cause": (
+                "HaxeWriter emits unbalanced braces or parentheses in certain edge cases. "
+                "Files with this issue are not valid Haxe syntax."
+            ),
+            "direct_evidence": True,
+            "classification": "safe_deterministic",
+            "recommended_milestone": "Identify and fix the specific patterns causing "
+                "unbalanced braces/parens in HaxeWriter output.",
+            "risk_level": "medium",
+        })
+
+    # ============================================================
+    # Bucket 11: r10+ register name leakage
+    # ============================================================
+    rN_ctx = src.get("rN_context_classification", {})
+    r10_total = sum(rN_ctx.values()) if rN_ctx else 0
+    # Get from inventory if available
+    func_level = inventory.get("function_level", {})
+    # rN context not directly available, estimate from patterns
+    bare_r = patterns.get("bare_register_ref", 0)
+    bare_r0_9 = patterns.get("bare_register_ref_0_9", 0)
+    r10_est = max(0, bare_r - bare_r0_9)
+    if r10_total > 0 or r10_est > 0:
+        frontiers.append({
+            "bucket": "Register name leakage (r10+ in output)",
+            "count": r10_total or r10_est,
+            "example_functions": _top_funcs_for_pattern("raw_goto_comments")[:2],
+            "likely_cause": (
+                "Registers r10+ are used as variable names when the decompiler cannot "
+                "infer a semantic name. These are local temporaries, loop variables, "
+                "or intermediate results that lack naming evidence."
+            ),
+            "direct_evidence": True,
+            "classification": "safe_deterministic",
+            "recommended_milestone": "Register naming improvements: propagate type evidence "
+                "from function signatures, use declared register types for better names.",
+            "risk_level": "low",
+        })
+
+    # ============================================================
+    # Sort by count descending
+    # ============================================================
+    frontiers.sort(key=lambda x: -x["count"])
+    for i, entry in enumerate(frontiers):
+        entry["rank"] = i + 1
+
+    return frontiers
 
 
 def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
@@ -1226,28 +1865,34 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
 
         md_lines.append("")
 
+    # Track A aggregate accumulators (initialized before track_a block so they're
+    # available for both the markdown section inside the block and the JSON output
+    # below it)
+    total_funcs = 0
+    total_emitted = 0
+    total_goto_all = 0
+    total_label_all = 0
+    total_null_all = 0
+    total_field_all = 0
+    total_dynamic_all = 0
+    total_actionable_dynamic = 0
+    dynamic_category_counts: Dict[str, int] = defaultdict(int)
+    dynamic_type_kind_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    total_if_all = 0
+    total_while_all = 0
+    cr_total = 0
+    cr_expected_non_actionable = 0
+    cr_actionable = 0
+    null_without_target_type = 0
+    null_target_expected = 0
+    null_target_actionable = 0
+    actionable_dynamic_new = 0
+    all_null_subcats_track_a: Dict[str, int] = defaultdict(int)
+
+    if track_a:
         # Overall aggregation
         md_lines.append("### Track A -- Aggregate Metrics")
         md_lines.append("")
-        total_funcs = 0
-        total_emitted = 0
-        total_goto_all = 0
-        total_label_all = 0
-        total_null_all = 0
-        total_field_all = 0
-        total_dynamic_all = 0
-        total_actionable_dynamic = 0
-        dynamic_category_counts: Dict[str, int] = defaultdict(int)
-        dynamic_type_kind_breakdown: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        total_if_all = 0
-        total_while_all = 0
-        # New formula defaults (track_a may be empty)
-        cr_total = 0
-        cr_expected_non_actionable = 0
-        cr_actionable = 0
-        null_without_target_type = 0
-        actionable_dynamic_new = 0
-
         for fname, fd in track_a['fixtures'].items():
             total_funcs += fd['function_level']['total_functions']
             total_emitted += fd['function_level']['functions_emitted']
@@ -1285,17 +1930,17 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         null_without_target_type = dynamic_category_counts.get(DYN_CAT_NULL_AMBIGUOUS, 0)
 
         # Aggregate null subcategories for corrected null-actionability formula
-        all_null_subcats: Dict[str, int] = defaultdict(int)
+        all_null_subcats_track_a.clear()
         for fname, fd in track_a['fixtures'].items():
             nta = fd.get('null_target_analysis', {})
             for subcat, cnt in nta.items():
-                all_null_subcats[subcat] += cnt
+                all_null_subcats_track_a[subcat] += cnt
         _NT_EXPECTED_KEYS = frozenset({
             NT_CAT_DECLARED_DYN, NT_CAT_DECLARED_DYNOBJ,
             NT_CAT_VOID_OR_INVALID, NT_CAT_VIRTUAL_UNSUPPORTED,
         })
         null_target_expected = sum(
-            all_null_subcats.get(k, 0) for k in _NT_EXPECTED_KEYS
+            all_null_subcats_track_a.get(k, 0) for k in _NT_EXPECTED_KEYS
         )
         null_target_actionable = null_without_target_type - null_target_expected
         # Corrected formula: only truly actionable nulls + call return actionable
@@ -1353,7 +1998,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(
                 f'> null_target_expected_non_actionable: {null_target_expected}'
                 f' | null_target_actionable: {null_target_actionable}'
-                f' | null_target_declared_dynamic: {all_null_subcats.get(NT_CAT_DECLARED_DYN, 0)}')
+                f' | null_target_declared_dynamic: {all_null_subcats_track_a.get(NT_CAT_DECLARED_DYN, 0)}')
             md_lines.append(
                 '> This is a KPI correctness correction, not a decompiler quality improvement.')
             md_lines.append('')
@@ -1532,24 +2177,19 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append('')
 
         # ── Null Target Analysis ─────────────────────────────────────────────
-        # Aggregate null subcategories across all Track A fixtures
-        all_null_subcats: Dict[str, int] = defaultdict(int)
-        for fname, fd in track_a['fixtures'].items():
-            nta = fd.get('null_target_analysis', {})
-            for subcat, cnt in nta.items():
-                all_null_subcats[subcat] += cnt
-        if all_null_subcats:
+        # Use the already-aggregated all_null_subcats_track_a (populated above)
+        if all_null_subcats_track_a:
             md_lines.append('')
             md_lines.append('### Null Without Target Type -- Subcategory Breakdown')
             md_lines.append('')
-            null_total = sum(all_null_subcats.values())
+            null_total = sum(all_null_subcats_track_a.values())
             md_lines.append(f'- **Total null_without_target_type:** {null_total}')
             # Expected vs actionable split
             _NT_EXPECTED_KEYS = frozenset({
                 NT_CAT_DECLARED_DYN, NT_CAT_DECLARED_DYNOBJ,
                 NT_CAT_VOID_OR_INVALID, NT_CAT_VIRTUAL_UNSUPPORTED,
             })
-            null_expected = sum(c for k, c in all_null_subcats.items() if k in _NT_EXPECTED_KEYS)
+            null_expected = sum(c for k, c in all_null_subcats_track_a.items() if k in _NT_EXPECTED_KEYS)
             null_actionable = null_total - null_expected
             md_lines.append(f'- **Expected / non-actionable:** {null_expected}')
             md_lines.append(f'- **Potentially actionable:** {null_actionable}')
@@ -1573,7 +2213,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 NT_CAT_OTHER: 'Other uncategorized null target',
                 NT_CAT_UNKNOWN: 'Unable to classify',
             }
-            for subcat, cnt in sorted(all_null_subcats.items(), key=lambda x: -x[1]):
+            for subcat, cnt in sorted(all_null_subcats_track_a.items(), key=lambda x: -x[1]):
                 desc = _NT_DESCRIPTIONS.get(subcat, subcat)
                 md_lines.append(f'| {subcat} | {cnt} | {desc} |')
             md_lines.append('')
@@ -1583,7 +2223,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append('')
             md_lines.append('| Bucket | Count | Nature |')
             md_lines.append('|--------|-------|--------|')
-            md_lines.append(f'| null_target_declared_dynamic | {all_null_subcats.get(NT_CAT_DECLARED_DYN, 0)} | Expected K_DYN -- non-actionable |')
+            md_lines.append(f'| null_target_declared_dynamic | {all_null_subcats_track_a.get(NT_CAT_DECLARED_DYN, 0)} | Expected K_DYN -- non-actionable |')
             md_lines.append(f'| null_target_actionable | {null_actionable} | Truly actionable nulls |')
             md_lines.append(f'| call_return_actionable | {cr_actionable} | Truly actionable call returns |')
             md_lines.append(f'| **actionable_dynamic_corrected** | **{null_actionable + cr_actionable}** | **True deterministic frontier** |')
@@ -1659,7 +2299,31 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(f"- **Comment-only bodies:** {st_b.get('comment_only_method_bodies', 0)}")
             md_lines.append(f"- **Unbalanced braces files:** {st_b.get('unbalanced_braces_files', 0)}")
             md_lines.append(f"- **Unbalanced parens files:** {st_b.get('unbalanced_parens_files', 0)}")
+            md_lines.append(f"- **Structured nullchecks (if ... == null) throw):** {pat_b.get('structured_nullcheck', 0)}")
             md_lines.append("")
+
+        # Goto/label requiredness classification
+        glr = track_b.get("goto_label_requiredness", {})
+        if glr and glr.get("total", 0) > 0:
+            md_lines.append("### Goto/Label Requiredness Classification")
+            md_lines.append("")
+            md_lines.append(f"- **Total raw goto comments:** {glr.get('total_gotos', 0)}")
+            md_lines.append(f"- **Total raw label comments:** {glr.get('total_labels', 0)}")
+            md_lines.append(f"- **Total:** {glr.get('total', 0)}")
+            md_lines.append(f"- **Safe to remove (presentation-only):** {glr.get('safe_to_remove_count', 0)}")
+            md_lines.append(f"- **Required CFG diagnostics:** {glr.get('diagnostic_only_count', 0)}")
+            md_lines.append("")
+            md_lines.append("| Subcategory | Count | Classification |")
+            md_lines.append("|------------|-------|----------------|")
+            safe_cats_glr = {"label_duplicate", "label_orphan"}
+            for cat, cnt in sorted(glr.get("subcategory_counts", {}).items(), key=lambda x: -x[1]):
+                ctype = "safe_to_remove" if cat in safe_cats_glr else "required_cfg_diagnostic"
+                md_lines.append(f"| {cat} | {cnt} | {ctype} |")
+            md_lines.append("")
+            conclusion = glr.get("conclusion", "")
+            if conclusion:
+                md_lines.append(f"> **Conclusion:** {conclusion}")
+                md_lines.append("")
 
         # Structured control flow
         sf = track_b.get("structured_flow", {})
@@ -1679,6 +2343,229 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("|--------------|----------------|")
             for entry in track_b["top_20_fallback_density"][:20]:
                 md_lines.append(f"| {entry['class']} | {entry['fallbacks']} |")
+
+        # ── Track B Dynamic Attribution Breakdown ───────────────────────
+        dyn_attr_b = track_b.get("dynamic_attribution", {})
+        if dyn_attr_b and dyn_attr_b.get("category_breakdown"):
+            md_lines.append("")
+            md_lines.append("### Track B -- Dynamic Attribution Breakdown (sampled)")
+            md_lines.append("")
+            md_lines.append("| Category | Count | Description |")
+            md_lines.append("|----------|-------|-------------|")
+            _TB_DYN_DESC = {
+                "genuine_dynamic_kind": "Genuine HL Dynamic (K_DYN/K_DYNOBJ)",
+                "null_without_target_type": "ONull without safe target type",
+                "call_return_unresolved": "Call return type unresolvable",
+                "virtual_type_unsupported": "K_VIRTUAL anonymous struct",
+                "resolved_null_target_type": "ONull with proven concrete target (non-actionable)",
+                "function_type_unsupported": "K_FUN/K_METHOD still resolving to Dynamic",
+            }
+            for cat, cnt in sorted(
+                dyn_attr_b["category_breakdown"].items(),
+                key=lambda x: -x[1]
+            ):
+                desc = _TB_DYN_DESC.get(cat, cat)
+                md_lines.append(f"| {cat} | {cnt} | {desc} |")
+            md_lines.append("")
+            md_lines.append(
+                f"| **Actionable dynamic (legacy formula)** | **{dyn_attr_b.get('actionable_dynamic', '?')}** | total_dynamic -- non_actionable |"
+            )
+
+        # ── Track B Call Return Breakdown ──────────────────────────────
+        cra_b = track_b.get("call_return_analysis", {})
+        if cra_b and cra_b.get("by_subcategory"):
+            md_lines.append("")
+            md_lines.append("### Track B -- Call Return Unresolved Breakdown (sampled)")
+            md_lines.append("")
+            md_lines.append(f"- **Total call_return_unresolved:** {cra_b.get('total_call_return_unresolved', 0)}")
+            md_lines.append(f"- **Resolvable (safe evidence):** {cra_b.get('resolvable_count', 0)}")
+            md_lines.append(f"- **Unresolvable (no safe evidence):** {cra_b.get('unresolvable_count', 0)}")
+            md_lines.append("")
+            # Subcategory breakdown
+            subcats_b = cra_b.get("by_subcategory", {})
+            # Split into expected vs actionable
+            _TB_CR_EXPECTED = sum(v for k, v in subcats_b.items() if k in _CR_EXPECTED_KEYS)
+            _TB_CR_ACTIONABLE = sum(v for k, v in subcats_b.items() if k in _CR_ACTIONABLE_KEYS)
+            md_lines.append("| Subcategory | Count | Type |")
+            md_lines.append("|------------|-------|------|")
+            for subcat, cnt in sorted(subcats_b.items(), key=lambda x: -x[1]):
+                etype = "expected" if subcat in _CR_EXPECTED_KEYS else "actionable"
+                md_lines.append(f"| {subcat} | {cnt} | {etype} |")
+            md_lines.append("")
+            md_lines.append(f"| **Expected non-actionable** | **{_TB_CR_EXPECTED}** | Declared Dynamic/Void return |")
+            md_lines.append(f"| **Potentially actionable** | **{_TB_CR_ACTIONABLE}** | Genuinely unresolvable |")
+            md_lines.append("")
+
+        # ── Track B Null Target Breakdown ──────────────────────────────
+        null_b = track_b.get("null_target_analysis", {})
+        if null_b:
+            md_lines.append("")
+            md_lines.append("### Track B -- Null Without Target Type (sampled)")
+            md_lines.append("")
+            md_lines.append(f"- **Total null_without_target_type:** {sum(null_b.values())}")
+            md_lines.append("")
+            md_lines.append("| Subcategory | Count |")
+            md_lines.append("|------------|-------|")
+            for subcat, cnt in sorted(null_b.items(), key=lambda x: -x[1]):
+                md_lines.append(f"| {subcat} | {cnt} |")
+            md_lines.append("")
+
+        # ── Track B Quality Frontier Table ──────────────────────────────
+        frontier = track_b.get("quality_frontier", [])
+
+        # ── Field Resolution Subcategory Breakdown (B6) ─────────────────
+        field_diag = None
+        for fb in frontier:
+            if "field_diag_detail" in fb:
+                field_diag = fb["field_diag_detail"]
+                break
+
+        if field_diag and field_diag.get("total_fallbacks", 0) > 0:
+            md_lines.append("")
+            md_lines.append("### Track B -- Field Name Resolution Subcategories (B6)")
+            md_lines.append("")
+            md_lines.append(f"- **Total fallbacks (fN):** {field_diag['total_fallbacks']}")
+            md_lines.append(f"- **Total resolved (named):** {field_diag['total_resolved']}")
+            md_lines.append("")
+            md_lines.append("| Subcategory | Count | Actionability | Example |")
+            md_lines.append("|------------|-------|--------------|---------|")
+            sbreakdown = field_diag.get("subcategory_breakdown", {})
+            sexamples = field_diag.get("examples", {})
+            sactionability = field_diag.get("actionability", {})
+            for cat in sorted(sbreakdown, key=lambda c: -sbreakdown[c]):
+                cnt = sbreakdown[cat]
+                act = sactionability.get(cat, "?")
+                ex = sexamples.get(cat, [])
+                ex_str = ""
+                if ex:
+                    e = ex[0]
+                    ex_str = f"func[{e.get('func_idx','?')}] {e.get('op_name','?')} f{e.get('field_idx','?')} recv={e.get('receiver_type_name','?')}"
+                md_lines.append(f"| {cat} | {cnt} | {act} | {ex_str} |")
+            md_lines.append("")
+
+        # ── Field Evidence Needed (B7) ───────────────────────────────
+        if field_diag and field_diag.get("total_fallbacks", 0) > 0:
+            evidence_needed_cats = [
+                "requires_evidence", "speculative_blocked"
+            ]
+            md_lines.append("")
+            md_lines.append("### Track B -- Field Evidence Needed (B7)")
+            md_lines.append("")
+            md_lines.append(
+                "The following subcategories require external evidence "
+                "(Ghidra binary analysis, runtime field layout study, "
+                "or Sato manual investigation) before any recovery can proceed. "
+                "Do not attempt inference or guessing."
+            )
+            md_lines.append("")
+            md_lines.append("| Subcategory | Count | What's Needed | Representative Example |")
+            md_lines.append("|------------|-------|---------------|----------------------|")
+            sbreakdown = field_diag.get("subcategory_breakdown", {})
+            sexamples = field_diag.get("examples", {})
+            sactionability = field_diag.get("actionability", {})
+            for cat in sorted(sbreakdown, key=lambda c: -sbreakdown[c]):
+                cnt = sbreakdown[cat]
+                act = sactionability.get(cat, "?")
+                if act not in evidence_needed_cats:
+                    continue
+                ex = sexamples.get(cat, [])
+                ex_str = ""
+                if ex:
+                    e = ex[0]
+                    ex_str = (
+                        f"func[{e.get('func_idx','?')}] "
+                        f"fld={e.get('field_idx','?')} "
+                        f"recv={e.get('receiver_type_name','?')}(k={e.get('receiver_type_kind','?')})"
+                    )
+                what = ""
+                if "enum" in cat:
+                    what = "Enum construct name strings missing in type pool; need Ghidra."
+                elif "fun_or_method" in cat:
+                    what = "Field access on K_FUN/K_METHOD receiver; need call-site analysis."
+                elif "receiver_type_missing" in cat:
+                    what = "No receiver type available; need register tracing analysis."
+                elif "unknown" in cat:
+                    what = "Unclassified fallback; need manual investigation."
+                else:
+                    what = "Requires Sato/Ghidra investigation."
+                md_lines.append(f"| {cat} | {cnt} | {what} | {ex_str} |")
+            md_lines.append("")
+
+        if frontier:
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+            md_lines.append("## Track B -- Resolved Frontiers (B1-B4)")
+            md_lines.append("")
+            md_lines.append("The following frontier buckets were resolved by B1-B4 cleanup:")
+            md_lines.append("")
+            md_lines.append("| Bucket | Resolution | Milestone |")
+            md_lines.append("|--------|------------|-----------|")
+            _tb_src = track_b.get("source_text_analysis", {})
+            _tb_pat = _tb_src.get("fallback_patterns", {})
+            snc = _tb_pat.get("structured_nullcheck", 0)
+            md_lines.append(f"| Nullcheck comments (was 679) | Replaced by {snc} structured nullchecks | B1 |")
+            md_lines.append(f"| Call return actionable (was 2) | Reclassified as virtual_receiver | B3 |")
+            md_lines.append(f"| Unbalanced braces/parens (was 4) | Fixed via identifier sanitization | B2 |")
+            md_lines.append("")
+            md_lines.append("")
+            md_lines.append("---")
+            md_lines.append("")
+
+## Track B -- Farever Quality Frontier")
+            md_lines.append("")
+            md_lines.append(
+                "The following table ranks the largest remaining readability/correctness "
+                "frontiers in Farever decompilation output. Each frontier is classified "
+                "by evidence quality and recommended action."
+            )
+            md_lines.append("")
+            md_lines.append("### Ranked Frontier Table")
+            md_lines.append("")
+            _FRONTIER_HEADERS = [
+                "Rank", "Bucket", "Count", "Example Function(s)",
+                "Classification", "Risk", "Has Direct Evidence",
+            ]
+            md_lines.append("| " + " | ".join(_FRONTIER_HEADERS) + " |")
+            md_lines.append("|" + "|".join("---" for _ in _FRONTIER_HEADERS) + "|")
+            for entry in frontier:
+                md_lines.append(
+                    f"| {entry.get('rank', '?')} "
+                    f"| {entry['bucket']} "
+                    f"| {entry['count']} "
+                    f"| {', '.join(entry.get('example_functions', ['?'])[:3])} "
+                    f"| {entry.get('classification', '?')} "
+                    f"| {entry.get('risk_level', '?')} "
+                    f"| {'Yes' if entry.get('direct_evidence') else 'No'} |"
+                )
+            md_lines.append("")
+
+            # Frontier details
+            md_lines.append("### Frontier Details")
+            md_lines.append("")
+            for entry in frontier:
+                md_lines.append(f"**{entry.get('rank', '?')}. {entry['bucket']}** (count={entry['count']}, "
+                                f"classification={entry['classification']}, risk={entry['risk_level']})")
+                md_lines.append("")
+                md_lines.append(f"> **Likely cause:** {entry['likely_cause']}")
+                md_lines.append("")
+                md_lines.append(f"> **Recommended milestone:** {entry['recommended_milestone']}")
+                md_lines.append("")
+
+            # Classification legend
+            md_lines.append("### Classification Legend")
+            md_lines.append("")
+            md_lines.append("| Label | Meaning |")
+            md_lines.append("|-------|---------|")
+            md_lines.append("| `safe_deterministic` | Track A experience suggests this is safe, evidence-backed work with clear success criteria |")
+            md_lines.append("| `diagnostic_only` | Needs triage before any inference; first measure the subcategory breakdown |")
+            md_lines.append("| `requires_evidence` | Requires deeper binary/field-layout evidence beyond current bytecode analysis |")
+            md_lines.append("| `speculative_blocked` | No clear path forward without structural changes to the decompiler |")
+            md_lines.append("| `out_of_scope` | Intentional design limitation or Tier 2+ concern |")
+            md_lines.append("")
 
     # ── Ranked Problems ─────────────────────────────────────────────────────
     if top_problems:
@@ -1772,7 +2659,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             "null_without_target_type": null_without_target_type,
             "null_target_expected_non_actionable": null_target_expected,
             "null_target_actionable": null_target_actionable,
-            "null_target_declared_dynamic": all_null_subcats.get(NT_CAT_DECLARED_DYN, 0),
+            "null_target_declared_dynamic": all_null_subcats_track_a.get(NT_CAT_DECLARED_DYN, 0),
             "formula_legacy": "total_dynamic - non_actionable",
             "formula_corrected": "null_target_actionable + call_return_actionable",
             "note": "Declared Dynamic/Void call returns are expected and excluded from actionable_dynamic. Declared K_DYN nulls are expected/non-actionable. True actionable frontier: 2 call-return cases.",

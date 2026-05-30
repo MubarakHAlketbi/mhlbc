@@ -98,6 +98,7 @@ CR_CAT_UNKNOWN_CALLEE       = "call_return_unknown_callee"
 CR_CAT_OBJ_NO_RET           = "call_return_object_type_no_return_metadata"
 CR_CAT_METHOD_BINDING_MISS  = "method_binding_missing"
 CR_CAT_RECEIVER_TYPE_MISS   = "receiver_type_missing"
+CR_CAT_VIRTUAL_RECEIVER    = "virtual_receiver"
 CR_CAT_UNCLASSIFIED         = "unclassified"
 
 # Null target subcategory constants (null_without_target_type classification)
@@ -139,6 +140,70 @@ class CallReturnRecord:
     resolved_return_type: str      # what TypeResolver returns for the return type
     is_resolvable: bool            # True if type can be resolved to non-Dynamic
     unresolved_category: str = CR_CAT_UNCLASSIFIED
+
+
+# ============================================================================
+# Field name resolution subcategories (B6, refined B7)
+# ============================================================================
+# These classify why _resolve_field_name fell back to fN.
+FN_CAT_RECEIVER_TYPE_MISSING          = "receiver_type_missing"
+FN_CAT_RECEIVER_DECLARED_DYNAMIC      = "receiver_declared_dynamic"
+FN_CAT_RECEIVER_VIRTUAL_UNSUPPORTED   = "receiver_virtual_unsupported"
+FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB = "receiver_object_field_index_oob"
+FN_CAT_THIS_FIELD_INDEX_OOB           = "this_field_index_oob"       # B7: renamed from this_field_metadata_available
+FN_CAT_DYNAMIC_STRING_FIELD_AVAILABLE = "dynamic_string_field_available"
+FN_CAT_ENUM_FIELD_UNRESOLVED          = "enum_field_unresolved"
+FN_CAT_CLASSBUILDER_FIELD_UNRESOLVED  = "classbuilder_field_unresolved"
+# B7: Split malformed_or_unknown into precise subcategories
+FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE  = "enum_receiver_not_enum_opcode"
+FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD   = "fun_or_method_receiver_field_access"
+FN_CAT_DYNAMIC_STRING_MISSING         = "dynamic_string_missing"
+FN_CAT_RECEIVER_TYPE_INVALID          = "receiver_type_invalid"
+FN_CAT_UNKNOWN_FIELD_PATTERN          = "unknown_field_pattern"
+# Backward-compat aliases (B6)
+FN_CAT_RECEIVER_OBJECT_FIELD_METADATA_AVAILABLE = FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB
+FN_CAT_INHERITED_FIELD_FLATTENING_MISS = "inherited_field_flattening_miss"
+FN_CAT_THIS_FIELD_METADATA_AVAILABLE  = FN_CAT_THIS_FIELD_INDEX_OOB  # B7: deprecated alias
+FN_CAT_MALFORMED_OR_UNKNOWN           = "malformed_or_unknown"       # B7: deprecated, split into finer cats
+
+FN_CAT_LABELS = {
+    FN_CAT_RECEIVER_TYPE_MISSING:          "receiver_type_missing",
+    FN_CAT_RECEIVER_DECLARED_DYNAMIC:      "receiver_declared_dynamic",
+    FN_CAT_RECEIVER_VIRTUAL_UNSUPPORTED:   "receiver_virtual_unsupported",
+    FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB: "receiver_object_field_index_oob",
+    FN_CAT_THIS_FIELD_INDEX_OOB:           "this_field_index_oob",
+    FN_CAT_DYNAMIC_STRING_FIELD_AVAILABLE: "dynamic_string_field_available",
+    FN_CAT_ENUM_FIELD_UNRESOLVED:          "enum_field_unresolved",
+    FN_CAT_CLASSBUILDER_FIELD_UNRESOLVED:  "classbuilder_field_unresolved",
+    FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE:  "enum_receiver_not_enum_opcode",
+    FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD:   "fun_or_method_receiver_field_access",
+    FN_CAT_DYNAMIC_STRING_MISSING:         "dynamic_string_missing",
+    FN_CAT_RECEIVER_TYPE_INVALID:          "receiver_type_invalid",
+    FN_CAT_UNKNOWN_FIELD_PATTERN:          "unknown_field_pattern",
+}
+
+
+@dataclass
+class FieldResolveRecord:
+    """Diagnostic record for a field name resolution attempt.
+
+    Captures context at the point where a field index is translated to a name,
+    so the quality report can classify every fN fallback.
+    """
+    func_idx: int                  # function index in parser.functions[]
+    instr_idx: int                 # instruction index (-1 for ClassBuilder/static)
+    opcode: int                    # opcode (38=OField, 39=OSetField, etc.)
+    op_name: str                   # mnemonic
+    receiver_reg: int              # register holding the object (-1 for this/-1)
+    field_idx: int                 # field index argument
+    receiver_type_idx: int         # resolved receiver type index (-1 if unknown)
+    receiver_type_kind: int        # resolved receiver type kind (-1 if unknown)
+    receiver_type_name: str        # type name string ("unknown" if unknown)
+    resolution_strategy: str       # "parent_type", "fn_type_arg0", "none"
+    parent_type_idx: int           # fn.parent_type (-1 if none)
+    resolved_name: str             # the emitted name (e.g. "radius" or "f3")
+    is_fallback: bool              # True if resolved_name is a fallback fN
+    subcategory: str = ""          # populated during classification
 
 # Opcode ranges for type propagation
 _ARITHMETIC_BINARY_OPS = frozenset(range(7, 20))   # OAdd..OXor (dst=a op b)
@@ -273,6 +338,8 @@ class IRStmt:
             return f"// label_{self.comment or ''}"
         if self.op == "goto":
             return f"// goto @{self.comment}"
+        if self.op == "nullcheck":
+            return f"if ({self.src} == null) throw;"
         if self.op == "nop":
             return ""
         if self.op == "comment":
@@ -294,6 +361,7 @@ class IRFunction:
     var_attributions: Dict[str, str] = field(default_factory=dict)  # var_name → Dynamic category
     call_return_analysis: Dict[str, CallReturnRecord] = field(default_factory=dict)  # var_name → analysis
     null_analysis: Dict[str, str] = field(default_factory=dict)  # var_name → null subcategory
+    field_resolve_diags: List[Any] = field(default_factory=list)  # FieldResolveRecord list
 
 
 @dataclass
@@ -1404,6 +1472,7 @@ class ExprBuilder:
         self._logger = logger
         self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)) if logger else (
             lambda tag, msg, level=INFO: None)
+        self._field_diags: List[Any] = []  # FieldResolveRecord diagnostics
 
     def build_body(self, instructions: List[Instruction],
                    func_idx: int) -> List[IRStmt]:
@@ -1483,10 +1552,9 @@ class ExprBuilder:
             return IRStmt("switch", src=val,
                           comment=f"{len(instr.jump_cases or [])} cases")
 
-        if op == 71:  # ONullCheck — throw if null
+        if op == 71:  # ONullCheck -- throw if null
             val = self._reg_var(args[0]) if args else IRConst("?")
-            return IRStmt("comment",
-                          comment=f"nullcheck({val})")
+            return IRStmt("nullcheck", src=val)
 
         # --- Return ---
         if op == 67:  # ORet
@@ -1626,6 +1694,8 @@ class ExprBuilder:
                 field = metadata_name
             else:
                 field = self._resolve_field_name(args[2], self._func_idx)
+            self._record_field_diag(op, instr.mnemonic, args[1], args[2],
+                                    instr.index, field)
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get", [obj, IRConst(field)]))
 
@@ -1635,6 +1705,8 @@ class ExprBuilder:
             src = self._reg_var(args[0])
             obj = self._reg_var(args[1])
             field = self._resolve_field_name(args[2], self._func_idx)
+            self._record_field_diag(op, instr.mnemonic, args[1], args[2],
+                                    instr.index, field)
             return IRStmt("expr",
                           src=IRExpr("field_set", [obj, IRConst(field), src]))
 
@@ -1643,6 +1715,8 @@ class ExprBuilder:
                 return IRStmt("comment", comment=f"malformed OGetThis args={args}")
             dst = self._reg_var(args[0])
             field_name = self._resolve_field_name(args[1], self._func_idx)
+            self._record_field_diag(op, instr.mnemonic, -1, args[1],
+                                    instr.index, field_name)
             return IRStmt("assign", dst=dst,
                           src=IRExpr("field_get",
                                      [IRVar("this"), IRConst(field_name)]))
@@ -1652,6 +1726,8 @@ class ExprBuilder:
                 return IRStmt("comment", comment=f"malformed OSetThis args={args}")
             src = self._reg_var(args[0])
             field_name = self._resolve_field_name(args[1], self._func_idx)
+            self._record_field_diag(op, instr.mnemonic, -1, args[1],
+                                    instr.index, field_name)
             return IRStmt("expr",
                           src=IRExpr("field_set",
                                      [IRVar("this"), IRConst(field_name), src]))
@@ -1660,6 +1736,8 @@ class ExprBuilder:
             dst_or_src = self._reg_var(args[0])
             obj = self._reg_var(args[1])
             field = self._resolve_string(args[2]) if len(args) >= 3 else "?"
+            self._record_field_diag(op, instr.mnemonic, args[1], args[2],
+                                    instr.index, field)
             if op == 42:
                 return IRStmt("assign", dst=dst_or_src,
                               src=IRExpr("field_get", [obj, IRConst(field)]))
@@ -1739,15 +1817,22 @@ class ExprBuilder:
             val = self._reg_var(args[1]) if op == 94 else None
             dst_or_en = self._reg_var(args[0]) if op == 94 else self._reg_var(
                 args[0])
+            # Try deterministic enum construct name resolution
+            field_name = self._resolve_enum_field_name(args, op)
+            if field_name is None:
+                field_name = f"f{args[2]}"
+            self._record_field_diag(op, instr.mnemonic,
+                                    args[1] if op == 93 else -1,
+                                    args[2], instr.index, field_name)
             if op == 93:
                 dst = self._reg_var(args[0])
                 ev = self._reg_var(args[1])
                 return IRStmt("assign", dst=dst,
-                              src=IRExpr("enum_field", [ev, IRConst(f"f{args[2]}")]))
+                              src=IRExpr("enum_field", [ev, IRConst(field_name)]))
             else:
                 return IRStmt("expr",
                               src=IRExpr("enum_field_set",
-                                         [dst_or_en, IRConst(f"f{args[2]}"),
+                                         [dst_or_en, IRConst(field_name),
                                           self._reg_var(args[1])]))
 
         # --- Misc ---
@@ -1962,6 +2047,114 @@ class ExprBuilder:
                             return name
         return f"f{field_idx}"
 
+    def _resolve_enum_field_name(self, args: List[int], op: int) -> Optional[str]:
+        """Resolve an enum field index to a construct name from type metadata.
+
+        OEnumField args: [dst, enum_val_reg, field_idx, enum_type_idx???]
+        OSetEnumField args: [enum_val_reg, value_reg, field_idx]
+
+        Uses the enum value register's declared type (from reg_types) to find
+        the enum definition, then looks up constructs[field_idx].name.
+        Returns None if any step fails.
+        """
+        if not args or len(args) < 3:
+            return None
+        field_idx = args[2]
+        func_idx = self._func_idx
+        if func_idx < 0 or func_idx >= len(self.parser.functions):
+            return None
+        fn = self.parser.functions[func_idx]
+
+        # Determine the enum value register
+        if op == 93:  # OEnumField
+            ev_reg = args[1]
+        elif op == 94:  # OSetEnumField
+            ev_reg = args[0]
+        else:
+            return None
+
+        # Get the declared type of the enum value register
+        if not (0 <= ev_reg < len(fn.reg_types)):
+            return None
+        enum_type_idx = fn.reg_types[ev_reg]
+        if not (0 < enum_type_idx < len(self.parser.types)):
+            return None
+        et = self.parser.types[enum_type_idx]
+        if et.kind != K_ENUM:
+            return None
+
+        # Look up construct by field index
+        if not (0 <= field_idx < len(et.constructs)):
+            return None
+        construct = et.constructs[field_idx]
+        if construct.name is not None and 0 <= construct.name < len(self.parser.strings):
+            name = self.parser.strings[construct.name]
+            if name and not name.startswith("f") and not name[0].isdigit():
+                return name
+        return None
+
+    def _record_field_diag(self, opcode: int, op_name: str,
+                           receiver_reg: int, field_idx: int,
+                           instr_idx: int, resolved_name: str) -> None:
+        """Record diagnostic context for a field name resolution.
+
+        Called from every opcode handler that resolves a field name, regardless
+        of whether the resolution succeeded or fell back to fN.
+        """
+        func_idx = self._func_idx
+        if func_idx < 0 or func_idx >= len(self.parser.functions):
+            return
+        fn = self.parser.functions[func_idx]
+
+        # Determine receiver type from strategy order
+        receiver_type_idx = -1
+        receiver_type_kind = -1
+        receiver_type_name = "unknown"
+        resolution_strategy = "none"
+        parent_type_idx = fn.parent_type if fn.parent_type is not None else -1
+
+        # Strategy 1: parent_type
+        pt = fn.parent_type
+        if pt is not None and pt >= 0 and pt < len(self.parser.types):
+            receiver_type_idx = pt
+            resolution_strategy = "parent_type"
+
+        # Strategy 2: fn.type -> args[0]
+        if receiver_type_idx < 0:
+            ft_idx = fn.type
+            if ft_idx > 0 and ft_idx < len(self.parser.types):
+                ftt = self.parser.types[ft_idx]
+                if ftt.kind in (K_FUN, K_METHOD) and len(ftt.args) > 0:
+                    this_type = ftt.args[0]
+                    if this_type > 0 and this_type < len(self.parser.types):
+                        receiver_type_idx = this_type
+                        resolution_strategy = "fn_type_arg0"
+
+        # Populate receiver type details if found
+        if receiver_type_idx >= 0 and receiver_type_idx < len(self.parser.types):
+            rt = self.parser.types[receiver_type_idx]
+            receiver_type_kind = rt.kind
+            if rt.name is not None and 0 <= rt.name < len(self.parser.strings):
+                receiver_type_name = self.parser.strings[rt.name]
+
+        is_fallback = resolved_name.startswith("f") and resolved_name[1:].isdigit()
+
+        self._field_diags.append(FieldResolveRecord(
+            func_idx=func_idx,
+            instr_idx=instr_idx,
+            opcode=opcode,
+            op_name=op_name,
+            receiver_reg=receiver_reg,
+            field_idx=field_idx,
+            receiver_type_idx=receiver_type_idx,
+            receiver_type_kind=receiver_type_kind,
+            receiver_type_name=receiver_type_name,
+            resolution_strategy=resolution_strategy,
+            parent_type_idx=parent_type_idx,
+            resolved_name=resolved_name,
+            is_fallback=is_fallback,
+        ))
+
     def _arith_op(self, opcode: int) -> str:
         """Map an arithmetic opcode to its string operator."""
         _ARITH_OPS = {
@@ -2054,6 +2247,37 @@ def _block_can_reach_any(block_map: Dict[int, 'BasicBlock'],
                 queue.append(succ_id)
         depth += 1
     return False
+
+
+def _cleanup_goto_labels(stmts: List[IRStmt]) -> List[IRStmt]:
+    """Remove provably no-op goto-to-next-label comment pairs.
+
+    A ``goto @N`` immediately followed by ``label @N`` is a no-op:
+    the jump target is the very next instruction, so execution would
+    continue at the same point regardless.  Removing the goto comment
+    reduces visual noise without losing control-flow information.
+
+    Labels are preserved because they may be referenced by other
+    non-immediate gotos.
+
+    Recurses into structured if/while blocks.
+    """
+    i = len(stmts) - 2
+    while i >= 0:
+        cur = stmts[i]
+        nxt = stmts[i + 1]
+        if cur.op == "goto" and nxt.op == "label":
+            # Extract goto target (strip leading "@")
+            goto_target = (cur.comment or "").lstrip("@")
+            if goto_target == (nxt.comment or ""):
+                del stmts[i]
+        i -= 1
+    # Recurse into structured blocks
+    for stmt in stmts:
+        if hasattr(stmt, 'blocks') and stmt.blocks:
+            for blk in stmt.blocks:
+                _cleanup_goto_labels(blk)
+    return stmts
 
 
 class ControlStructurer:
@@ -2680,7 +2904,12 @@ class ClassBuilder:
         name_idx = t.name if t.name is not None else -1
         if name_idx < 0 or name_idx >= len(self.parser.strings):
             return None
-        name = self.parser.strings[name_idx]
+        raw_name = self.parser.strings[name_idx]
+        name = _sanitize_type_name(raw_name)
+        # Ensure uniqueness: if sanitization produced a generic fallback and the
+        # original name was different, append type index to avoid collisions.
+        if name == "Dynamic" and raw_name != "Dynamic":
+            name = f"Dynamic_{t_idx}"
 
         # Super class
         super_idx = t.super_idx if t.super_idx is not None else 0
@@ -2827,7 +3056,7 @@ class ClassBuilder:
                 f_name_idx = f.name
                 f_type_idx = f.type
                 if f_name_idx is not None and f_name_idx < len(self.parser.strings):
-                    f_name = self.parser.strings[f_name_idx]
+                    f_name = _sanitize_type_name(self.parser.strings[f_name_idx])
                 else:
                     f_name = f"f{len(fields)}"
                 fields.append((f_name, f_type_idx))
@@ -2842,11 +3071,11 @@ class ClassBuilder:
             pt = self.parser.types[parent_t_idx]
             pn = pt.name
             if pn is not None and pn < len(self.parser.strings):
-                parent_name = self.parser.strings[pn]
+                parent_name = _sanitize_type_name(self.parser.strings[pn])
 
         name = "?"
         if name_idx is not None and name_idx < len(self.parser.strings):
-            name = self.parser.strings[name_idx]
+            name = _sanitize_type_name(self.parser.strings[name_idx])
 
         # Find the actual function for signature details
         for i, fn in enumerate(self.parser.functions):
@@ -2908,14 +3137,14 @@ class ClassBuilder:
         name_idx = t.name if t.name is not None else -1
         if name_idx < 0 or name_idx >= len(self.parser.strings):
             return None
-        name = self.parser.strings[name_idx]
+        name = _sanitize_type_name(self.parser.strings[name_idx])
 
         constructs: List[Tuple[str, List[int]]] = []
         for c in t.constructs:
             c_name_idx = c.name
             c_name = "?"
             if c_name_idx is not None and c_name_idx < len(self.parser.strings):
-                c_name = self.parser.strings[c_name_idx]
+                c_name = _sanitize_type_name(self.parser.strings[c_name_idx])
             constructs.append((c_name, c.params))
 
         return EnumDef(name=name, type_idx=t_idx, constructs=constructs)
@@ -3010,11 +3239,18 @@ class HaxeWriter:
         lines: List[str] = []
         self._indent = 0
 
+        # Sanitize class name for safe Haxe output
+        safe_cls_name = _sanitize_type_name(cls.name)
+        # If sanitization produced a generic fallback, append type index for uniqueness
+        if safe_cls_name == "Dynamic" and cls.name != "Dynamic":
+            safe_cls_name = f"Dynamic_{cls.type_idx}"
+
         # Class declaration
         if cls.super_class:
-            lines.append(f"class {cls.name} extends {cls.super_class} {{")
+            safe_super = _sanitize_type_name(cls.super_class)
+            lines.append(f"class {safe_cls_name} extends {safe_super} {{")
         else:
-            lines.append(f"class {cls.name} {{")
+            lines.append(f"class {safe_cls_name} {{")
 
         self._indent += 1
 
@@ -3023,7 +3259,8 @@ class HaxeWriter:
             lines.append("")
             for fname, ftype in cls.fields:
                 t_str = self.type_resolver.resolve(ftype)
-                lines.append(self._indent_str() + f"var {fname}: {t_str};")
+                safe_fname = _sanitize_type_name(fname)
+                lines.append(self._indent_str() + f"var {safe_fname}: {t_str};")
             lines.append("")
 
         # Methods
@@ -3210,6 +3447,9 @@ class HaxeWriter:
             if self.include_comments:
                 return f"// label @{stmt.comment}"
             return None
+
+        if stmt.op == "nullcheck":
+            return f"if ({stmt.src} == null) throw;"
 
         if stmt.op == "comment":
             if self.include_comments:
@@ -3551,11 +3791,18 @@ class Decompiler:
                     if callee_findex is None or callee_func_type_idx is None:
                         # Proto/resolution failure -- check receiver availability
                         if op == 30 and obj_reg is not None:
-                            obj_rt = reg_types[obj_reg] if 0 <= obj_reg < len(reg_types) else -1
+                            obj_rt = reg_type_evidence.get(
+                                obj_reg,
+                                reg_types[obj_reg] if 0 <= obj_reg < len(reg_types) else -1
+                            )
                             is_obj = (0 <= obj_rt < len(parser.types)
                                       and parser.types[obj_rt].kind in (K_OBJ, K_STRUCT))
+                            is_virtual = (0 <= obj_rt < len(parser.types)
+                                          and parser.types[obj_rt].kind == K_VIRTUAL)
                             if is_obj:
                                 record.unresolved_category = CR_CAT_METHOD_BINDING_MISS
+                            elif is_virtual:
+                                record.unresolved_category = CR_CAT_VIRTUAL_RECEIVER
                             else:
                                 record.unresolved_category = CR_CAT_RECEIVER_TYPE_MISS
                         else:
@@ -3800,6 +4047,10 @@ class Decompiler:
                                        logger=self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
 
+        # Step 5b: Clean up provably no-op goto-to-next-label comment pairs
+        # (purely presentational -- reduces comment noise without losing info)
+        structured_stmts = _cleanup_goto_labels(structured_stmts)
+
         # Step 6: Register type evidence + variable declarations
         reg_type_evidence = build_register_type_evidence(
             instructions, reg_types, sig, self.parser,
@@ -3859,6 +4110,7 @@ class Decompiler:
             var_attributions=var_attributions,
             call_return_analysis=call_return_analysis,
             null_analysis=null_analysis,
+            field_resolve_diags=expr_builder._field_diags,
         )
 
         return ir_fn

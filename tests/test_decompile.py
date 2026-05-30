@@ -53,7 +53,7 @@ from hl_decompile import (
     CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
     CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
     CR_CAT_UNKNOWN_CALLEE, CR_CAT_OBJ_NO_RET, CR_CAT_METHOD_BINDING_MISS,
-    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+    CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_VIRTUAL_RECEIVER, CR_CAT_UNCLASSIFIED,
     NT_CAT_DECLARED_DYN, NT_CAT_FUN_OR_METHOD_TYPE,
     NT_CAT_NULLABLE_TYPE,
     _sanitize_type_name,
@@ -1648,6 +1648,29 @@ class TestDynamicAttribution:
         )
         assert self._get_classification(data, 't2') == CR_CAT_RECEIVER_TYPE_MISS
 
+    def test_classification_method_virtual_receiver(self):
+        """Method call with K_VIRTUAL receiver -> virtual_receiver (non-actionable)."""
+        protos = [build_type_primitive(i) for i in range(10)]
+        caller_fun = bytes([K_FUN, 0]) + encode_varint(K_DYN)
+        obj_type = build_type_objlike(
+            K_OBJ, name_si=0, super_si=-1, global_si=0,
+            fields=[], protos=[(0, 0, 0)], bindings=[],
+        )
+        virt_type = build_type_virtual([])  # K_VIRTUAL with no fields
+        type_blobs = protos + [caller_fun, obj_type, virt_type]
+        VIRT_TYPE_IDX = 12  # index of virt_type in type_blobs
+        # receiver reg (3) has type at VIRT_TYPE_IDX (K_VIRTUAL)
+        caller = self._build_func_body(
+            reg_types=[K_DYN, K_DYN, K_DYN, VIRT_TYPE_IDX], type_idx=10, findex=0, nregs=4,
+            ops=[(30, [2, 0, 1, 3]), (67, [2])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=len(type_blobs), type_blobs=type_blobs,
+            raw_function_entries=[caller],
+            ints=[42], strings=["MyClass"], version=4,
+        )
+        assert self._get_classification(data, 't2') == CR_CAT_VIRTUAL_RECEIVER
+
 # ============================================================================
 # Test: Expression Builder
 # ============================================================================
@@ -3055,12 +3078,12 @@ class TestActionableDynamicFormula:
             CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
             CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
             CR_CAT_UNKNOWN_CALLEE, CR_CAT_METHOD_BINDING_MISS,
-            CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
+            CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_VIRTUAL_RECEIVER, CR_CAT_UNCLASSIFIED,
         )
         expected_keys = frozenset({
             CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
             CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
-            CR_CAT_OBJ_NO_RET,
+            CR_CAT_OBJ_NO_RET, CR_CAT_VIRTUAL_RECEIVER,
         })
         actionable_keys = frozenset({
             CR_CAT_UNKNOWN_CALLEE, CR_CAT_CALLEE_TYPE_INVALID,
@@ -3068,7 +3091,7 @@ class TestActionableDynamicFormula:
             CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
         })
         # Verify all constants are distinct and cover expected range
-        assert len(expected_keys) == 6, f'Expected 6 non-actionable CR subcats, got {len(expected_keys)}'
+        assert len(expected_keys) == 7, f'Expected 7 non-actionable CR subcats, got {len(expected_keys)}'
         assert len(actionable_keys) == 6, f'Expected 6 actionable CR subcats, got {len(actionable_keys)}'
         assert expected_keys.isdisjoint(actionable_keys), \
             'Expected and actionable CR key sets must be disjoint'
@@ -3429,3 +3452,372 @@ class TestActionableDynamicFormula:
                 break
         else:
             pytest.fail('OCall2 not found in call_return_analysis')
+
+
+class TestReportFormatting:
+    """Test report aggregation/formatting behavior (not Farever-specific logic)."""
+
+    def test_track_b_quality_frontier_structure(self):
+        """Run Track B report and verify quality frontier JSON structure."""
+        import subprocess
+        import json
+        import tempfile
+        import os
+
+        script = os.path.join(
+            os.path.dirname(__file__), '..', 'scripts', 'decompiler_quality_report.py'
+        )
+        script = os.path.abspath(script)
+        farever_path = os.path.join(
+            os.path.dirname(__file__), '..', 'workspace', 'Farever', 'hlboot.dat'
+        )
+        farever_path = os.path.abspath(farever_path)
+        if not os.path.exists(farever_path):
+            pytest.skip('Farever hlboot.dat not available for testing')
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ['.venv/bin/python', script, '--track', 'B',
+                 '--farever', farever_path, '--sample', '200',
+                 '--output', tmpdir],
+                capture_output=True, text=True,
+                cwd=os.path.join(os.path.dirname(__file__), '..'),
+            )
+            assert result.returncode == 0, \
+                f'Track B report failed: {result.stderr}'
+
+            report_path = os.path.join(tmpdir, 'report.json')
+            with open(report_path) as f:
+                data = json.load(f)
+
+            # Track B structure
+            tb = data.get('track_B', {})
+            assert tb, 'Track B data must not be empty'
+            assert tb.get('nfunctions', 0) > 0, 'Expected functions parsed'
+
+            # Quality frontier
+            frontier = tb.get('quality_frontier', [])
+            assert len(frontier) > 0, \
+                'Quality frontier must be non-empty for Farever'
+            assert len(frontier) >= 8, \
+                f'Expected at least 8 frontier buckets, got {len(frontier)}'
+
+            # Every frontier entry must have the required fields
+            REQUIRED_FRONTIER_FIELDS = {
+                'bucket', 'count', 'example_functions', 'likely_cause',
+                'direct_evidence', 'classification', 'recommended_milestone',
+                'risk_level', 'rank',
+            }
+            VALID_CLASSIFICATIONS = {
+                'safe_deterministic', 'diagnostic_only', 'requires_evidence',
+                'speculative_blocked', 'out_of_scope',
+            }
+            VALID_RISK_LEVELS = {'low', 'medium', 'high'}
+
+            for i, entry in enumerate(frontier):
+                missing = REQUIRED_FRONTIER_FIELDS - set(entry.keys())
+                assert not missing, \
+                    f'Frontier entry {i} missing fields: {missing}'
+                assert entry['classification'] in VALID_CLASSIFICATIONS, \
+                    f'Frontier entry {i}: invalid classification "{entry["classification"]}"'
+                assert entry['risk_level'] in VALID_RISK_LEVELS, \
+                    f'Frontier entry {i}: invalid risk_level "{entry["risk_level"]}"'
+                assert isinstance(entry['direct_evidence'], bool), \
+                    f'Frontier entry {i}: direct_evidence must be bool'
+                assert isinstance(entry['count'], int), \
+                    f'Frontier entry {i}: count must be int'
+                assert isinstance(entry['example_functions'], list), \
+                    f'Frontier entry {i}: example_functions must be list'
+                assert entry['rank'] == i + 1, \
+                    f'Frontier entry {i}: rank should be {i+1}, got {entry["rank"]}'
+
+            # Verify sorting by count descending
+            counts = [e['count'] for e in frontier]
+            assert counts == sorted(counts, reverse=True), \
+                'Frontier entries must be sorted by count descending'
+
+            # Dynamic attribution breakdown
+            dyn_attr = tb.get('dynamic_attribution', {})
+            assert dyn_attr, 'Expected dynamic_attribution data'
+            assert 'category_breakdown' in dyn_attr, \
+                'Expected category_breakdown in dynamic attribution'
+            assert dyn_attr.get('total_dynamic', 0) > 0, \
+                'Expected non-zero total_dynamic'
+
+            # Call return analysis
+            cra = tb.get('call_return_analysis', {})
+            assert cra, 'Expected call_return_analysis data'
+            assert 'by_subcategory' in cra, \
+                'Expected by_subcategory in call return analysis'
+
+            # Null target analysis
+            nta = tb.get('null_target_analysis', {})
+            assert nta, 'Expected null_target_analysis data'
+
+            # Name resolution
+            name_res = tb.get('name_resolution', {})
+            assert name_res, 'Expected name_resolution data'
+
+            # Function level
+            fl = tb.get('function_level', {})
+            assert fl, 'Expected function_level data'
+
+            # Class level
+            cl = tb.get('class_level', {})
+            assert cl, 'Expected class_level data'
+
+    def test_report_generated_ascii_safe(self):
+        """Verify report markdown and JSON contain only ASCII-safe characters."""
+        import subprocess
+        import json
+        import tempfile
+        import os
+
+        script = os.path.join(
+            os.path.dirname(__file__), '..', 'scripts', 'decompiler_quality_report.py'
+        )
+        script = os.path.abspath(script)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = subprocess.run(
+                ['.venv/bin/python', script, '--track', 'A', '--output', tmpdir],
+                capture_output=True, text=True,
+                cwd=os.path.join(os.path.dirname(__file__), '..'),
+            )
+            assert result.returncode == 0, \
+                f'Track A report failed: {result.stderr}'
+
+            # Check markdown
+            md_path = os.path.join(tmpdir, 'report.md')
+            with open(md_path) as f:
+                md_text = f.read()
+
+            # Check for non-ASCII characters (allow standard whitespace)
+            non_ascii = set()
+            for i, ch in enumerate(md_text):
+                if ord(ch) > 127:
+                    non_ascii.add((ch, hex(ord(ch)), md_text[max(0, i - 20):i + 20]))
+            assert not non_ascii, \
+                f'Found non-ASCII characters in report.md:\n' + \
+                '\n'.join(f'  char={c} code={code} context="...{ctx}..."' for c, code, ctx in list(non_ascii)[:10])
+
+            # Check JSON
+            json_path = os.path.join(tmpdir, 'report.json')
+            with open(json_path) as f:
+                json_text = f.read()
+
+            # Check for non-ASCII in JSON
+            non_ascii_json = set()
+            for i, ch in enumerate(json_text):
+                if ord(ch) > 127:
+                    non_ascii_json.add((ch, hex(ord(ch)), json_text[max(0, i - 20):i + 20]))
+            assert not non_ascii_json, \
+                f'Found non-ASCII characters in report.json:\n' + \
+                '\n'.join(f'  char={c} code={code} context="...{ctx}..."' for c, code, ctx in list(non_ascii_json)[:10])
+
+
+class TestGotoNullcheckCleanup:
+    """Test deterministic comment noise reduction (goto-to-next-label, structured nullcheck)."""
+
+    def test_goto_to_next_label_removed(self):
+        """goto @N immediately followed by label @N is provably no-op and removed."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            IRStmt("goto", comment="@10"),
+            IRStmt("label", comment="10"),
+            IRStmt("return"),
+        ]
+        result = _cleanup_goto_labels(body)
+        assert len(result) == 2, \
+            f'Expected 2 stmts (goto removed), got {len(result)}'
+        assert result[0].op == "label", \
+            f'First stmt should be label, got {result[0].op}'
+        assert result[1].op == "return", \
+            f'Second stmt should be return, got {result[1].op}'
+
+    def test_goto_to_non_immediate_label_preserved(self):
+        """goto @N followed by non-label stmts then label @N preserved."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            IRStmt("goto", comment="@20"),
+            IRStmt("assign", dst="r0", src="r1"),
+            IRStmt("label", comment="20"),
+            IRStmt("return"),
+        ]
+        result = _cleanup_goto_labels(body)
+        assert len(result) == 4, \
+            f'Expected 4 stmts (no change), got {len(result)}'
+        assert result[0].op == "goto", \
+            'Goto should be preserved (target not next stmt)'
+
+    def test_goto_mismatched_label_preserved(self):
+        """goto @N next to label @M (different target) preserved."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            IRStmt("goto", comment="@99"),
+            IRStmt("label", comment="5"),
+            IRStmt("return"),
+        ]
+        result = _cleanup_goto_labels(body)
+        assert len(result) == 3, \
+            f'Expected 3 stmts (no change), got {len(result)}'
+        assert result[0].op == "goto", \
+            'Goto should be preserved (target mismatch)'
+
+    def test_goto_label_inside_structured_block(self):
+        """goto-to-next-label inside if/while block is recursively cleaned."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            IRStmt("if", src="cond", blocks=[
+                [
+                    IRStmt("goto", comment="@15"),
+                    IRStmt("label", comment="15"),
+                    IRStmt("return"),
+                ]
+            ]),
+        ]
+        result = _cleanup_goto_labels(body)
+        # Should have 1 if stmt with 2 stmts in block (goto removed)
+        assert len(result) == 1, f'Expected 1 if stmt, got {len(result)}'
+        assert result[0].op == "if", f'Expected if, got {result[0].op}'
+        assert result[0].blocks, 'Expected blocks'
+        inner = result[0].blocks[0]
+        assert len(inner) == 2, \
+            f'Expected 2 inner stmts (goto removed), got {len(inner)}'
+        assert inner[0].op == "label", \
+            f'First inner should be label, got {inner[0].op}'
+        assert inner[1].op == "return", \
+            f'Second inner should be return, got {inner[1].op}'
+
+    def test_onullcheck_structured_via_pipeline(self):
+        """ONullCheck emits structured if-null-throw, not comment."""
+        from hl_decompile import IRStmt
+        from tests.hl_helper import build_type_primitive, encode_varint
+
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # K_FUN type[10]: () -> Int (args=[], ret=Int=3)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(3)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        # Build a function with ONullCheck (op 71): r0 = null check r0
+        # Need: ONull r0 (op6), ONullCheck r0 (op71), ORet r0 (op67)
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = K_FUN () -> Int
+            type_idx=10, findex=0, nregs=1,
+            ops=[(6, [0]), (71, [0]), (67, [0])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+
+        # Verify the body has a nullcheck-style stmt, not a comment
+        has_nullcheck_op = any(
+            s.op == "nullcheck" for s in ir_fn.body
+        )
+        has_nullcheck_comment = any(
+            s.op == "comment" and s.comment and "nullcheck" in s.comment
+            for s in ir_fn.body
+        )
+        assert has_nullcheck_op, \
+            'Expected IRStmt with op="nullcheck" in body'
+        assert not has_nullcheck_comment, \
+            'Must not emit nullcheck as a comment'
+
+    def test_onullcheck_output_structured_in_haxe(self):
+        """ONullCheck produces "if (r0 == null) throw;" in Haxe output."""
+        import re
+        from tests.hl_helper import build_type_primitive, encode_varint
+
+        primitives = [build_type_primitive(i) for i in range(10)]
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(3)
+        type_blobs = primitives + [kfun_type]
+
+        entry = self._build_func_body(
+            reg_types=[10],
+            type_idx=10, findex=0, nregs=1,
+            ops=[(6, [0]), (71, [0]), (67, [0])],
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+
+        # Run through HaxeWriter
+        from hl_decompile import TypeResolver, HaxeWriter
+        parser = _parse_bytecode(data)
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser, include_comments=True)
+        sources = writer.write_output(result)
+
+        all_source = " ".join(sources.values())
+        # Check for structured nullcheck in output (variable name may be tN or rN)
+        assert re.search(r'if \(\w+ == null\) throw;', all_source), \
+            'Expected structured nullcheck in Haxe output'
+        # Verify no // nullcheck(...) comment remains
+        assert not re.search(r'// nullcheck', all_source), \
+            'Must not contain // nullcheck(...) in output'
+        # Verify nullcheck frontier bucket count is 0
+        assert not re.search(r'Null-check comments', all_source), \
+            'Must not reference nullcheck comments in output'
+
+    def _build_func_body(self, reg_types: list[int],
+                         type_idx: int, findex: int,
+                         nregs: int, ops: list) -> bytes:
+        """Build a function body from opcode list."""
+        from tests.hl_helper import encode_varint
+        func_data = encode_varint(type_idx)
+        func_data += encode_varint(findex)
+        func_data += encode_varint(nregs)
+        func_data += encode_varint(len(ops))
+        for rt in reg_types:
+            func_data += encode_varint(rt)
+        func_data += b"".join(
+            bytes([op]) + b"".join(encode_varint(a) for a in args)
+            for op, args in ops
+        )
+        return func_data
+
+class TestIdentifierSanitization:
+    """Test sanitization of non-identifier characters in class/field/enum names."""
+
+    def test_sanitize_bad_class_names(self):
+        """Non-identifier class names are sanitized to safe Haxe identifiers."""
+        from hl_decompile import _sanitize_type_name
+
+        cases = [
+            (")}", "Dynamic"),
+            (", f(", "f"),
+            ("Scaled(", "Scaled"),
+            ("bad-name!", "bad_name"),
+            ("", "Dynamic"),
+            ("hl.types.ArrayDyn", "hl.types.ArrayDyn"),
+        ]
+        for raw, expected in cases:
+            result = _sanitize_type_name(raw)
+            assert result == expected, \
+                f"Sanitize({raw!r}) = {result!r}, expected {expected!r}"
+            if result != "Dynamic":
+                assert result.replace(".", "").replace("_", "").isalnum(), \
+                    f"Result {result!r} contains invalid identifier chars"
+
+    def test_sanitize_field_names(self):
+        """Field names with parentheses are sanitized."""
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("Scaled(") == "Scaled"
+        assert _sanitize_type_name("f(") == "f"
+        assert _sanitize_type_name("normal name") == "normal_name"
+
+    def test_sanitize_field_names(self):
+        """Field names with parentheses are sanitized."""
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("Scaled(") == "Scaled"
+        assert _sanitize_type_name("f(") == "f"
+        assert _sanitize_type_name("normal name") == "normal_name"

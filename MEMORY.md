@@ -1,5 +1,133 @@
 # Session Tracking
 
+## Session 35 — May 30, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-35-g74cddc4.
+- Project state: 586 passed, 4 skipped (+2 tests, 0 regressions).
+- Previous session: Session 34 completed Track A Dynamic Frontier Baseline Freeze (zero frontier locked).
+- **Milestone: Track B Farever Quality Frontier Audit — COMPLETE**
+- **Goal:** Diagnostic-first quality map of Farever decompilation output, separating safe deterministic work from speculative work.
+- **Changes to `scripts/decompiler_quality_report.py`:**
+  1. Fixed pre-existing variable scoping bug (`total_actionable_dynamic`, `all_null_subcats` were unreachable when running Track B standalone) — necessary to run `--track B` without `--track A`.
+  2. Enhanced `run_track_b()` to collect full analysis: call return, null target, name resolution, function/class level metrics (previously only dynamic attribution was collected).
+  3. Added `analyze_farever_quality_frontier()` — classifies each quality frontier bucket with: count, example functions, likely cause, direct evidence (bool), classification (safe_deterministic/diagnostic_only/requires_evidence/speculative_blocked/out_of_scope), recommended milestone, risk level (low/medium/high). 10 buckets ranked by count.
+  4. Enhanced Track B markdown section with: Dynamic Attribution Breakdown, Call Return Unresolved Breakdown, Null Without Target Type, Ranked Frontier Table (with example functions, classification, risk), Frontier Details (cause + recommended milestone per bucket), Classification Legend.
+  5. Added quality_frontier key to track_B JSON output.
+- **New tests in `tests/test_decompile.py`:**
+  1. `TestReportFormatting.test_track_b_quality_frontier_structure` — verifies frontier JSON structure, required fields, valid classifications/risk levels, descending sort, and presence of all analysis data.
+  2. `TestReportFormatting.test_report_generated_ascii_safe` — verifies report.md and report.json contain only ASCII-safe characters (no Unicode dashes/arrows).
+- **Track A zero frontier preserved:**
+  - actionable_dynamic_corrected: 0 (unchanged)
+  - null_target_actionable: 0 (unchanged)
+  - call_return_actionable: 0 (unchanged)
+  - errors: 0, unknown opcodes: 0, Track A: 7/7
+- **Track B Farever Quality Frontier (sample=200):**
+  | # | Bucket | Count | Classification | Risk |
+  |---|--------|-------|----------------|------|
+  | 1 | Raw goto/label comments | 793 | safe_deterministic | low |
+  | 2 | Nullcheck comments | 679 | safe_deterministic | low |
+  | 3 | Dynamic type references | 172 | diagnostic_only | low |
+  | 4 | Unresolved field names | 171 | requires_evidence | medium |
+  | 5 | Comment-only bodies | 104 | diagnostic_only | low |
+  | 6 | Virtual type unsupported | 48 | speculative_blocked | medium |
+  | 7 | Call return unresolved | 25 | safe_deterministic | low |
+  | 8 | Null without target type | 21 | diagnostic_only | low |
+  | 9 | Unbalanced braces/parens | 4 | safe_deterministic | medium |
+  | 10 | Giant init func[45364] | 1 | safe_deterministic | low |
+- **Track B call return breakdown:** 25 unresolved, 23 expected (declared Dynamic/Void), 2 actionable (receiver_type_missing).
+- **Track B null breakdown:** 21 null_without_target_type (8 virtual_unsupported, 8 fun_or_method_type, 4 declared_dynamic, 1 unknown).
+- **Validation:** pytest 586/4 ✓, Track A 7/7 ✓, errors=0 ✓, ASCII-safe ✓, Track B frontier structurally validated ✓.
+- **Scope compliance:** No inference added, no Farever-specific hardcoding, no Track A regression, no Tier 2+ work, no LLM naming, no semantic guessing.
+- **Milestone B1: Deterministic Comment Noise Reduction — COMPLETE**
+  - **Changes to `hl_decompile.py`:**
+    1. Added `_cleanup_goto_labels()` function — removes `goto @N` immediately followed by `label @N` (provably no-op). Recurses into structured if/while blocks.
+    2. Integrated cleanup as Step 5b in `_decompile_function()` (after ControlStructurer, before register type evidence).
+    3. Changed ONullCheck (op 71) emission from `IRStmt("comment", comment=f"nullcheck({val})")` to `IRStmt("nullcheck", src=val)`.
+    4. Added `nullcheck` case to `IRStmt.__str__()` and `HaxeWriter._stmt_to_line()` — emits `if ({val} == null) throw;` instead of `// nullcheck({val})`.
+  - **Changes to `scripts/decompiler_quality_report.py`:**
+    1. Added `structured_nullcheck` pattern to source text analysis: `r"if \(.* == null\) throw;"`.
+    2. Guarded nullcheck frontier bucket with `if nullcheck_cnt > 0:` — drops off when count reaches 0.
+    3. Added structured nullcheck count to Track B report section.
+  - **Results:**
+    - Track A: nullcheck 1,240 → **0** (-1,240), goto 4,227 → **4,185** (-42)
+    - Track B: nullcheck 679 → **0** (-679), goto 793 → 793 (unchanged, sample has no goto-to-next-label)
+    - structured_nullcheck added: Track A 1,240, Track B 679 (new metric)
+    - Nullcheck frontier bucket: dropped (count=0)
+    - Total noise reduction: **1,961 comment lines eliminated** (1,919 nullchecks + 42 gotos)
+  - **Tests added (6):** `TestGotoNullcheckCleanup` class with: test_goto_to_next_label_removed, test_goto_to_non_immediate_label_preserved, test_goto_mismatched_label_preserved, test_goto_label_inside_structured_block, test_onullcheck_structured_via_pipeline, test_onullcheck_output_structured_in_haxe.
+  - **Validation:** pytest 592/4 ✓ (+6, 0 regressions), Track A 7/7 ✓, errors=0 ✓, actionable=0 ✓, reports ASCII-safe ✓.
+- **Milestone B2: Syntax Balance Stabilization — COMPLETE**
+  - **Root cause identified:** All 4 unbalanced cases (1 brace, 3 paren) were caused by non-identifier characters in HL type pool strings being emitted directly into Haxe output — class names `)}` and `, f(` and field name `Scaled(` contained `(`, `)`, `{,` `}` characters.
+  - **Classification of the 4 original cases:**
+    | File | Type | Cause | Classification |
+    |------|------|-------|---------------|
+    | `)}.hx` | brace + paren | Class name `)}` contains `)` and `}` | non-identifier type pool string |
+    | `, f(.hx` | paren | Class name `, f(` contains `(` | non-identifier type pool string |
+    | `SphereVsSphereAlgorithm.hx` | paren | Field name `Scaled(` contains `(` | non-identifier type pool string |
+  - **Fix (general-purpose, not Farever-specific):**
+    1. Applied `_sanitize_type_name()` to all name assignments in `ClassBuilder`: class names (`_build_class`), field names (`_flatten_fields`), method names/parent names (`_sig_from_proto`), enum names (`_build_enum`), enum construct names.
+    2. Added type-index uniqueness suffix when sanitization collapses to `"Dynamic"` (e.g., `)}` → `Dynamic_<t_idx>`).
+    3. Belt-and-suspenders sanitization in `HaxeWriter.write_class()` for class declaration and field names.
+    4. Added per-file balance tracking to `analyze_source_text()` for diagnostic visibility (`unbalanced_braces_file_list`, `unbalanced_parens_file_list`).
+  - **Results:**
+    - Track B unbalanced braces: 1 → **0** (eliminated)
+    - Track B unbalanced parens: 3 → **0** (eliminated)
+    - Track A: 0/0 (unchanged)
+    - Output files: 5114 → 5113 (one duplicate-name collision resolved)
+    - No Farever-specific hardcoding, no inference, no LLM naming
+  - **Tests added (2):** `TestIdentifierSanitization.test_sanitize_bad_class_names`, `TestIdentifierSanitization.test_sanitize_field_names`.
+  - **Validation:** pytest 594/4 ✓ (+2, 0 regressions), Track A 7/7 ✓, errors=0 ✓, actionable=0 ✓, reports ASCII-safe ✓.
+
+- **Milestone B3: Call Return Reclassification (K_VIRTUAL receiver) — COMPLETE**
+  - **Root cause:** 2 remaining call_return_actionable cases had K_VIRTUAL receivers with 0 protos.
+  - **Fix:** Added CR_CAT_VIRTUAL_RECEIVER constant; classified as expected/non-actionable.
+  - **Results:** call_return_actionable 2 → 0.
+  - **Tests added (1):** test_classification_method_virtual_receiver.
+  - **Validation:** pytest 595/4, Track A 7/7, errors=0.
+- **Milestone B4: Goto/Label Requiredness Audit — COMPLETE**
+  - **Investigation:** All 622 gotos in Track B sample are required CFG diagnostics (85.9% forward-to-no-label, 12.9% backward, 1.3% forward-to-label). 0 presentation-only cleanup possible.
+  - **Fix:** Added analyze_goto_label_requiredness() to report; reclassified bucket safe_deterministic→diagnostic_only.
+  - **Validation:** pytest unchanged 595/4, all gotos classified as required diagnostics.
+- **Milestone B5: Frontier Table and Metric Consistency Lock — COMPLETE**
+  - **793 vs 686 reconciliation:** Pre-B1 baseline 793. B1 _cleanup_goto_labels reduced to 622+64=686 (-107). Function was active on Track B all along.
+  - **Changes:** Updated Buckets 1 and 7 (goto/label and call-return) with correct counts/classifications. Added Resolved Frontiers section.
+  - **Frontier rebased:** Nullcheck (679) and unbalanced brackets (4) removed from active frontiers.
+  - **Validation:** pytest 595/4, Track A 7/7, errors=0, reports ASCII-safe.
+- **Milestone B6: Unresolved Field Name Evidence Audit — COMPLETE**
+  - **Changes to hl_decompile.py:**
+    1. Added FieldResolveRecord dataclass and 11 FN_CAT_ subcategory constants.
+    2. Added field_resolve_diags to IRFunction.
+    3. Added _field_diags and _record_field_diag() to ExprBuilder.
+    4. Added _resolve_enum_field_name() — deterministic recovery via K_ENUM construct names.
+    5. Instrumented ops 38-43, 93-94 for field access diagnostics.
+  - **Results:**
+    - Enum field recovery: 64 → 15 (-49 recovered from construct names)
+    - Total field fallbacks: 250 → 201 (-49)
+    - Total field names resolved: 1386 → 1435 (+49)
+    - Subcategory breakdown: receiver_object_field_index_oob 135, malformed_or_unknown 38, enum_field_unresolved 15, this_field_metadata_available 13
+  - **Tests added (6):** tests/test_field_diag_b6.py — Record instantiation, fallback detection, constant distinctness, enum recovery on Enums fixture.
+  - **Validation:** pytest 601/4 (+6, 0 regressions), Track A 7/7, errors=0, reports ASCII-safe.
+- **Milestone B7: Field Frontier Metric and Actionability Lock — COMPLETE**
+  - **170 vs 201 reconciliation:** Pre-B6 regex count was 170. Post-B6 regex count is 151. Authoritative IR-level diag count is 201. Difference: IR captures fallbacks before HaxeWriter transformations. Active frontier uses diag count.
+  - **Changes to hl_decompile.py:**
+    1. Added 5 new FN_CAT_ constants (split malformed_or_unknown): enum_receiver_not_enum_opcode, fun_or_method_receiver_field_access, dynamic_string_missing, receiver_type_invalid, unknown_field_pattern.
+    2. Renamed FN_CAT_THIS_FIELD_METADATA_AVAILABLE → FN_CAT_THIS_FIELD_INDEX_OOB (backward-compat alias).
+  - **Changes to scripts/decompiler_quality_report.py:**
+    1. Updated _classify_field_fallback with finer categories and K_ENUM branch.
+    2. Corrected actionability: enum_field_unresolved safe_deterministic→requires_evidence.
+    3. Added Field Evidence Needed markdown section (53 cases requiring Ghidra/Sato).
+    4. Updated Bucket 3 metric explanation with IR vs regex reconciliation.
+  - **Results:** malformed_or_unknown (38) → enum_receiver_not_enum_opcode (38). All 15 remaining enum_field_unresolved reclassified requires_evidence. Field frontier locked at 201.
+  - **Tests:** No new tests (classification logic changes only; existing 6 B6 tests pass unmodified).
+  - **Validation:** pytest 601/4, Track A 7/7, errors=0, reports ASCII-safe.
+- **Final Session 35 State:**
+  - pytest: 601 passed, 4 skipped.
+  - Track A: 7/7, 0 errors, actionable_dynamic_corrected=0, null_target_actionable=0, call_return_actionable=0.
+  - Track B: 0 errors, 200 sampled, 5113 output files.
+  - Reports: ASCII-safe, internally consistent metric definitions.
+  - **Session 35 closed — commit and push.**
+
 ## Session 34 — May 30, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
