@@ -52,7 +52,7 @@ from hl_decompile import (
     CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
     CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
     CR_CAT_CALLEE_TYPE_INVALID, CR_CAT_CALLEE_MISSING,
-    CR_CAT_UNKNOWN_CALLEE, CR_CAT_METHOD_BINDING_MISS,
+    CR_CAT_UNKNOWN_CALLEE, CR_CAT_OBJ_NO_RET, CR_CAT_METHOD_BINDING_MISS,
     CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
     NT_CAT_DECLARED_DYN, NT_CAT_FUN_OR_METHOD_TYPE,
     NT_CAT_NULLABLE_TYPE,
@@ -3060,6 +3060,7 @@ class TestActionableDynamicFormula:
         expected_keys = frozenset({
             CR_CAT_DECLARED_DYNAMIC, CR_CAT_DECLARED_VOID,
             CR_CAT_CLOSURE_DYN, CR_CAT_METHOD_DYN, CR_CAT_METHOD_VOID,
+            CR_CAT_OBJ_NO_RET,
         })
         actionable_keys = frozenset({
             CR_CAT_UNKNOWN_CALLEE, CR_CAT_CALLEE_TYPE_INVALID,
@@ -3067,13 +3068,13 @@ class TestActionableDynamicFormula:
             CR_CAT_RECEIVER_TYPE_MISS, CR_CAT_UNCLASSIFIED,
         })
         # Verify all constants are distinct and cover expected range
-        assert len(expected_keys) == 5, f'Expected 5 non-actionable CR subcats, got {len(expected_keys)}'
+        assert len(expected_keys) == 6, f'Expected 6 non-actionable CR subcats, got {len(expected_keys)}'
         assert len(actionable_keys) == 6, f'Expected 6 actionable CR subcats, got {len(actionable_keys)}'
         assert expected_keys.isdisjoint(actionable_keys), \
             'Expected and actionable CR key sets must be disjoint'
 
     def test_formula_consistency_on_track_a(self):
-        """Run Track A quality report and verify formula values via subprocess."""
+        """Run Track A quality report and verify full zero-frontier baseline."""
         import subprocess
         import json
         import tempfile
@@ -3095,6 +3096,22 @@ class TestActionableDynamicFormula:
             with open(report_path) as f:
                 data = json.load(f)
 
+            # Track A structure
+            track_a = data.get('track_A', {})
+            assert track_a.get('overall', {}).get('total_fixtures') == 7, \
+                'Expected 7 Track A fixtures'
+            assert track_a.get('overall', {}).get('total_errors') == 0, \
+                'Track A must have 0 errors'
+
+            # Per-fixture: 0 errors, 0 unknown opcodes
+            for fname, fd in track_a.get('fixtures', {}).items():
+                assert len(fd.get('errors', [])) == 0, \
+                    f'{fname}: expected 0 errors'
+                fallback = fd.get('source_text_analysis', {}).get('fallback_patterns', {})
+                assert fallback.get('unknown_opcode', 0) == 0, \
+                    f'{fname}: expected 0 unknown opcodes'
+
+            # Formula baseline
             formula = data.get('actionable_dynamic_formula', {})
             cr_total = formula.get('call_return_unresolved_total')
             cr_expected = formula.get('call_return_expected_non_actionable')
@@ -3102,18 +3119,31 @@ class TestActionableDynamicFormula:
             null_ambig = formula.get('null_without_target_type')
             corrected = formula.get('actionable_dynamic_corrected')
             legacy = formula.get('actionable_dynamic_legacy')
+            nt_expected = formula.get('null_target_expected_non_actionable')
+            nt_actionable = formula.get('null_target_actionable')
+            nt_declared_dyn = formula.get('null_target_declared_dynamic')
+
+            # Core counts
             assert cr_total == 102, \
                 f'Expected call_return_unresolved_total=102, got {cr_total}'
-            assert cr_expected == 100, \
-                f'Expected call_return_expected_non_actionable=100, got {cr_expected}'
-            assert cr_actionable == 2, \
-                f'Expected call_return_actionable=2, got {cr_actionable}'
-            assert null_ambig == 260, \
-                f'Expected null_without_target_type=260, got {null_ambig}'
-            assert corrected == 262, \
-                f'Expected actionable_dynamic_corrected=262, got {corrected}'
-            assert legacy == 362, \
-                f'Expected actionable_dynamic_legacy=362, got {legacy}'
+            assert cr_expected == 102, \
+                f'Expected call_return_expected_non_actionable=102, got {cr_expected}'
+            assert cr_actionable == 0, \
+                f'Expected call_return_actionable=0, got {cr_actionable}'
+            assert null_ambig == 127, \
+                f'Expected null_without_target_type=127, got {null_ambig}'
+            assert corrected == 0, \
+                f'Expected actionable_dynamic_corrected=0, got {corrected}'
+            assert legacy == 229, \
+                f'Expected actionable_dynamic_legacy=229, got {legacy}'
+
+            # Null target frontier
+            assert nt_expected == 127, \
+                f'Expected null_target_expected_non_actionable=127, got {nt_expected}'
+            assert nt_actionable == 0, \
+                f'Expected null_target_actionable=0, got {nt_actionable}'
+            assert nt_declared_dyn == 127, \
+                f'Expected null_target_declared_dynamic=127, got {nt_declared_dyn}'
 
     def test_type_indexed_call_concrete_return(self):
         """OCall1 with K_FUN type index (not findex) resolves concrete return type."""
@@ -3193,15 +3223,15 @@ class TestActionableDynamicFormula:
         assert record.unresolved_category == CR_CAT_DECLARED_DYNAMIC, \
             f'Expected declared_dynamic, got {record.unresolved_category}'
 
-    def test_type_indexed_call_non_kfun_remains_unknown(self):
-        """OCall1 with type index of non-K_FUN kind (K_OBJ) stays call_return_unknown_callee."""
+    def test_type_indexed_call_non_kfun_remains_expected(self):
+        """OCall1 with type index of K_OBJ kind gets expected/non-actionable subcategory."""
         primitives = [build_type_primitive(i) for i in range(10)]
         # type[10]: K_OBJ
         obj_type = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
                                        fields=[], protos=[], bindings=[])
         type_blobs = primitives + [obj_type]  # ntypes=11
 
-        # p1=10 < ntypes(11) but type[10].kind=K_OBJ (not K_FUN) => stays unknown
+        # p1=10 < ntypes(11) but type[10].kind=K_OBJ (not K_FUN) => OBJ_NO_RET
         entry = self._build_func_body(
             reg_types=[9, 9], type_idx=10, findex=0, nregs=2,
             ops=[(25, [0, 10, 1]), (67, [])],  # p1=10
@@ -3217,8 +3247,8 @@ class TestActionableDynamicFormula:
             f'Non-KFUN type-indexed call should be unresolved, got {cat}'
         record = ir_fn.call_return_analysis.get('t0')
         assert record is not None, 'Missing call_return_analysis record'
-        assert record.unresolved_category == CR_CAT_UNKNOWN_CALLEE, \
-            f'Expected call_return_unknown_callee for non-KFUN p1, got {record.unresolved_category}'
+        assert record.unresolved_category == CR_CAT_OBJ_NO_RET, \
+            f'Expected call_return_object_type_no_return_metadata for K_OBJ p1, got {record.unresolved_category}'
 
     def test_null_target_declared_dynamic(self):
         """ONull with K_DYN register type is classified as null_target_declared_dynamic."""
@@ -3244,13 +3274,13 @@ class TestActionableDynamicFormula:
             f'Expected null_target_declared_dynamic, got {subcat}'
 
     def test_null_target_fun_or_method_type(self):
-        """ONull with K_FUN register type is classified as null_target_fun_or_method_type."""
+        """ONull with K_FUN register type is now resolved (not null_without_target_type)."""
         primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
         kfun_type = bytes([K_FUN, 0]) + encode_varint(0)  # type 10: () -> Void
         type_blobs = primitives + [kfun_type]  # ntypes=11
 
         entry = self._build_func_body(
-            reg_types=[10],  # r0 type = type[10] = K_FUN
+            reg_types=[10],  # r0 type = type[10] = K_FUN () -> Void
             type_idx=10, findex=0, nregs=1,
             ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
         )
@@ -3260,11 +3290,142 @@ class TestActionableDynamicFormula:
         )
         result = _disasm_and_decompile(data)
         ir_fn = list(result.functions.values())[0]
-        subcat = ir_fn.null_analysis.get('t0', '')
-        assert subcat == NT_CAT_FUN_OR_METHOD_TYPE, \
-            f'Expected null_target_fun_or_method_type, got {subcat}'
+        # K_FUN with valid args/ret should be resolved, not null_without_target_type
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_NULL_RESOLVED, \
+            f'Expected resolved_null_target_type, got {cat}'
+        # And not in null_analysis (no longer unrecovered)
+        assert 't0' not in ir_fn.null_analysis, \
+            'K_FUN null should not be in null_analysis'
+
+    def test_onull_kfun_resolved(self):
+        """ONull into K_FUN register resolves to function type, not Dynamic."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
+        # K_FUN: () -> Int (type 10). args=[], ret=3 (I32)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(3)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = K_FUN () -> Int
+            type_idx=10, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_NULL_RESOLVED, \
+            f'Expected resolved_null_target_type, got {cat}'
+        # Verify the resolved type makes it to the variable declaration
+        vtype = ir_fn.variables.get('t0', -1)
+        assert vtype == 10, f'Expected variable type=10 (K_FUN () -> Int), got {vtype}'
+
+    def test_onull_kfun_invalid_args_stays_dynamic(self):
+        """K_FUN with unresolvable ret stays null_without_target_type."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
+        # K_FUN: () -> Dynamic (type 10). args=[], ret=9 (K_DYN = unresolvable)
+        kfun_type = bytes([K_FUN, 0]) + encode_varint(9)
+        type_blobs = primitives + [kfun_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = K_FUN () -> Dynamic
+            type_idx=10, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_NULL_AMBIGUOUS, \
+            f'Expected null_without_target_type (Dynamic ret), got {cat}'
+
+    def test_onull_knull_resolved(self):
+        """ONull into K_NULL<Int> register resolves to Null<Int>, not Dynamic."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
+        # type 10: K_NULL<Int> (wrapper with inner=3)
+        null_type = build_type_wrapper(K_NULL, 3)
+        type_blobs = primitives + [null_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = Null<Int>
+            type_idx=0, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_NULL_RESOLVED, \
+            f'Expected resolved_null_target_type, got {cat}'
+        # Verify the type variable resolves to Null<Int>
+        vtype = ir_fn.variables.get('t0', -1)
+        assert vtype == 10, f'Expected variable type=10 (Null<Int>), got {vtype}'
+
+    def test_onull_knull_invalid_inner_stays_dynamic(self):
+        """K_NULL with unresolvable inner type stays null_without_target_type."""
+        primitives = [build_type_primitive(i) for i in range(10)]  # types 0-9
+        # type 10: K_NULL<Dynamic> (wrapper with inner=9 = K_DYN = unresolvable)
+        null_type = build_type_wrapper(K_NULL, 9)
+        type_blobs = primitives + [null_type]  # ntypes=11
+
+        entry = self._build_func_body(
+            reg_types=[10],  # r0 type = type[10] = Null<Dynamic>
+            type_idx=0, findex=0, nregs=1,
+            ops=[(6, [0]), (67, [0])],  # ONull r0; ORet(r0)
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+        cat = ir_fn.var_attributions.get('t0', '')
+        assert cat == DYN_CAT_NULL_AMBIGUOUS, \
+            f'Expected null_without_target_type (Dynamic inner), got {cat}'
 
     @pytest.mark.skip(reason='K_NULL type encoding requires Null<T> wrapper; synthetic builder limitation')
     def test_null_target_nullable_type(self):
         """Placeholder: ONull with K_NULL register type needs Null<T> wrapped type."""
         pass
+
+    def test_residual_call_return_obj_no_ret(self):
+        """K_OBJ type-indexed call is classified as expected/non-actionable (no return metadata)."""
+        primitives = [build_type_primitive(i) for i in range(10)]
+        # K_OBJ type[10]: min obj with 0 protos (no return metadata)
+        obj_type = build_type_objlike(K_OBJ, 0, 0, 0, [], [], [])
+        type_blobs = primitives + [obj_type]  # ntypes=11
+
+        # Build a function with OCall2: dst=1, args[1]=10 (K_OBJ type index), args[2]=0, args[3]=0
+        ops = [(6, [0]), (26, [1, 10, 0, 0]), (67, [1])]  # ONull r0; OCall2 r1, r10, r0, r0; ORet r1
+        entry = self._build_func_body(
+            reg_types=[9, 9],  # r0=K_DYN, r1=K_DYN
+            type_idx=0, findex=0, nregs=2,
+            ops=ops,
+        )
+        data = _build_minimal_with_raw_functions(
+            ntypes=11, type_blobs=type_blobs,
+            raw_function_entries=[entry], version=4,
+        )
+        result = _disasm_and_decompile(data)
+        ir_fn = list(result.functions.values())[0]
+
+        # The call to a K_OBJ type index should be classified as OBJ_NO_RET
+        # and must NOT count toward call_return_actionable
+        for vname, rec in ir_fn.call_return_analysis.items():
+            if rec.opcode == 26:  # OCall2
+                assert rec.unresolved_category == CR_CAT_OBJ_NO_RET, \
+                    f'Expected OBJ_NO_RET, got {rec.unresolved_category}'
+                assert not rec.is_resolvable, \
+                    'K_OBJ call must not be resolvable'
+                break
+        else:
+            pytest.fail('OCall2 not found in call_return_analysis')

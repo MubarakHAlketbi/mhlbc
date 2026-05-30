@@ -95,6 +95,7 @@ CR_CAT_METHOD_VOID          = "method_return_declared_void"
 CR_CAT_CALLEE_TYPE_INVALID  = "call_return_callee_type_invalid"
 CR_CAT_CALLEE_MISSING       = "call_return_callee_missing"
 CR_CAT_UNKNOWN_CALLEE       = "call_return_unknown_callee"
+CR_CAT_OBJ_NO_RET           = "call_return_object_type_no_return_metadata"
 CR_CAT_METHOD_BINDING_MISS  = "method_binding_missing"
 CR_CAT_RECEIVER_TYPE_MISS   = "receiver_type_missing"
 CR_CAT_UNCLASSIFIED         = "unclassified"
@@ -883,23 +884,42 @@ def build_register_type_evidence(
         elif op == 6:    # ONull
             # Default: set evidence to Dynamic.
             # But if the register's declared type is a concrete nullable-compatible
-            # type (Obj, Struct, Bytes, Null, Ref, Virtual, Abstract, Array),
-            # preserve the register type so the variable declaration stays concrete
-            # and the null assignment is validated against the real type.
+            # type (Obj, Struct, Bytes, Null, Ref, Virtual, Abstract, Array, Type),
+            # or a function/method type (Fun, Method) whose sub-types resolve
+            # deterministically, preserve the declared register type so the
+            # variable declaration stays concrete.
             reg_idx = args[0]
             if reg_idx < len(reg_types):
                 raw_type = reg_types[reg_idx]
                 if 0 <= raw_type < len(parser.types):
-                    kind = parser.types[raw_type].kind
-                    # Nullable-compatible kinds where the real type is more useful than Dynamic
-                    if kind in (K_OBJ, K_STRUCT, K_BYTES, K_NULL, K_REF,
-                                K_VIRTUAL, K_ABSTRACT, K_ARRAY, K_TYPE):
-                        # Don't add evidence; let the natural register type stand
-                        pass
-                    elif kind == K_DYN:
+                    raw_kind = parser.types[raw_type].kind
+                    if raw_kind in (K_OBJ, K_STRUCT, K_BYTES,
+                                    K_VIRTUAL, K_ABSTRACT, K_ARRAY, K_TYPE):
+                        # These types always resolve to concrete names
                         evidence[reg_idx] = raw_type
+                    elif raw_kind in (K_NULL, K_REF, K_PACKED):
+                        # Wrapper types: preserve only when inner resolves safely
+                        inner = parser.types[raw_type].inner
+                        if inner is not None and _is_type_resolvable(inner, parser):
+                            evidence[reg_idx] = raw_type
+                        else:
+                            evidence[reg_idx] = _K_DYN
+                    elif raw_kind == K_DYN:
+                        evidence[reg_idx] = raw_type
+                    elif raw_kind in (K_FUN, K_METHOD):
+                        # Fun/Method types: preserve only when all args and ret
+                        # resolve to non-Dynamic types deterministically
+                        td = parser.types[raw_type]
+                        all_args_safe = (td.args is not None and
+                                         all(_is_type_resolvable(a, parser) for a in td.args))
+                        ret_safe = (td.ret is not None and
+                                    _is_type_resolvable(td.ret, parser))
+                        if all_args_safe and ret_safe:
+                            evidence[reg_idx] = raw_type
+                        else:
+                            evidence[reg_idx] = _K_DYN
                     else:
-                        # Non-nullable primitives still get Dynamic evidence
+                        # Non-nullable primitives get Dynamic evidence
                         evidence[reg_idx] = _K_DYN
                 else:
                     evidence[reg_idx] = _K_DYN
@@ -910,11 +930,15 @@ def build_register_type_evidence(
             if src_type is not None:
                 evidence[args[0]] = src_type
         elif op in (59,) and len(args) >= 1:  # toDyn
-            evidence[args[0]] = _K_DYN
+            # Only override if current evidence is not a preserved declared register type
+            if not _is_declared_type_evidence(args[0], evidence, reg_types):
+                evidence[args[0]] = _K_DYN
         elif op in (60, 61) and len(args) >= 1:  # toSFloat, toUFloat
-            evidence[args[0]] = _K_F64
+            if not _is_declared_type_evidence(args[0], evidence, reg_types):
+                evidence[args[0]] = _K_F64
         elif op == 62 and len(args) >= 1:  # toInt
-            evidence[args[0]] = _K_I32
+            if not _is_declared_type_evidence(args[0], evidence, reg_types):
+                evidence[args[0]] = _K_I32
 
         # Arithmetic binary ops (7-19): dst = a op b -> same type as operands
         elif op in _ARITHMETIC_BINARY_OPS and len(args) >= 3:
@@ -1143,6 +1167,41 @@ def build_register_type_evidence(
                 evidence[reg_idx] = rt
 
     return evidence
+
+
+def _is_type_resolvable(type_idx: int, parser: Any) -> bool:
+    """Check if a type index resolves to a concrete (non-Dynamic) Haxe type.
+
+    Returns True only when the type at type_idx has a kind that TypeResolver
+    maps to something other than 'Dynamic' or 'Any'.  This is used to guard
+    declared-type preservation for wrapper types (Null<T>) and function types.
+    """
+    if not (0 <= type_idx < len(parser.types)):
+        return False
+    kind = parser.types[type_idx].kind
+    # These kinds resolve to "Dynamic" or "Any" in TypeResolver
+    if kind in (K_DYN, K_DYNOBJ, K_VIRTUAL, K_HLAST, K_GUID):
+        return False
+    # Unknown kinds also resolve to "Dynamic"
+    if kind > K_HLAST:
+        return False
+    return True
+
+
+def _is_declared_type_evidence(
+    reg_idx: int,
+    evidence: Dict[int, int],
+    reg_types: List[int],
+) -> bool:
+    """Check if evidence for reg_idx matches the declared register type.
+
+    Used to protect declared-type evidence from being overridden by
+    lower-priority conversion ops (OToDyn, etc.).
+    """
+    if 0 <= reg_idx < len(reg_types):
+        ev = evidence.get(reg_idx)
+        return ev is not None and ev == reg_types[reg_idx]
+    return False
 
 
 def _get_evidence_or_reg_type(
@@ -3524,7 +3583,16 @@ class Decompiler:
                     else:
                         record.unresolved_category = CR_CAT_CALLEE_TYPE_INVALID
                 elif cs == "unknown" or cs == "dynamic":
-                    record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
+                    # Check if this is a type-indexed call to a K_OBJ type
+                    # (no return metadata available — expected/non-actionable)
+                    if cs == "unknown" and len(instr.args) >= 2:
+                        tidx = instr.args[1]
+                        if 0 <= tidx < len(parser.types) and parser.types[tidx].kind == K_OBJ:
+                            record.unresolved_category = CR_CAT_OBJ_NO_RET
+                        else:
+                            record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
+                    else:
+                        record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
                 else:
                     record.unresolved_category = CR_CAT_UNCLASSIFIED
 

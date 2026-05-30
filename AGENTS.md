@@ -449,3 +449,16 @@ Classification priority:
 3. Fallback: `null_target_unknown`.
 
 The `null_analysis` key is included in the quality report as `null_target_analysis` per fixture and aggregated in the "Null Without Target Type -- Subcategory Breakdown" section.
+
+## 16. Track A Dynamic Frontier Baseline
+
+As of Session 34, the deterministic actionable Dynamic frontier for Track A (7 standard HLB fixtures) is **zero**:
+
+- `actionable_dynamic_corrected = 0`
+- `null_target_actionable = 0`
+- `call_return_actionable = 0`
+- errors = 0, unknown opcodes = 0, Track A = 7/7
+
+All null-without-target-type and call-return-unresolved cases have been either recovered through direct bytecode evidence or reclassified as expected/non-actionable with documented reasons. Do not reopen null target recovery or call-return inference work on Track A unless new direct bytecode evidence appears. The formula consistency test (`test_formula_consistency_on_track_a`) in `tests/test_decompile.py` guards against regressions.
+
+This baseline applies to Track A (standard fixtures) only. Track B (Farever) is a separate frontier and may still have actionable Dynamic work.

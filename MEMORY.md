@@ -1,5 +1,115 @@
 # Session Tracking
 
+## Session 34 — May 30, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-33-gfc3006a-dirty.
+- Project state: 579 passed, 4 skipped. Gates 1-6 complete.
+- Previous session: Session 33 completed Null Without Target Type Triage and Reclassification milestone.
+- All 30 .py files read in full.
+- **Milestone: Safe Null Target Recovery from Declared Type Evidence — COMPLETE**
+- **Root cause identified:** build_register_type_evidence() ONull handler set K_FUN/K_METHOD register evidence to _K_DYN (fall-through to else branch). K_NULL correctly passed through, but conversion ops (OToDyn) overrode evidence to _K_DYN.
+- **Code changes in `hl_decompile.py`:**
+  1. Added `_is_type_resolvable()` helper — checks if a type index resolves to a non-Dynamic Haxe type (steps 1+2).
+  2. Added `_is_declared_type_evidence()` helper — guards conversion ops from overriding declared-type evidence (step 3).
+  3. ONull handler: now sets evidence to declared register type for K_NULL, K_REF, K_PACKED (safe inner only), K_FUN/K_METHOD (safe args+ret only), and other nullable types (OBJ, STRUCT, BYTES, etc.). Previously only `pass` for K_NULL, and `_K_DYN` for K_FUN (step 3).
+  4. Conversion ops (OToDyn/OToSFloat/OToUFloat/OToInt): added `_is_declared_type_evidence()` guard — only override if evidence is not the declared register type (step 3).
+- **Results:**
+  - null_without_target_type: 260 → 127 (-133)
+  - resolved_null_target_type: 385 → 518 (+133)
+  - actionable_dynamic_corrected: 262 → 129 (-133)
+  - Dynamic type refs: 2191 → 2058 (-133)
+  - K_NULL recovered: 63 (all to resolved_null_target_type)
+  - K_FUN/K_METHOD recovered: 70 (all to resolved_null_target_type)
+  - null_target_fun_or_method_type: 70 → 0 (fully recovered)
+  - null_target_nullable_type: 63 → 0 (fully recovered)
+  - null_target_declared_dynamic: 127 (unchanged — expected)
+  - Potentially actionable: 133 → 0
+- **Validation:**
+  - pytest: 583 passed, 4 skipped (+4 new tests, 0 regressions)
+  - Track A: 7/7 ✓, errors=0 ✓, unknown opcodes=0 ✓
+  - call_return_actionable: 2 (unchanged) ✓
+  - reports ASCII-safe ✓
+- **New tests (4):** test_onull_kfun_resolved, test_onull_kfun_invalid_args_stays_dynamic, test_onull_knull_resolved, test_onull_knull_invalid_inner_stays_dynamic.
+- **Key principle:** Direct bytecode evidence (declared register type) is now the authoritative source for null-variable typing. No flow speculation, no LLM naming.
+
+### Session 34 — Milestone 2: Actionable Dynamic Formula Rebase After Null Recovery — COMPLETE
+  - **Diagnostic/reporting only — no inference changes.**
+  - **Formula change:**
+    - Corrected formula: `actionable_dynamic_corrected = null_target_actionable + call_return_actionable`
+    - null_target_actionable: 0 (all 127 nulls are K_DYN declared dynamic, expected/non-actionable)
+    - call_return_actionable: 2 (unchanged)
+    - Old formula: null_without_target_type (127) + cr_actionable (2) = 129
+    - New formula: null_target_actionable (0) + cr_actionable (2) = **2**
+  - **Report changes in `scripts/decompiler_quality_report.py`:**
+    1. Null subcategory aggregation moved before formula computation
+    2. `null_target_actionable` computed as `null_without_target_type - null_target_expected`
+    3. Formula line now shows `null_target_actionable + call_return_actionable`
+    4. Corrected formula note block now includes `null_target_expected_non_actionable`, `null_target_actionable`, `null_target_declared_dynamic`
+    5. New "True Actionable Frontier" table in null section: shows all buckets with counts
+    6. JSON output: added `null_target_expected_non_actionable`, `null_target_actionable`, `null_target_declared_dynamic` fields
+  - **Results:**
+    - pytest: 583 passed, 4 skipped (unchanged, 0 regressions)
+    - Track A: 7/7, errors=0, unknown opcodes=0
+    - call_return_actionable: 2 (unchanged)
+    - null_without_target_type: 127 (unchanged)
+    - resolved_null_target_type: 518 (unchanged)
+    - actionable_dynamic_corrected: 129 → 2 (now excludes declared K_DYN nulls)
+    - Reports ASCII-safe ✓
+  - **True Actionable Frontier:**
+    | Bucket | Count | Nature |
+    |--------|-------|--------|
+    | null_target_declared_dynamic | 127 | Expected K_DYN -- non-actionable |
+    | null_target_actionable | 0 | Truly actionable nulls |
+    | call_return_actionable | 2 | Truly actionable call returns |
+    | **actionable_dynamic_corrected** | **2** | **True deterministic frontier** |
+  - **Session closed (Milestone 2).**
+
+### Session 34 — Milestone 3: Residual Call Return Evidence Audit and Final Actionability Lock — COMPLETE
+  - **Diagnostic-first audit of the 2 call_return_actionable cases.**
+  - **Cases identified:**
+    1. Shapes.hl __cast[97] v=t4: OCall2 with args[1]=355 (K_OBJ type hl.types.ArrayDynIterator, no return metadata)
+    2. classes.hl setDyn[317] v=t6: OCall2 with args[1]=341 (K_OBJ type hl.types.BytesIterator_hl_UI16, no return metadata)
+  - **Evidence check:** Both cases are OCall2 with K_OBJ type indices as callee. K_OBJ has no return-type metadata (protos exist but no ret on the protos themselves — they're iterator methods hasNext/next, not call targets). No valid function index, no K_FUN/K_METHOD kind, no closure producer, no native. Truly unresolvable from direct evidence.
+  - **Action:** Added `CR_CAT_OBJ_NO_RET` ("call_return_object_type_no_return_metadata") subcategory constant, classified both cases as expected/non-actionable.
+  - **Changes:**
+    - `hl_decompile.py`: Added `CR_CAT_OBJ_NO_RET` constant; updated `_analyze_call_return` to classify K_OBJ type-indexed calls as expected/non-actionable.
+    - `scripts/decompiler_quality_report.py`: Added `CR_CAT_OBJ_NO_RET` to `_CR_EXPECTED_KEYS`, non_actionable_labels, import list. Updated note text to remove hardcoded counts.
+    - `tests/test_decompile.py`: Updated formula test (cr_actionable: 2→0, corrected: 2→0, expected: 100→102). Added test_residual_call_return_obj_no_ret. Updated test_type_indexed_call_non_kfun_remains_expected.
+  - **Results:**
+    - pytest: 584 passed, 4 skipped (+1 new test, 0 regressions)
+    - Track A: 7/7, errors=0, unknown opcodes=0
+    - call_return_actionable: 2 → **0** (both residual cases reclassified)
+    - actionable_dynamic_corrected: 2 → **0** (true deterministic frontier reached 0)
+    - null_target_actionable: 0 (unchanged)
+    - null_target_declared_dynamic: 127 (unchanged)
+    - null_without_target_type: 127 (unchanged)
+    - resolved_null_target_type: 518 (unchanged)
+    - call_return_expected_non_actionable: 100 → 102 (+2 OBJ_NO_RET)
+    - Reports ASCII-safe ✓
+  - **Session closed (Milestone 3).**
+
+### Session 34 — Milestone 4: Track A Dynamic Frontier Baseline Freeze and Regression Guard — COMPLETE
+  - **Baseline/reporting/tests only — no inference changes.**
+  - **Zero frontier confirmed and locked:**
+    - actionable_dynamic_corrected: 0
+    - null_target_actionable: 0
+    - call_return_actionable: 0
+    - errors: 0, unknown opcodes: 0, Track A: 7/7
+  - **Changes:**
+    - `tests/test_decompile.py`: Extended `test_formula_consistency_on_track_a` to check full zero-frontier (null_target_actionable=0, null_target_expected=127, null_target_declared_dyn=127, 7 fixtures, 0 errors, 0 unknown opcodes per fixture). Extended `test_residual_call_return_obj_no_ret` to verify unresolvable + not-actionable.
+    - `scripts/decompiler_quality_report.py`: Added "Track A -- Zero Frontier Baseline" section before Ranked Problems with table of zero-metrics and baseline lock note. Clarifies that legacy totals (null_without_target_type=127, call_return_unresolved=102) are NOT automatically actionable.
+    - `AGENTS.md`: Added section 16 documenting the zero frontier with guardrail notice.
+  - **Validation:**
+    - pytest: 584 passed, 4 skipped (0 regressions)
+    - Track A: 7/7, errors=0, unknown opcodes=0
+    - actionable_dynamic_corrected: 0 (locked)
+    - null_target_actionable: 0 (locked)
+    - call_return_actionable: 0 (locked)
+    - Reports ASCII-safe ✓
+  - **Next direction:** Track B (Farever) quality frontier audit — not more Track A null/call-return inference.
+  - **Session closed (Milestone 4).**
+
 ## Session 33 — May 30, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
