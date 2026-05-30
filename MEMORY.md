@@ -1,5 +1,35 @@
 # Session Tracking
 
+## Session 36 — May 30, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-36-g4f22754.
+- Project state: 601 passed, 4 skipped (end of Session 35 state).
+- Previous session: Session 35 completed Track B Quality Cleanup B1-B7 (field diag audit, enum recovery 49/64, syntax balance, call-return lock, goto/label requiredness audit, frontier metric consistency, field frontier metric lock).
+- **Milestone: Track B Field Evidence B9 — Headless Ghidra Evidence Collection — COMPLETE**
+- **(see B9 details below)**
+- **Milestone: Track B Field Cleanup B10 — Deterministic Field Resolution Fixes — COMPLETE**
+- **Changes:**
+  - `hl_decompile.py`: Added `obj_reg` parameter to `_resolve_field_name()` as Strategy 0 (per-instruction register type). Added `FN_CAT_NO_DIRECT_METADATA` constant. Added `reg_type` as Strategy 0 in `_record_field_diag()`. Fixed OSetEnumField handler: passes correct receiver_reg, falls back to `_resolve_field_name` with obj_reg when `_resolve_enum_field_name` fails.
+  - `tests/test_fixtures.py`: Added `test_field_resolution_obj_reg_resolves()` and `test_field_resolution_obj_reg_fallback()`.
+- **Results:**
+  - Track B field fallbacks: **201 → 94 (-107)** — largest single reduction in project history
+  - Track B resolved field names: **1435 → 1542 (+107)**
+  - Subcategory: receiver_object_field_index_oob: **135 → 69** (-66)
+  - Subcategory: enum_receiver_not_enum_opcode: **38 → 8** (-30)
+  - Subcategory: enum_field_unresolved: **15 → 4** (-11)
+  - Subcategory: this_field_index_oob: **13** (unchanged)
+  - Frontier bucket: **201 → 94** (-107)
+  - Evidence packet: **53 cases, 16 groups → 12 cases, 12 groups** (all truly unresolvable)
+  - Track A: 7/7, 0 errors, all zero-frontier metrics locked
+  - pytest: **603 passed, 4 skipped** (+2, 0 regressions)
+  - Reports ASCII-safe.
+- **Remaining unresolved:** 69 receiver_oob (diagnostic_only), 13 this_oob (diagnostic_only), 8 enum_not_enum_opcode (funcs with K_ENUM reg types), 4 enum_field_unresolved (OOB construct indices).
+- **Key principle:** Per-instruction register type (Strategy 0) beats fn.type->args[0] (Strategy 2). OSetEnumField on K_OBJ receivers falls back to object field resolution. No Farever hardcoding. All remaining fallbacks are genuinely unresolvable from HL type metadata.
+- **B9 process rule added:** Before asking Sato for binary/Ghidra evidence, first use available local tooling. Sato is the last resort for manual visual inspection only.
+
+## B9 Details
+
 ## Session 35 — May 30, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

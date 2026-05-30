@@ -1269,7 +1269,7 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
         inventory["class_level"] = cls_metrics
 
     # Quality frontier classification
-    inventory["quality_frontier"] = analyze_farever_quality_frontier(inventory, result, sources)
+    inventory["quality_frontier"] = analyze_farever_quality_frontier(inventory, result, sources, parser)
 
     return inventory
 
@@ -1346,10 +1346,229 @@ def _classify_field_fallback_actionability(subcat: str) -> str:
     return _ACTIONABLE_MAP.get(subcat, "diagnostic_only")
 
 
+def build_field_evidence_packet(
+    parser: HLParser,
+    examples: Dict[str, List[Dict[str, Any]]],
+    subcategory_breakdown: Dict[str, int],
+    evidence_cats: set,
+) -> Dict[str, Any]:
+    """Build a deduplicated, ranked evidence packet for requires_evidence field fallbacks.
+
+    Enriches each fallback example with type pool metadata (enum construct names,
+    string pool lookups, construct counts), deduplicates by
+    (subcategory, receiver_type_idx, field_idx, opcode), and classifies each
+    unique group as one of:
+      - ghidra_candidate: likely recoverable from binary/runtime metadata
+      - hl_metadata_absent: no direct HL evidence (enum construct names missing,
+        field index OOB with known type bounds)
+      - structurally_suspicious: enum accessed through object-field opcodes,
+        suggesting the enum type metadata may be wrong
+
+    Args:
+        parser: Parsed HL bytecode.
+        examples: Dict[subcategory_str -> list of example dicts].
+        subcategory_breakdown: Dict[subcategory_str -> count].
+        evidence_cats: Set of subcategory actionability strings to include
+                       (e.g. {"requires_evidence"}).
+
+    Returns:
+        Dict with keys:
+          - total_evidence_cases: int (total req_evidence fallback instances)
+          - unique_groups: list of deduplicated evidence groups sorted by frequency
+          - evidence_classification_summary: breakdown by classification label
+    """
+    # Collect all requires_evidence records from the example data
+    all_records: List[Dict[str, Any]] = []
+    for cat, cat_examples in examples.items():
+        cat_actionability = _classify_field_fallback_actionability(cat)
+        if cat_actionability not in evidence_cats:
+            continue
+        for ex in cat_examples:
+            rec = dict(ex)
+            rec["subcategory"] = cat
+            rec["actionability"] = cat_actionability
+            all_records.append(rec)
+
+    if not all_records:
+        return {
+            "total_evidence_cases": 0,
+            "unique_groups": [],
+            "evidence_classification_summary": {},
+        }
+
+    # Compute true total from subcategory_breakdown for evidence categories
+    evidence_total = sum(
+        cnt for cat, cnt in subcategory_breakdown.items()
+        if _classify_field_fallback_actionability(cat) in evidence_cats
+    )
+
+    # Deduplication key: (subcategory, receiver_type_idx, field_idx, opcode)
+    # We want to show the same logical evidence gap regardless of which function
+    # it appears in.
+    group_map: Dict[Tuple, Dict[str, Any]] = {}
+
+    for rec in all_records:
+        key = (
+            rec["subcategory"],
+            rec.get("receiver_type_idx", -1),
+            rec["field_idx"],
+            rec["opcode"],
+        )
+        if key not in group_map:
+            group_map[key] = {
+                "subcategory": rec["subcategory"],
+                "receiver_type_idx": rec.get("receiver_type_idx", -1),
+                "receiver_type_kind": rec.get("receiver_type_kind", -1),
+                "receiver_type_name": rec.get("receiver_type_name", "unknown"),
+                "field_idx": rec["field_idx"],
+                "opcode": rec["opcode"],
+                "op_name": rec["op_name"],
+                "count": 0,
+                "examples": [],
+                "func_indices": set(),
+                "func_names": set(),
+                "evidence_classification": "",
+                "enum_type_name": "",
+                "enum_nconstructs": 0,
+                "enum_construct_name_at_idx": "",
+                "notes": "",
+            }
+        g = group_map[key]
+        g["count"] += 1
+        g["func_indices"].add(rec.get("func_idx", -1))
+        g["func_names"].add(rec.get("func", f"func[{rec.get('func_idx','?')}]"))
+        if len(g["examples"]) < 3:
+            g["examples"].append(rec)
+
+    # Enrich with type pool metadata
+    for g in group_map.values():
+        rt_idx = g["receiver_type_idx"]
+        if rt_idx >= 0 and rt_idx < len(parser.types):
+            td = parser.types[rt_idx]
+            if td.name is not None and 0 <= td.name < len(parser.strings):
+                g["enum_type_name"] = parser.strings[td.name]
+            if hasattr(td, "nconstructs"):
+                g["enum_nconstructs"] = td.nconstructs
+            if g["subcategory"] == FN_CAT_ENUM_FIELD_UNRESOLVED and hasattr(td, "constructs"):
+                cidx = g["field_idx"]
+                if 0 <= cidx < len(td.constructs):
+                    cname_idx = td.constructs[cidx].name
+                    if cname_idx is not None and 0 <= cname_idx < len(parser.strings):
+                        g["enum_construct_name_at_idx"] = parser.strings[cname_idx]
+
+        # Classify the evidence gap
+        subcat = g["subcategory"]
+        if subcat == FN_CAT_ENUM_FIELD_UNRESOLVED:
+            if g["enum_construct_name_at_idx"]:
+                g["evidence_classification"] = "structurally_suspicious"
+                g["notes"] = (
+                    f"Construct name '{g['enum_construct_name_at_idx']}' exists at index "
+                    f"{g['field_idx']} in type pool but decompiler reported fallback. "
+                    f"Possible enum type mismatch or OpEnumField index misalignment."
+                )
+            elif 0 <= g["field_idx"] < g["enum_nconstructs"]:
+                g["evidence_classification"] = "hl_metadata_absent"
+                g["notes"] = (
+                    f"Construct index {g['field_idx']} is within bounds (nconstructs="
+                    f"{g['enum_nconstructs']}) but construct name string is missing "
+                    f"from type pool. Need Ghidra to recover from runtime enum metadata."
+                )
+            else:
+                g["evidence_classification"] = "ghidra_candidate"
+                g["notes"] = (
+                    f"Construct index {g['field_idx']} is OOB (nconstructs="
+                    f"{g['enum_nconstructs']}). Likely enum type metadata incomplete "
+                    f"in HL pool. Need Ghidra to verify the true enum type and construct list."
+                )
+        elif subcat == FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE:
+            g["evidence_classification"] = "ghidra_candidate"
+            g["notes"] = (
+                f"Receiver is K_ENUM type '{g['enum_type_name']}' (kind=18) but accessed "
+                f"via OField/OSetField opcode (not OEnumField). The field index "
+                f"{g['field_idx']} may map to an enum construct or the type metadata "
+                f"may be incorrect. Needs Ghidra to determine the true field layout."
+            )
+        elif subcat == FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD:
+            g["evidence_classification"] = "ghidra_candidate"
+            g["notes"] = (
+                f"Field access on K_FUN/K_METHOD receiver type. The field index "
+                f"{g['field_idx']} may be a closure environment offset or function "
+                f"table lookup. Needs Ghidra to verify call-site structure."
+            )
+        elif subcat == FN_CAT_RECEIVER_TYPE_MISSING:
+            g["evidence_classification"] = "ghidra_candidate"
+            g["notes"] = "No receiver type available. Needs register tracing via Ghidra."
+        elif subcat == FN_CAT_UNKNOWN_FIELD_PATTERN:
+            g["evidence_classification"] = "ghidra_candidate"
+            g["notes"] = (
+                f"Unknown field access pattern (kind={g['receiver_type_kind']}, "
+                f"op={g['opcode']}). Needs Ghidra to classify."
+            )
+
+    # Sort by frequency descending
+    sorted_groups = sorted(
+        group_map.values(),
+        key=lambda g: (-g["count"], g.get("receiver_type_name", ""), g["field_idx"]),
+    )
+
+    # Build ranked list
+    unique_group_list = []
+    for i, g in enumerate(sorted_groups):
+        unique_group_list.append({
+            "rank": i + 1,
+            "subcategory": g["subcategory"],
+            "count": g["count"],
+            "receiver_type_idx": g["receiver_type_idx"],
+            "receiver_type_kind": g["receiver_type_kind"],
+            "receiver_type_name": g["receiver_type_name"],
+            "field_idx": g["field_idx"],
+            "opcode": g["opcode"],
+            "op_name": g["op_name"],
+            "enum_type_name": g["enum_type_name"],
+            "enum_nconstructs": g["enum_nconstructs"],
+            "enum_construct_name_at_idx": g["enum_construct_name_at_idx"],
+            "evidence_classification": g["evidence_classification"],
+            "notes": g["notes"],
+            "example_funcs": sorted(g["func_names"])[:3],
+            "example_func_indices": sorted(g["func_indices"])[:3],
+        })
+
+    # Summary by classification: map each subcategory's total count to its evidence classification
+    summary: Dict[str, int] = Counter()
+    for g in sorted_groups:
+        summary[g["evidence_classification"]] += g["count"]
+    # Also add any evidence_total counts not covered by example groups
+    for cat, cnt in subcategory_breakdown.items():
+        cls_action = _classify_field_fallback_actionability(cat)
+        if cls_action not in evidence_cats:
+            continue
+        # Estimate: if this category has examples in groups, those counts are already added
+        # We need to add the remainder not covered by the capped examples
+        cat_example_total = sum(
+            g["count"] for g in sorted_groups if g["subcategory"] == cat
+        )
+        if cat_example_total < cnt:
+            # Assign remainder to the dominant classification for this category
+            for g in sorted_groups:
+                if g["subcategory"] == cat:
+                    summary[g["evidence_classification"]] += cnt - cat_example_total
+                    break
+            else:
+                # No example group was created for this subcategory (should not happen here)
+                summary["ghidra_candidate"] += cnt - cat_example_total
+
+    return {
+        "total_evidence_cases": evidence_total,
+        "unique_groups": unique_group_list,
+        "evidence_classification_summary": dict(summary),
+    }
+
+
 def analyze_farever_quality_frontier(
     inventory: Dict[str, Any],
     result: Optional[DecompileResult],
     sources: Optional[Dict[str, str]],
+    parser: Optional[HLParser] = None,
 ) -> List[Dict[str, Any]]:
     """Classify Track B quality frontier buckets with evidence assessment.
 
@@ -1407,10 +1626,12 @@ def analyze_farever_quality_frontier(
                         "op_name": d.op_name,
                         "receiver_reg": d.receiver_reg,
                         "field_idx": d.field_idx,
-                        "receiver_type_name": d.receiver_type_name,
+                        "receiver_type_idx": d.receiver_type_idx,
                         "receiver_type_kind": d.receiver_type_kind,
+                        "receiver_type_name": d.receiver_type_name,
                         "resolution_strategy": d.resolution_strategy,
                         "resolved_name": d.resolved_name,
+                        "parent_type_idx": d.parent_type_idx,
                     })
 
     if result:
@@ -1508,6 +1729,19 @@ def analyze_farever_quality_frontier(
             for cat in fn_subcat_counts
         },
     }
+
+    # Build evidence packet for requires_evidence cases (B8)
+    if parser and fn_examples:
+        _EVIDENCE_CATS = {"requires_evidence"}
+        field_diag_detail["evidence_packet"] = build_field_evidence_packet(
+            parser, fn_examples, fn_subcat_counts, _EVIDENCE_CATS
+        )
+    else:
+        field_diag_detail["evidence_packet"] = {
+            "total_evidence_cases": 0,
+            "unique_groups": [],
+            "evidence_classification_summary": {},
+        }
 
     # Determine which count to display: prefer diag data when available
     effective_field_cnt = field_diag_total if field_diag_total > 0 else field_cnt
@@ -2489,6 +2723,71 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 else:
                     what = "Requires Sato/Ghidra investigation."
                 md_lines.append(f"| {cat} | {cnt} | {what} | {ex_str} |")
+            md_lines.append("")
+
+        # ── Field Evidence Packet (B8) ───────────────────────────────
+        evidence_packet = field_diag.get("evidence_packet", {})
+        ep_total = evidence_packet.get("total_evidence_cases", 0)
+        if ep_total > 0:
+            md_lines.append("")
+            md_lines.append("### Track B -- Field Evidence Packet (B8)")
+            md_lines.append("")
+            md_lines.append(
+                "The following deduplicated evidence groups represent the 53 requires_evidence "
+                "field fallback cases, enriched with type pool metadata and ranked by frequency. "
+                "Each group is a unique (subcategory, receiver_type_idx, field_idx, opcode) "
+                "combination. Do not infer field names from this data."
+            )
+            md_lines.append("")
+
+            # Classification summary
+            cls_summary = evidence_packet.get("evidence_classification_summary", {})
+            md_lines.append("**Evidence Classification Summary:**")
+            md_lines.append("")
+            md_lines.append("| Classification | Count | Meaning |")
+            md_lines.append("|---------------|-------|---------|")
+            md_lines.append(
+                "| ghidra_candidate | "
+                f"{cls_summary.get('ghidra_candidate', 0)} | "
+                "Likely recoverable from binary/runtime metadata via Ghidra |"
+            )
+            md_lines.append(
+                "| hl_metadata_absent | "
+                f"{cls_summary.get('hl_metadata_absent', 0)} | "
+                "No direct HL bytecode evidence; construct names missing from type pool |"
+            )
+            md_lines.append(
+                "| structurally_suspicious | "
+                f"{cls_summary.get('structurally_suspicious', 0)} | "
+                "Construct name exists in type pool but decompiler reported fallback -- may be type mismatch |"
+            )
+            md_lines.append("")
+
+            # Ranked groups table
+            unique_groups = evidence_packet.get("unique_groups", [])
+            md_lines.append("**Ranked Evidence Groups (Top 20 by frequency):**")
+            md_lines.append("")
+            md_lines.append(
+                "| Rank | Subcategory | Count | Receiver Type | Field Idx | Opcode | "
+                "Classification | Example Funcs | Notes |"
+            )
+            md_lines.append(
+                "|------|-------------|-------|---------------|-----------|--------|"
+                "---------------|---------------|-------|"
+            )
+            for g in unique_groups[:20]:
+                ex_funcs = ", ".join(g.get("example_funcs", [])[:2])
+                md_lines.append(
+                    f"| {g['rank']} "
+                    f"| {g['subcategory']} "
+                    f"| {g['count']} "
+                    f"| {g.get('receiver_type_name', '?')} "
+                    f"| {g['field_idx']} "
+                    f"| {g['op_name']} "
+                    f"| {g.get('evidence_classification', '?')} "
+                    f"| {ex_funcs} "
+                    f"| {g.get('notes', '')} |"
+                )
             md_lines.append("")
 
         if frontier:

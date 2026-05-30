@@ -160,6 +160,7 @@ FN_CAT_FUN_OR_METHOD_RECEIVER_FIELD   = "fun_or_method_receiver_field_access"
 FN_CAT_DYNAMIC_STRING_MISSING         = "dynamic_string_missing"
 FN_CAT_RECEIVER_TYPE_INVALID          = "receiver_type_invalid"
 FN_CAT_UNKNOWN_FIELD_PATTERN          = "unknown_field_pattern"
+FN_CAT_NO_DIRECT_METADATA             = "no_direct_metadata"
 # Backward-compat aliases (B6)
 FN_CAT_RECEIVER_OBJECT_FIELD_METADATA_AVAILABLE = FN_CAT_RECEIVER_OBJECT_FIELD_INDEX_OOB
 FN_CAT_INHERITED_FIELD_FLATTENING_MISS = "inherited_field_flattening_miss"
@@ -180,6 +181,7 @@ FN_CAT_LABELS = {
     FN_CAT_DYNAMIC_STRING_MISSING:         "dynamic_string_missing",
     FN_CAT_RECEIVER_TYPE_INVALID:          "receiver_type_invalid",
     FN_CAT_UNKNOWN_FIELD_PATTERN:          "unknown_field_pattern",
+    FN_CAT_NO_DIRECT_METADATA:             "no_direct_metadata",
 }
 
 
@@ -1693,7 +1695,7 @@ class ExprBuilder:
             if metadata_name is not None:
                 field = metadata_name
             else:
-                field = self._resolve_field_name(args[2], self._func_idx)
+                field = self._resolve_field_name(args[2], self._func_idx, args[1])
             self._record_field_diag(op, instr.mnemonic, args[1], args[2],
                                     instr.index, field)
             return IRStmt("assign", dst=dst,
@@ -1704,7 +1706,7 @@ class ExprBuilder:
                 return IRStmt("comment", comment=f"malformed OSetField args={args}")
             src = self._reg_var(args[0])
             obj = self._reg_var(args[1])
-            field = self._resolve_field_name(args[2], self._func_idx)
+            field = self._resolve_field_name(args[2], self._func_idx, args[1])
             self._record_field_diag(op, instr.mnemonic, args[1], args[2],
                                     instr.index, field)
             return IRStmt("expr",
@@ -1714,7 +1716,7 @@ class ExprBuilder:
             if len(args) < 2:
                 return IRStmt("comment", comment=f"malformed OGetThis args={args}")
             dst = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1], self._func_idx)
+            field_name = self._resolve_field_name(args[1], self._func_idx, 0)
             self._record_field_diag(op, instr.mnemonic, -1, args[1],
                                     instr.index, field_name)
             return IRStmt("assign", dst=dst,
@@ -1725,7 +1727,7 @@ class ExprBuilder:
             if len(args) < 2:
                 return IRStmt("comment", comment=f"malformed OSetThis args={args}")
             src = self._reg_var(args[0])
-            field_name = self._resolve_field_name(args[1], self._func_idx)
+            field_name = self._resolve_field_name(args[1], self._func_idx, 0)
             self._record_field_diag(op, instr.mnemonic, -1, args[1],
                                     instr.index, field_name)
             return IRStmt("expr",
@@ -1819,10 +1821,14 @@ class ExprBuilder:
                 args[0])
             # Try deterministic enum construct name resolution
             field_name = self._resolve_enum_field_name(args, op)
+            if field_name is None and op == 94:
+                # OSetEnumField: field index is an object field, not a construct.
+                # Fall back to object field resolution using the object register.
+                field_name = self._resolve_field_name(args[2], self._func_idx, args[1])
             if field_name is None:
                 field_name = f"f{args[2]}"
             self._record_field_diag(op, instr.mnemonic,
-                                    args[1] if op == 93 else -1,
+                                    args[1],
                                     args[2], instr.index, field_name)
             if op == 93:
                 dst = self._reg_var(args[0])
@@ -2018,15 +2024,27 @@ class ExprBuilder:
         return None
 
     def _resolve_field_name(self, field_idx: int,
-                            func_idx: Optional[int] = None) -> str:
+                            func_idx: Optional[int] = None,
+                            obj_reg: Optional[int] = None) -> str:
         """Resolve a field index to a name.
 
-        Uses three strategies in order:
-          1. fn.parent_type (most reliable — parser already resolves this)
-          2. fn.type → signature args → 'this' type (existing fallback)
+        Uses strategies in priority order:
+          0. obj_reg register declared type (most precise -- per-instruction)
+          1. fn.parent_type (populated by _resolve_function_names)
+          2. fn.type -> signature args -> 'this' type (existing fallback)
         """
         if func_idx is not None and func_idx >= 0 and self.parser is not None and func_idx < len(self.parser.functions):
             fn = self.parser.functions[func_idx]
+
+            # Strategy 0: Use the object register's declared type (per-instruction)
+            if obj_reg is not None and 0 <= obj_reg < len(fn.reg_types):
+                obj_type_idx = fn.reg_types[obj_reg]
+                if obj_type_idx is not None and 0 < obj_type_idx < len(self.parser.types):
+                    t = self.parser.types[obj_type_idx]
+                    if t.kind in (K_OBJ, K_STRUCT):
+                        name = self._resolve_field_from_type(obj_type_idx, field_idx)
+                        if name is not None:
+                            return name
 
             # Strategy 1: Use parent_type directly (populated by _resolve_function_names)
             pt = fn.parent_type
@@ -2112,6 +2130,15 @@ class ExprBuilder:
         receiver_type_name = "unknown"
         resolution_strategy = "none"
         parent_type_idx = fn.parent_type if fn.parent_type is not None else -1
+
+        # Strategy 0: Use receiver register's declared type (per-instruction)
+        if receiver_reg >= 0 and receiver_reg < len(fn.reg_types):
+            reg_type_idx = fn.reg_types[receiver_reg]
+            if reg_type_idx is not None and 0 < reg_type_idx < len(self.parser.types):
+                rt = self.parser.types[reg_type_idx]
+                if rt.kind in (K_OBJ, K_STRUCT):
+                    receiver_type_idx = reg_type_idx
+                    resolution_strategy = "reg_type"
 
         # Strategy 1: parent_type
         pt = fn.parent_type

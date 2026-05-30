@@ -983,3 +983,67 @@ def test_class_wrapper_no_broad_parent_type():
         assert getattr(fn, 'from_class_wrapper', False), (
             f"func[{fi}] ({fn.name}) should have from_class_wrapper=True, "
             f"but it's a static method without the flag")
+
+
+# =============================================================================
+# B10: Field resolution fixes — obj_reg parameter, OSetEnumField fallback
+# =============================================================================
+
+
+def test_field_resolution_obj_reg_resolves():
+    """OFiield obj_reg pointing to K_OBJ register resolves field names."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    area_funcs = _find_field_funcs(p, "area")
+    circle_area = [i for i in area_funcs
+                   if p.functions[i].parent_type is not None
+                   and p.types[p.functions[i].parent_type].name is not None
+                   and p.strings[p.types[p.functions[i].parent_type].name] == "Circle"]
+    assert len(circle_area) >= 1
+    func_idx = circle_area[0]
+    fn = p.functions[func_idx]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    # obj_reg=0: reg[0] is 'this' (Circle K_OBJ), field[0] -> 'radius'
+    name = eb._resolve_field_name(0, func_idx, obj_reg=0)
+    assert name == "radius", f"Expected 'radius', got '{name}'"
+
+    # OOB field still returns fallback
+    name = eb._resolve_field_name(999, func_idx, obj_reg=0)
+    assert name == "f999", f"Expected 'f999', got '{name}'"
+
+
+def test_field_resolution_obj_reg_fallback():
+    """obj_reg with non-K_OBJ register falls through to parent_type strategy."""
+    raw = _load("classes.hl")
+    p = HLParser(os.path.join(FIXTURES_DIR, "classes.hl"))
+    p.execute(io_obj(raw))
+    d = Disassembler(p)
+
+    # Find Point.length — uses OGetThis and OField internally
+    length_funcs = _find_field_funcs(p, "length")
+    point_length = [i for i in length_funcs
+                    if p.functions[i].parent_type is not None
+                    and p.types[p.functions[i].parent_type].name is not None
+                    and p.strings[p.types[p.functions[i].parent_type].name] == "Point"]
+    assert len(point_length) >= 1
+    func_idx = point_length[0]
+    fn = p.functions[func_idx]
+    reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+    eb = ExprBuilder(p, d, reg_names)
+
+    # Verify parent_type strategy still works (no obj_reg)
+    name0 = eb._resolve_field_name(0, func_idx)
+    name1 = eb._resolve_field_name(1, func_idx)
+    assert name0 == "x", f"Point field 0: expected 'x', got '{name0}'"
+    assert name1 == "y", f"Point field 1: expected 'y', got '{name1}'"
+
+    # Verify with obj_reg=0 (reg[0] is 'this' = Point K_OBJ) works
+    name0b = eb._resolve_field_name(0, func_idx, obj_reg=0)
+    name1b = eb._resolve_field_name(1, func_idx, obj_reg=0)
+    assert name0b == "x", f"obj_reg Point field 0: expected 'x', got '{name0b}'"
+    assert name1b == "y", f"obj_reg Point field 1: expected 'y', got '{name1b}'"

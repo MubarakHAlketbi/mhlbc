@@ -462,3 +462,14 @@ As of Session 34, the deterministic actionable Dynamic frontier for Track A (7 s
 All null-without-target-type and call-return-unresolved cases have been either recovered through direct bytecode evidence or reclassified as expected/non-actionable with documented reasons. Do not reopen null target recovery or call-return inference work on Track A unless new direct bytecode evidence appears. The formula consistency test (`test_formula_consistency_on_track_a`) in `tests/test_decompile.py` guards against regressions.
 
 This baseline applies to Track A (standard fixtures) only. Track B (Farever) is a separate frontier and may still have actionable Dynamic work.
+
+## 17. Evidence-First Process
+
+Before asking Sato for binary/Ghidra evidence, use available local tooling first:
+- headless Ghidra (at /home/mubarak/re_tools/ghidra_12.0.4_PUBLIC/support/analyzeHeadless)
+- existing project scripts, HL parser, binary files, logs, reports
+- repository search for past analysis artifacts
+
+Sato is the last resort for manual visual inspection only, when headless tools cannot provide the necessary evidence or when interpretation requires human judgment. If headless Ghidra scripts/plugins are needed, search for existing local scripts first before escalating.
+
+This applies to all investigation work: the HL parser and type pool should be queried before reaching for Ghidra, because field names, type kinds, and inheritance chains are often directly available from the parsed bytecode.
