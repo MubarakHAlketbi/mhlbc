@@ -3821,3 +3821,113 @@ class TestIdentifierSanitization:
         assert _sanitize_type_name("Scaled(") == "Scaled"
         assert _sanitize_type_name("f(") == "f"
         assert _sanitize_type_name("normal name") == "normal_name"
+
+
+class TestGiantSectionMarkers:
+    """Test HaxeWriter giant_section_size parameter for giant function readability safeguards."""
+
+    def _make_ir_func(self, n_stmts: int, name: str = "test_func",
+                      nops: int = 100, nregs: int = 8) -> IRFunction:
+        """Build a minimal IRFunction with n_stmts dummy assign statements."""
+        body = []
+        for i in range(n_stmts):
+            dst = IRVar(name=f"v{i}", reg=i)
+            src = IRConst(value=i)
+            body.append(IRStmt(op="assign", dst=dst, src=src))
+        sig = FunctionSig(name=name, params=[], ret_type=K_VOID,
+                          is_method=False, parent_class=None, has_this=False)
+        return IRFunction(
+            name=name, findex=0, func_idx=0, sig=sig, body=body,
+            variables={}, raw_regnames={}, errors=[],
+            nops=nops, nregs=nregs,
+        )
+
+    def _render_body(self, ir_fn: IRFunction,
+                     giant_section_size: int = 20000) -> str:
+        """Render a function through HaxeWriter with given giant_section_size."""
+        from hl_parser import HLParser, TypeDef
+        p = HLParser("/dev/null")
+        p.types = [TypeDef(kind=K_VOID)]
+        p.ntypes = 1
+        p.nints = 0
+        p.nfloats = 0
+        p.nstrings = 0
+        p.bytes = []
+        resolver = TypeResolver(p)
+        writer = HaxeWriter(resolver, p, include_comments=False,
+                            giant_section_size=giant_section_size)
+        return writer.write_function(ir_fn)
+
+    def test_small_func_no_markers(self):
+        """Function with < giant_section_size stmts gets no section markers or summary."""
+        ir = self._make_ir_func(3)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert "GIANT FUNCTION" not in output
+        assert "section " not in output
+
+    def test_large_func_has_header(self):
+        """Function with > giant_section_size stmts gets GIANT FUNCTION header."""
+        ir = self._make_ir_func(25000)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert "GIANT FUNCTION" in output
+        assert "nops=100" in output
+        assert "nregs=8" in output
+        assert "stmts=25000" in output
+
+    def test_large_func_has_section_markers(self):
+        """Function with > giant_section_size stmts gets section markers."""
+        ir = self._make_ir_func(45000)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert "--- section 1/3" in output
+        assert "--- section 2/3" in output
+        assert "section 3/3" not in output
+        marker_count = output.count("--- section ")
+        assert marker_count == 2, f"Expected 2 section markers, got {marker_count}"
+
+    def test_giant_section_disabled_with_zero(self):
+        """giant_section_size=0 disables all giant function safeguards."""
+        ir = self._make_ir_func(50000)
+        output = self._render_body(ir, giant_section_size=0)
+        assert "GIANT FUNCTION" not in output
+        assert "--- section " not in output
+        assign_count = output.count("= ")
+        assert assign_count >= 50000
+
+    def test_markers_do_not_remove_statements(self):
+        """Section markers do not remove or alter any original statements."""
+        ir = self._make_ir_func(25000)
+        output_with = self._render_body(ir, giant_section_size=20000)
+        output_without = self._render_body(ir, giant_section_size=0)
+        # Count semicolons (each stmt ends with ';'; markers do not)
+        stmts_with = output_with.count(";")
+        stmts_without = output_without.count(";")
+        assert stmts_with == stmts_without == 25000
+
+    def test_marker_boundary_exact_threshold(self):
+        """Function with exactly giant_section_size stmts gets no header or markers (strict >)."""
+        ir = self._make_ir_func(20000)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert "GIANT FUNCTION" not in output
+        assert "--- section " not in output
+        assert output.count(";") == 20000
+
+    def test_marker_boundary_one_over_threshold(self):
+        """Function with giant_section_size+1 stmts gets 1 marker."""
+        ir = self._make_ir_func(20001)
+        output = self._render_body(ir, giant_section_size=20000)
+        marker_count = output.count("--- section ")
+        assert marker_count == 1
+        assert "--- section 1/2" in output
+
+    def test_giant_nops_nregs_in_header(self):
+        """GIANT FUNCTION header reflects actual nops/nregs, not defaults."""
+        ir = self._make_ir_func(25000, nops=99999, nregs=1234)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert "nops=99999" in output
+        assert "nregs=1234" in output
+
+    def test_empty_body_no_crash(self):
+        """Empty function body does not crash when giant_section_size is set."""
+        ir = self._make_ir_func(0)
+        output = self._render_body(ir, giant_section_size=20000)
+        assert output is not None

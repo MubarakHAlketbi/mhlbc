@@ -230,19 +230,21 @@ from the Steam game Farever (Haxe/Heaps engine). Two copies exist:
 
 | Source | MD5 | Size | Notes |
 |--------|-----|------|-------|
-| Windows (Steam) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Original game file — uses custom shiroTools HL runtime |
-| Workspace (initial) | `70250a679ed6cf7b658b0b3753213262` | 13,218,460 | **Truncated copy** (-92KB) |
+| Windows (Steam, current) | `b85480ed23f04f2efc408e4ebdd208a0` | 13,358,488 | Steam copy after May 29 2026 update |
+| Windows (Steam, prior) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Pre-update original game file — uses custom shiroTools HL runtime |
+
+**2026-05-29 game update:** The game received an update adding ~98 functions, ~62 types, ~93 globals, ~125 strings. The old workspace hlboot.dat (`7014abbad2e5c7ebe33c910b659479a1`, 13,311,404) is preserved as `hlboot.dat.old_7014abbad2e5c7ebe33c910b659479a1`. The parser handles both versions with 0 errors.
 
 The initial workspace copy was transferred incorrectly (likely via text-mode copy),
 producing a truncated file that caused false "corrupt binary" conclusions.
 Always verify with the Steam copy.
 
-**Function pool analysis (clean copy, updated Session 21):**
-|- Header: v4, flags=1 (has_debug bit set), nfunctions=45365, ntypes=43844, nglobals=28399
-|- **Debug info is corrupt**: The debug flag is set but the string table size decodes to 185MB (impossible in a 13MB file). The parser detects this, backtracks, and sets `has_debug = False`. This **7-byte offset** was the root cause of all earlier function pool corruption.
-|- After the debug fix: **194 / 45365 functions parse** (190 valid, 4 malformed). The remaining 45,171 functions are unreachable because the 190 valid functions (many with nops > 10,000) consume all available buffer space.
-|- **Ghidra analysis (Session 21):** The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`. Decompilation of `hl_read_type` confirmed it is **identical to open-source HL** — same type kinds, same switch cases, same error handling. **No format extensions exist in the type system.** The remaining parsing issues are in the function pool layout, not type kinds or VarInt encoding.
-|- The Farever target remains a robustness regression target, not a completeness benchmark. It validates that the parser handles corrupt debug info, negative VarInts, oversize nregs/nops, and EOF gracefully without crashing.
+**Function pool analysis (current file, updated Session 37 after May 29 game update):**
+|- Header: v4, flags=1 (has_debug bit set), nfunctions=45463, ntypes=43906, nglobals=28492, nstrings=65775, nconstants=22211
+|- **Debug info is valid** — parser finds 2051 debug files. Debug section is not corrupt in the current file; the earlier 7-byte offset issue was specific to the original release, which the game update may have fixed.
+|- **Current parser status:** **45,463 / 45,463 functions parse with 0 errors, 0 malformed, 0 warnings.** The parser navigation closure (Session 25) applies to both old and updated files.
+|- **libhl.dll** (482,304 bytes, MD5 `68a4f8eeac234491d348fbb46b28bf54`) is unchanged from pre-update.
+|- **Ghidra analysis (Session 21) remains current:** The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`. Decompilation of `hl_read_type` confirmed it is **identical to open-source HL** — same type kinds, same switch cases, same error handling. **No format extensions exist in the type system.**
 
 |**shiroTools runtime discovery (Session 14–21):** The Farever game's `libhl.dll` (471 KB, 431 exports) was built from `E:\\Projects\\shiroTools\\hashlink\\src\\`, compiled April 9, 2026 with MSVC 14.29. This is a custom HashLink fork maintained by **Shiro Games** (the game's developer). `libhl.dll` is the **runtime** (allocators, debug, objects, dispatch); the bytecode reader is in **`Farever.exe`** directly. Headless Ghidra analysis confirmed the type system matches open-source HL exactly — no extended type kinds, no different VarInt encoding. The function pool layout remains the open question.
 

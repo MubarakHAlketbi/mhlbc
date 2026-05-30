@@ -1259,8 +1259,8 @@ class TestFareverTarget:
         """Verify workspace copy matches the clean Steam copy MD5."""
         import hashlib
         md5 = hashlib.md5(farever_data).hexdigest()
-        assert md5 == "7014abbad2e5c7ebe33c910b659479a1", \
-            f"MD5 mismatch: got {md5}"
+        assert md5 == "b85480ed23f04f2efc408e4ebdd208a0", \
+            f"MD5 mismatch: got {md5}. Game was updated (new hlboot.dat from Steam)."
 
     def test_farever_header_pools(self, farever_data):
         """Parse Farever header and pools — verify expected counts."""
@@ -1270,14 +1270,14 @@ class TestFareverTarget:
         # Farever debug section is now valid after string lens fix
         assert p.has_debug is True
         assert len(p.debug_files) > 0, "Expected debug files to be found"
-        assert p.nints == 1541
+        assert p.nints == 1546
         assert p.nfloats == 1674
-        assert p.nstrings == 65650
-        assert p.ntypes == 43844
-        assert p.nglobals == 28399
+        assert p.nstrings == 65775
+        assert p.ntypes == 43906
+        assert p.nglobals == 28492
         assert p.nnatives == 723
-        assert p.nfunctions == 45365
-        assert p.nconstants == 22124
+        assert p.nfunctions == 45463
+        assert p.nconstants == 22211
 
 
 class TestHighRegOpsConsumption:

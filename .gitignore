@@ -10,6 +10,8 @@ _investigate.py
 .coverage
 workspace/*/decompiled/
 workspace/*/*.log/
+workspace/*/*.old_*
+workspace/*/*.dll
 plan.md
 tools/
 plan.md.partial.tmp

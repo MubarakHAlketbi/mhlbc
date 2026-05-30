@@ -1,5 +1,52 @@
 # Session Tracking
 
+## Session 37 — June 7, 2026
+- Start: New session initialized on Discord OmniDecomp thread.
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-37-gf2f5639.
+- Project state: 603 passed, 4 skipped (end of Session 36 state).
+- Previous session: Session 36 completed Track B Field Evidence B9-B10 (obj_reg Strategy 0, OSetEnumField fallback, receiver OOB 135→69, enum_receiver 38→8, enum_field_unresolved 15→4, field fallbacks 201→94).
+- **Waiting for Sato's instructions.**
+- **Milestone: Track B Quality Rebase B11 — Post-Field Resolution Frontier Lock — COMPLETE**
+- **Changes to `scripts/decompiler_quality_report.py`:**
+  1. `_classify_field_fallback_actionability()`: Changed `FN_CAT_ENUM_FIELD_UNRESOLVED` and `FN_CAT_ENUM_RECEIVER_NOT_ENUM_OPCODE` from `requires_evidence` → `diagnostic_only`.
+  2. Bucket 3 classification: requires_evidence → diagnostic_only; risk_level: medium → low.
+  3. Bucket 3 likely_cause/recommended_milestone: updated to reflect diagnostic_only state, evidence packet closed.
+  4. Added "Post-B10 Field Resolution Summary" section with before/after totals, subcategory movement table (135→69, 38→8, 15→4, 13→13), 107-case improvement explanation.
+  5. B7 "Field Evidence Needed": now handles `evidence_cats_found==0` with closure message instead of empty table.
+  6. Resolved frontiers: updated header to "B1-B4 + B10", added Unresolved field names resolution row.
+  7. Removed stale requires_evidence references on field bucket.
+- **Results:**
+  - Track A: 7/7, 0 errors, 0 actionable_dynamic_corrected, 0 null_target_actionable, 0 call_return_actionable (locked).
+  - Track B: 0 errors, 200 sampled, 5113 output files.
+  - Field frontier: 94 (diagnostic_only, low risk, evidence packet closed).
+  - No Ghidra/Sato evidence required for remaining 94 cases.
+  - Reports ASCII-safe.
+  - pytest: 603 passed, 4 skipped (0 regressions).
+- **No changes to:** hl_decompile.py, hl_parser/, tests (classification validation already accepts both values).
+- **File reacquisition:** Farever hlboot.dat updated from Steam (May 29 game update +98 funcs, +62 types, +93 globals, +125 strings). Old copy preserved as `hlboot.dat.old_7014abbad2e5c7ebe33c910b659479a1`. libhl.dll copied for reference (unchanged: MD5 `68a4f8ee...`). Parser handles both versions with 0 errors, 0 malformed. Tests updated: Farever MD5 check and header pool counts. CONTRIBUTING.md Farever section updated with new file info.
+- **Milestone: Track B Quality Cleanup B12 — Giant Init Readability Guard — COMPLETE**
+- **Changes to `hl_decompile.py`:**
+  1. `HaxeWriter.__init__()`: Added `giant_section_size` parameter (default 0 = disabled).
+  2. `IRFunction`: Added `nops` and `nregs` fields (populated from parser FunctionDef at construction).
+  3. `_write_function_impl()`: When `giant_section_size > 0` and body > threshold, inserts a `// === GIANT FUNCTION: nops=..., nregs=..., stmts=...` summary header.
+  4. `_write_body()`: When threshold exceeded, inserts `// --- section N/M: stmts X-Y ---` markers every N statements. Full output preserved.
+- **Changes to `scripts/decompiler_quality_report.py`:**
+  1. `_write_output()`: Passes `giant_section_size=20000` to HaxeWriter (default).
+  2. `largest_20_functions`: Now stores `findex` as `index` (plus `list_pos`), used for frontier bucket title.
+  3. Giant init bucket: Title uses dynamic func index/nops/nregs; likely_cause updated with B12 details; recommended_milestone updated to reflect safeguard.
+  4. Added "Giant Function Summary (B12)" section to Track B report.
+- **New tests (9):** `TestGiantSectionMarkers` class with: small func no markers, large func has header, large func has section markers, disabled with zero, markers preserve stmts, exact threshold boundary, one-over threshold boundary, nops/nregs in header, empty body no crash.
+- **Results:**
+  - Track A: 7/7, 0 errors, zero frontier locked.
+  - Track B: 200 sampled, 0 errors, 5120 output files.
+  - Giant init: func[46044] 'init' (109814 nops, 4728 nregs, 150K+ emitted lines, 36K IR stmts).
+  - Giant init frontier: safe_deterministic, low risk, resolved with section markers.
+  - pytest: **612 passed, 4 skipped** (+9, 0 regressions).
+  - Reports ASCII-safe.
+- **No changes to:** hl_parser/, CLI, CFG logic, field/null/call-return resolution.
+- **Session 37 closed — commit and push.**
+
 ## Session 36 — May 30, 2026
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.

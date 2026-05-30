@@ -364,6 +364,8 @@ class IRFunction:
     call_return_analysis: Dict[str, CallReturnRecord] = field(default_factory=dict)  # var_name → analysis
     null_analysis: Dict[str, str] = field(default_factory=dict)  # var_name → null subcategory
     field_resolve_diags: List[Any] = field(default_factory=list)  # FieldResolveRecord list
+    nops: int = 0
+    nregs: int = 0
 
 
 @dataclass
@@ -3189,10 +3191,12 @@ class HaxeWriter:
 
     def __init__(self, type_resolver: TypeResolver,
                  parser: Any,
-                 include_comments: bool = True):
+                 include_comments: bool = True,
+                 giant_section_size: int = 0):
         self.type_resolver = type_resolver
         self.parser = parser
         self.include_comments = include_comments
+        self.giant_section_size = giant_section_size
         self._indent = 0
 
     def write_function(self, ir_func: IRFunction,
@@ -3251,6 +3255,15 @@ class HaxeWriter:
         self._indent += 1
         body_lines = self._write_body(ir_func.body, ir_func)
         if body_lines:
+            # Insert giant function summary if applicable
+            if self.giant_section_size > 0 and len(ir_func.body) > self.giant_section_size:
+                summary = (
+                    f"// === GIANT FUNCTION: "
+                    f"nops={ir_func.nops}, "
+                    f"nregs={ir_func.nregs}, "
+                    f"stmts={len(ir_func.body)} ===\n"
+                )
+                body_lines.insert(0, summary)
             lines.extend(body_lines)
         else:
             lines.append(self._indent_str() + "// (empty body)")
@@ -3395,7 +3408,27 @@ class HaxeWriter:
                 t_str = self.type_resolver.resolve(vtype)
                 lines.append(self._indent_str() + f"var {vname}: {t_str};")
 
-        for stmt in stmts:
+        # Determine section marker interval
+        section_size = self.giant_section_size
+        total_stmts = len(stmts)
+        use_sections = section_size > 0 and total_stmts > section_size
+        if use_sections:
+            n_sections = (total_stmts + section_size - 1) // section_size
+            next_marker = section_size
+
+        for i, stmt in enumerate(stmts):
+            # Section marker before the statement
+            if use_sections and i > 0 and i == next_marker:
+                section_num = i // section_size
+                start_stmt = i
+                end_stmt = min(i + section_size, total_stmts)
+                lines.append(
+                    self._indent_str()
+                    + f"// --- section {section_num}/{n_sections}: "
+                    f"stmts {start_stmt}-{end_stmt} ---"
+                )
+                next_marker += section_size
+
             line = self._stmt_to_line(stmt)
             if line is not None:
                 if self.include_comments and stmt.line > 0:
@@ -4047,6 +4080,8 @@ class Decompiler:
                 raw_regnames={},
                 errors=["no instructions"],
                 var_attributions={},
+                nops=func.nops,
+                nregs=nregs,
             )
 
         # Step 1: Build function signature FIRST (before variable mapping)
@@ -4138,6 +4173,8 @@ class Decompiler:
             call_return_analysis=call_return_analysis,
             null_analysis=null_analysis,
             field_resolve_diags=expr_builder._field_diags,
+            nops=func.nops,
+            nregs=nregs,
         )
 
         return ir_fn
