@@ -492,7 +492,7 @@ class RegisterLiveness:
         if op in (38, 40, 42, 74, 75, 76, 77):
             return [args[0]]
         # Type/ref/enum reads
-        if op in (83, 89, 93, 96, 97):
+        if op in (83, 89, 90, 93, 96, 97):
             return [args[0]]
         # OGetThis writes to dst
         if op == 40:
@@ -533,22 +533,32 @@ class RegisterLiveness:
         if op in (22, 23) and len(args) >= 1:
             return [args[0]]
 
-        # Fixed-arg calls: dst, fun_reg[, a0, a1, ...]
+        # Fixed-arg calls (OCall0-4): dst, findex/type_idx, args...
+        # args[1] is a function index or type index, NOT a register
         if op == 24 and len(args) >= 2:  # OCall0: no arg regs
-            return [args[1]]
+            return []  # dst + findex only, no register args
         if op == 25 and len(args) >= 3:  # OCall1
-            return [args[1], args[2]]
-        if op == 26 and len(args) >= 4:
-            return [args[1], args[2], args[3]]
-        if op == 27 and len(args) >= 5:
-            return [args[1], args[2], args[3], args[4]]
-        if op == 28 and len(args) >= 6:
-            return [args[1], args[2], args[3], args[4], args[5]]
+            return [args[2]]  # a0 register
+        if op == 26 and len(args) >= 4:  # OCall2
+            return [args[2], args[3]]
+        if op == 27 and len(args) >= 5:  # OCall3
+            return [args[2], args[3], args[4]]
+        if op == 28 and len(args) >= 6:  # OCall4
+            return [args[2], args[3], args[4], args[5]]
 
-        # Vararg calls: OCallN, OCallMethod, OCallThis, OCallClosure
-        if op in (29, 30, 32) and len(args) >= 3:
-            # p1=dst, p2=fun_reg, p3=count, then args[3:]
-            srcs.append(args[1])
+        # Vararg calls: OCallN (29), OCallClosure (32): dst, fun_reg, count, args...
+        if op in (29, 32) and len(args) >= 3:
+            srcs.append(args[1])  # fun_reg / closure_reg
+            count_idx = 2
+            if len(args) > count_idx:
+                count = args[count_idx]
+                for k in range(min(count, len(args) - count_idx - 1)):
+                    srcs.append(args[count_idx + 1 + k])
+            return srcs
+
+        # OCallMethod (30): dst, method_index, count, extra...
+        # method_index is NOT a register -- it's a type/proto index
+        if op == 30 and len(args) >= 3:
             count_idx = 2
             if len(args) > count_idx:
                 count = args[count_idx]
@@ -668,13 +678,14 @@ class RegisterLiveness:
             return [args[0], args[1]]
 
         # Enum operations
-        if op in (90, ) and len(args) >= 3:
-            # OMakeEnum: dst, nargs, args...
-            count_idx = 1
+        if op in (90, ) and len(args) >= 4:
+            # OMakeEnum: dst, ctor_idx, count, args...
+            # args[1] = ctor_idx (NOT a register), args[2] = count
+            count_idx = 2
             count = args[count_idx]
             for k in range(min(count, len(args) - count_idx - 1)):
                 srcs.append(args[count_idx + 1 + k])
-            return []
+            return srcs
         if op == 91 and len(args) >= 2:
             return [args[1]]
         if op == 92 and len(args) >= 2:

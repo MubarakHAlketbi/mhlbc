@@ -113,15 +113,15 @@ def build_report(hlb_path: str) -> dict:
 
     # ── Assertions (Task 3: diagnostics) ──
     assertions = []
-    # For Farever, func[-1] = func[45364] has known expected values
-    assertions.append(("func_last_nregs_eq_4722", f_last.nregs == 4722))
-    assertions.append(("func_last_nops_eq_109580", f_last.nops == 109580))
-    assertions.append(("func_last_body_offset_eq_12499044", f_last.body_offset == 12499044))
+    # For Farever (new post-update), func[-1] = func[45462] has known expected values
+    assertions.append(("func_last_nregs_eq_4728", f_last.nregs == 4728))
+    assertions.append(("func_last_nops_eq_109814", f_last.nops == 109814))
+    assertions.append(("func_last_body_offset_eq_12544044", f_last.body_offset == 12544044))
     assertions.append(("malformed_count_eq_0", r["malformed_count"] == 0))
     assertions.append(("unknown_opcodes_eq_0", not unknown_opcodes))
-    assertions.append(("parsed_constants_eq_22124", len(p.constants) == p.nconstants == 22124))
-    assertions.append(("nfunctions_eq_45365", p.nfunctions == 45365))
-    assertions.append(("parsed_function_count_eq_45365", len(fns) == 45365))
+    assertions.append(("parsed_constants_eq_22211", len(p.constants) == p.nconstants == 22211))
+    assertions.append(("nfunctions_eq_45463", p.nfunctions == 45463))
+    assertions.append(("parsed_function_count_eq_45463", len(fns) == 45463))
     assertions.append(("decoded_eq_sum_nops", total_decoded == total_all_nops))
     r["assertions"] = assertions
 

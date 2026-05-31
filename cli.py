@@ -104,6 +104,12 @@ def _parse_and_load(filepath: str, logger = None) -> HLParser:
     return parser
 
 
+def _check_warnings_as_errors(parser: HLParser, args) -> None:
+    """Exit with EX_PARSE_ERR if --warnings-as-errors is set and warnings exist."""
+    if getattr(args, "warnings_as_errors", False) and parser.parse_warnings:
+        sys.exit(EX_PARSE_ERR)
+
+
 def _output_as_json(data: dict | list, out = sys.stdout):
     """Write data as JSON to out."""
     json.dump(data, out, indent=2, default=str)
@@ -127,6 +133,7 @@ def _output_as_csv(rows: list[dict], fieldnames: list[str] | None = None,
 
 def cmd_header(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     ver = get_parser_version()
     data = {
         "parser_version": ver,
@@ -181,6 +188,7 @@ def cmd_header(args):
 
 def cmd_pools(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     data = {
         "ints": {
             "count": len(parser.ints),
@@ -284,6 +292,7 @@ def _output_pool_csv(parser, args):
 
 def cmd_types(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     types_list = []
     for i, t in enumerate(parser.types):
         kind = t.kind
@@ -330,6 +339,7 @@ def cmd_types(args):
 
 def cmd_globals(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     globals_list = []
     for i, type_idx in enumerate(parser.globals):
         type_name = KIND_NAMES.get(type_idx, str(type_idx))
@@ -356,6 +366,7 @@ def cmd_globals(args):
 
 def cmd_natives(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     natives_list = []
     for i, n in enumerate(parser.natives):
         lib_name = _resolve_string(parser, n.lib)
@@ -427,6 +438,7 @@ def _resolve_parent_type_name(parser: HLParser, fn: FunctionDef) -> str:
 
 def cmd_functions(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     funcs_list = []
     for i, f in enumerate(parser.functions):
         entry = {
@@ -502,6 +514,7 @@ def cmd_functions(args):
 
 def cmd_disasm(args):
     parser = _parse_and_load(args.file, _make_logger(args))
+    _check_warnings_as_errors(parser, args)
     disasm = Disassembler(parser)
     
     func_indices = args.function if args.function else range(len(parser.functions))
@@ -666,8 +679,7 @@ def cmd_decompile(args):
                 print(f"  [WARN] {err}", file=sys.stderr)
 
     # Check for parse warnings
-    if parser.parse_warnings and args.warnings_as_errors:
-        sys.exit(EX_PARSE_ERR)
+    _check_warnings_as_errors(parser, args)
 
 
 # ── Logger Setup ──────────────────────────────────────────────────────────
@@ -675,19 +687,32 @@ def cmd_decompile(args):
 
 class _StdoutLogger:
     """A VerboseLogger-compatible logger that writes to stdout."""
-    def __init__(self):
+    def __init__(self, level: int = INFO):
         self.log_path = "<stdout>"
+        self._level = level
         print("=" * 60)
-        print("  HashLink Bytecode Decompiler — Verbose Log (stdout)")
+        print("  HashLink Bytecode Decompiler -- Verbose Log (stdout)")
         print("=" * 60)
 
     def log(self, tag: str, message: str, level: int = INFO):
         import datetime
+        if level < self._level:
+            return
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
         print(f"[{ts}] [{tag}] {message}")
 
+    def set_level(self, level: int):
+        self._level = level
+
+    def get_level(self) -> int:
+        return self._level
+
+    def flush(self):
+        import sys
+        sys.stdout.flush()
+
     def close(self):
-        pass
+        self.flush()
 
 
 def _make_logger(args):
@@ -714,7 +739,7 @@ def _make_logger(args):
         level = INFO
 
     if verbose_stdout:
-        return _StdoutLogger()
+        return _StdoutLogger(level=level)
 
     if log_path:
         return VerboseLogger(logs_dir=log_path, level=level)

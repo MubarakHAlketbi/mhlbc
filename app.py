@@ -1151,6 +1151,9 @@ class DecompilerApp(QMainWindow):
 
     def _on_decompile_success(self, parser: HLParser, files: dict):
         """Update the decompile tab with successfully decompiled output."""
+        # Guard: ignore stale results from cancelled workers
+        if parser is not self.parser:
+            return
         self._decompile_worker = None
         if not files:
             self._decompile_text.setPlainText("// No decompilable functions found.")
@@ -1171,6 +1174,9 @@ class DecompilerApp(QMainWindow):
 
     def _on_decompile_failure(self, error_message: str):
         """Show error in decompile tab on failure."""
+        # Guard: don't overwrite UI if a newer worker has started
+        if hasattr(self, '_decompile_worker') and self._decompile_worker and self._decompile_worker.isRunning():
+            return
         self._decompile_worker = None
         self._decompile_text.setPlainText(
             f"// Decompilation failed:\n// \n// {error_message}"
@@ -1202,15 +1208,26 @@ class DecompilerApp(QMainWindow):
         source_idx = self._cfg_func_proxy.mapToSource(proxy_idx)
         self._render_cfg(source_idx.row())
 
+    def _cfg_func_name(self, func_idx: int) -> str:
+        """Resolve function name for CFG display, consistent with FunctionsListModel."""
+        if not self.parser or func_idx >= len(self.parser.functions):
+            return f"func[{func_idx}]"
+        f = self.parser.functions[func_idx]
+        name = f.name
+        if name is None:
+            return f"func[{func_idx}]"
+        if isinstance(name, int) and self.parser.strings and 0 <= name < len(self.parser.strings):
+            return self.parser.strings[name]
+        return str(name)
+
     def _render_cfg(self, func_idx: int):
         if not self.parser or func_idx >= len(self.parser.functions):
             return
 
         func = self.parser.functions[func_idx]
 
-        # Resolve name
-        name = func.name
-        name = name or f"func[{func_idx}]"
+        # Resolve name consistently
+        name = self._cfg_func_name(func_idx)
 
         self._cfg_func_label.setText(
             f"[{func_idx}]  {name}"

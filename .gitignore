@@ -17,3 +17,4 @@ tools/
 plan.md.partial.tmp
 *.patch
 decompiler_quality_report/
+.hermes/

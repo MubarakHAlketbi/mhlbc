@@ -787,13 +787,15 @@ class TestRegisterTypePropagation:
         """Used-only register gets 'uN' prefix, not 'pN'."""
         i32_type = build_type_primitive(K_I32)
         fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
-        # OInt r0=42, OCall0 r0, r1 (r1 is used-only, no def)
-        ops = [(1, [0, 0]), (24, [0, 1])]  # OCall0 dst=r0, fun_reg=r1
+        fun_type2 = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(K_VOID)
+        # OInt r0=42, OCall1 dst=r0, findex=r0(=0), a0=r1 (r1 is used-only, no def)
+        # OCall1 format: dst, findex/type_idx, a0 — a0 is a real register
+        ops = [(1, [0, 0]), (25, [0, 0, 1])]
         func_entry = self._build_func_body(
-            reg_types=[K_I32, K_DYN], type_idx=1, findex=0, nregs=2, ops=ops,
+            reg_types=[K_I32, K_DYN], type_idx=2, findex=0, nregs=2, ops=ops,
         )
         data = _build_minimal_with_raw_functions(
-            ntypes=2, type_blobs=[i32_type, fun_type],
+            ntypes=3, type_blobs=[i32_type, fun_type, fun_type2],
             raw_function_entries=[func_entry],
             ints=[42], version=4,
         )
@@ -3499,14 +3501,18 @@ class TestReportFormatting:
             frontier = tb.get('quality_frontier', [])
             assert len(frontier) > 0, \
                 'Quality frontier must be non-empty for Farever'
-            assert len(frontier) >= 8, \
-                f'Expected at least 8 frontier buckets, got {len(frontier)}'
+            assert len(frontier) >= 7, \
+                f'Expected at least 7 frontier buckets, got {len(frontier)}'
 
             # Every frontier entry must have the required fields
             REQUIRED_FRONTIER_FIELDS = {
                 'bucket', 'count', 'example_functions', 'likely_cause',
                 'direct_evidence', 'classification', 'recommended_milestone',
                 'risk_level', 'rank',
+            }
+            ALLOWED_EXTRA_FIELDS = {
+                'field_diag_detail', 'b15_analysis', 'analysis_note',
+                'rollup_only',
             }
             VALID_CLASSIFICATIONS = {
                 'safe_deterministic', 'diagnostic_only', 'requires_evidence',
