@@ -841,8 +841,8 @@ Examples:
                               help="Function index to decompile (default: all)")
     sp_decompile.add_argument("--output-dir", type=str, default=None,
                               help="Output directory for per-class .hx files")
-    sp_decompile.add_argument("--comments", action="store_true", default=True,
-                              help="Include debug comments in output")
+    sp_decompile.add_argument("--comments", action=argparse.BooleanOptionalAction, default=True,
+                              help="Include debug comments in output (use --no-comments to disable)")
     sp_decompile.set_defaults(func=cmd_decompile)
 
     args = ap.parse_args()

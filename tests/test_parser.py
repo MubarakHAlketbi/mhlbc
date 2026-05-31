@@ -1424,3 +1424,147 @@ class TestConstructorDetection:
         # All remaining should lack OGetThis/OSetThis (constructor-detection guard)
         assert remaining <= 5, \
             f"Expected <= 5 orphan K_FUNs with Obj args but no this-field ops, got {remaining}"
+
+
+class TestB24Hardening:
+    """Regression tests for B24 robustness fixes — ParseValidator, negative header/size bounds."""
+
+    def test_parsevalidator_runs_on_no_constants(self):
+        """File with nconstants=0 (v4) must still run ParseValidator.
+        Regression: ParseValidator was inside the 'if nconstants > 0' block
+        in the file-path branch of execute()."""
+        data = build_minimal_bytecode(
+            version=4,
+            types=[build_type_primitive(K_I32)],
+            globals_=[999],  # OOB — triggers ParseValidator warning
+            entrypoint=0,
+            constants=[],    # explicit empty => nconstants=0
+        )
+        p = HLParser("/dev/null")
+        p.execute(stream=stream_from_bytes(data))
+        # ParseValidator._check_globals_bounds warns on global[0].type=999 OOB
+        assert any(
+            "VALIDATE" in w.get("tag", "") and "global[0]" in w.get("message", "")
+            for w in p.parse_warnings
+        ), "Expected ParseValidator global OOB warning"
+
+    def test_negative_nints_raises_error(self):
+        """Negative nints header count must raise HLParserError."""
+        # Build header with nints=-1 manually
+        header = b"HLB" + struct.pack("<B", 4)  # v4
+        header += encode_varint(0)   # flags
+        header += encode_varint(-1)  # nints = -1  ← triggers bounds check
+        # Remaining header fields (values don't matter — we expect early error)
+        header += encode_varint(0)   # nfloats
+        header += encode_varint(0)   # nstrings
+        header += encode_varint(0)   # ntypes
+        header += encode_varint(0)   # nglobals
+        header += encode_varint(0)   # nnatives
+        header += encode_varint(0)   # nfunctions
+        header += encode_varint(0)   # nconstants
+        header += encode_varint(0)   # entrypoint
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative nints"):
+            p.parse_header(stream_from_bytes(header))
+
+    def test_negative_nstrings_raises_error(self):
+        """Negative nstrings header count must raise HLParserError."""
+        header = _build_header_raw(nstrings=-5)
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative nstrings"):
+            p.parse_header(stream_from_bytes(header))
+
+    def test_negative_ntypes_raises_error(self):
+        """Negative ntypes header count must raise HLParserError."""
+        header = _build_header_raw(ntypes=-3)
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative ntypes"):
+            p.parse_header(stream_from_bytes(header))
+
+    def test_negative_nfunctions_raises_error(self):
+        """Negative nfunctions header count must raise HLParserError."""
+        header = _build_header_raw(nfunctions=-1)
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative nfunctions"):
+            p.parse_header(stream_from_bytes(header))
+
+    def test_negative_strings_size_raises_error(self):
+        """Negative strings_size in string pool must raise HLParserError before reading payload.
+        Regression: strings_size was read as signed int32 without validation."""
+        # Build valid v4 header + minimal pools to reach strings pool
+        data = _build_header_raw(nstrings=1)
+        # Ints pool (empty)
+        data += b""
+        # Floats pool (empty)
+        data += b""
+        # String pool with negative size
+        data += struct.pack("<i", -100)  # strings_size = -100
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative string|negative"):
+            p.execute(stream=stream_from_bytes(data))
+
+    def test_negative_bytes_size_raises_error(self):
+        """Negative bytes_size in v5 bytes pool must raise HLParserError before reading payload."""
+        data = b"HLB" + struct.pack("<B", 5)   # v5
+        data += encode_varint(0)   # flags
+        data += encode_varint(0)   # nints
+        data += encode_varint(0)   # nfloats
+        data += encode_varint(1)   # nstrings=1
+        data += encode_varint(1)   # nbytes=1
+        data += encode_varint(0)   # ntypes
+        data += encode_varint(0)   # nglobals
+        data += encode_varint(0)   # nnatives
+        data += encode_varint(0)   # nfunctions
+        data += encode_varint(0)   # nconstants (v4+)
+        data += encode_varint(0)   # entrypoint
+        # Ints pool (empty)
+        # Floats pool (empty)
+        # Strings pool with nstrings=1
+        data += struct.pack("<i", 2)    # strings_size = 2 ("a\x00")
+        data += b"a\x00"                # string data: "a" + null
+        data += encode_varint(1)        # string lengths (UINDEX)
+        # Bytes pool with negative size
+        data += struct.pack("<i", -200)  # bytes_size = -200
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="Negative bytes|negative"):
+            p.execute(stream=stream_from_bytes(data))
+
+    def test_strings_size_exceeds_file_size_raises_error(self):
+        """strings_size larger than file must fail immediately."""
+        data = b"HLB" + struct.pack("<B", 4)
+        data += encode_varint(0)   # flags
+        data += encode_varint(0)   # nints
+        data += encode_varint(0)   # nfloats
+        data += encode_varint(1)   # nstrings=1
+        data += encode_varint(3)   # ntypes
+        data += encode_varint(0)   # nglobals
+        data += encode_varint(0)   # nnatives
+        data += encode_varint(0)   # nfunctions
+        data += encode_varint(0)   # nconstants
+        data += encode_varint(0)   # entrypoint
+        # Ints pool (empty)
+        # Floats pool (empty)
+        # Strings pool with impossible size
+        data += struct.pack("<i", 9_999_999)  # strings_size huge
+        p = HLParser("/dev/null")
+        with pytest.raises(HLParserError, match="exceeds file size|exceeds"):
+            p.execute(stream=stream_from_bytes(data))
+
+
+def _build_header_raw(
+    nints=0, nfloats=0, nstrings=0, ntypes=0, nglobals=0,
+    nnatives=0, nfunctions=0, nconstants=0, entrypoint=0,
+) -> bytes:
+    """Build a v4 header with specific count values for negative-value testing."""
+    data = b"HLB" + struct.pack("<B", 4)  # v4
+    data += encode_varint(0)               # flags
+    data += encode_varint(nints)
+    data += encode_varint(nfloats)
+    data += encode_varint(nstrings)
+    data += encode_varint(ntypes)
+    data += encode_varint(nglobals)
+    data += encode_varint(nnatives)
+    data += encode_varint(nfunctions)
+    data += encode_varint(nconstants)
+    data += encode_varint(entrypoint)
+    return data

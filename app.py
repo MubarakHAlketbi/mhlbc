@@ -369,7 +369,11 @@ class TypesListModel(QAbstractListModel):
 
 
 class GlobalsListModel(QAbstractListModel):
-    """Virtualized model for the globals pool."""
+    """Virtualized model for the globals pool.
+
+    Each global entry is a type index. Resolves through parser.types to
+    show the kind name and object/struct name, mirroring CLI logic.
+    """
 
     def __init__(self, parser=None):
         super().__init__()
@@ -384,8 +388,19 @@ class GlobalsListModel(QAbstractListModel):
             return None
         type_idx = self._data[index.row()]
         if role == Qt.ItemDataRole.DisplayRole:
-            type_name = KIND_NAMES.get(type_idx, str(type_idx))
-            return f"[{index.row()}]  type={type_idx}  ({type_name})"
+            kind_name = str(type_idx)
+            type_info = ""
+            if self._parser and 0 <= type_idx < len(self._parser.types):
+                t = self._parser.types[type_idx]
+                kind_name = KIND_NAMES.get(t.kind, f"kind_{t.kind}")
+                # Resolve object/struct/enum/abstract names through string pool
+                name_idx = getattr(t, 'name', None)
+                if name_idx is not None and isinstance(name_idx, int):
+                    if 0 <= name_idx < len(self._parser.strings):
+                        type_info = f" {self._parser.strings[name_idx]}"
+            elif self._parser:
+                kind_name = f"OOB:{type_idx}"
+            return f"[{index.row()}]  type={type_idx}  ({kind_name}){type_info}"
         if role == Qt.ItemDataRole.ForegroundRole:
             return _QC["text"]
         return None
@@ -1136,9 +1151,13 @@ class DecompilerApp(QMainWindow):
         """Start decompilation in a background worker thread."""
         if not self.parser:
             return
-        # Cancel existing decompile worker if still running
+        # Cancel existing decompile worker safely (cooperative cancellation)
+        # QThread.quit() is only for threads with event loops; HLDecompileWorker
+        # has a plain run() method so we use cancel() + wait() instead.
         if hasattr(self, '_decompile_worker') and self._decompile_worker:
-            self._decompile_worker.quit()
+            old_worker = self._decompile_worker
+            old_worker.cancel()
+            old_worker.wait(500)  # Give it 500ms to finish cleanly
             self._decompile_worker = None
         self._decompile_worker = HLDecompileWorker(self.parser, logger=None)
         self._decompile_worker.progress.connect(self._on_decompile_progress)

@@ -188,22 +188,40 @@ class HLParser:
         self._log("HEADER", f"flags={self.flags} has_debug={self.has_debug}", level=INFO)
         
         self.nints = self.read_varint(stream, context="nints")
+        if self.nints < 0:
+            raise HLParserError(f"Negative nints header count: {self.nints}")
         self.nfloats = self.read_varint(stream, context="nfloats")
+        if self.nfloats < 0:
+            raise HLParserError(f"Negative nfloats header count: {self.nfloats}")
         self.nstrings = self.read_varint(stream, context="nstrings")
+        if self.nstrings < 0:
+            raise HLParserError(f"Negative nstrings header count: {self.nstrings}")
         self._log("HEADER", f"nints={self.nints} nfloats={self.nfloats} nstrings={self.nstrings}", level=INFO)
         
         if self.version >= 5:
             self.nbytes = self.read_varint(stream, context="nbytes")
+            if self.nbytes < 0:
+                raise HLParserError(f"Negative nbytes header count: {self.nbytes}")
             self._log("HEADER", f"nbytes={self.nbytes}", level=INFO)
             
         self.ntypes = self.read_varint(stream, context="ntypes")
+        if self.ntypes < 0:
+            raise HLParserError(f"Negative ntypes header count: {self.ntypes}")
         self.nglobals = self.read_varint(stream, context="nglobals")
+        if self.nglobals < 0:
+            raise HLParserError(f"Negative nglobals header count: {self.nglobals}")
         self.nnatives = self.read_varint(stream, context="nnatives")
+        if self.nnatives < 0:
+            raise HLParserError(f"Negative nnatives header count: {self.nnatives}")
         self.nfunctions = self.read_varint(stream, context="nfunctions")
+        if self.nfunctions < 0:
+            raise HLParserError(f"Negative nfunctions header count: {self.nfunctions}")
         self._log("HEADER", f"ntypes={self.ntypes} nglobals={self.nglobals} nnatives={self.nnatives} nfunctions={self.nfunctions}", level=INFO)
         
         if self.version >= 4:
             self.nconstants = self.read_varint(stream, context="nconstants")
+            if self.nconstants < 0:
+                raise HLParserError(f"Negative nconstants header count: {self.nconstants}")
             self._log("HEADER", f"nconstants={self.nconstants}", level=INFO)
             
         self.entrypoint = self.read_varint(stream, context="entrypoint")
@@ -243,6 +261,11 @@ class HLParser:
         if len(raw_size_data) < 4:
             raise HLParserError("Failed to read string pool size.")
         strings_size = struct.unpack("<i", raw_size_data)[0]
+        if strings_size < 0:
+            raise HLParserError(f"Negative string pool size: {strings_size}")
+        # Sanity: strings_size > _file_size implies corrupt or impossible
+        if self._file_size > 0 and strings_size > self._file_size:
+            raise HLParserError(f"String pool size {strings_size} exceeds file size {self._file_size}")
         self._log("POOL", f"String pool size header: {strings_size} bytes", level=INFO)
         
         strings_bytes = stream.read(strings_size)
@@ -276,6 +299,10 @@ class HLParser:
             if len(raw_bytes_size_data) < 4:
                 raise HLParserError("Failed to read bytes pool size.")
             bytes_size = struct.unpack("<i", raw_bytes_size_data)[0]
+            if bytes_size < 0:
+                raise HLParserError(f"Negative bytes pool size: {bytes_size}")
+            if self._file_size > 0 and bytes_size > self._file_size:
+                raise HLParserError(f"Bytes pool size {bytes_size} exceeds file size {self._file_size}")
             self._log("POOL", f"Bytes pool size header: {bytes_size} bytes, nbytes={self.nbytes}", level=INFO)
             
             self.bytes_data = stream.read(bytes_size)
@@ -1455,11 +1482,12 @@ class HLParser:
             return
         with open(self.filepath, "rb") as f:
             self._file_size = os.path.getsize(self.filepath) if os.path.exists(self.filepath) else 0
-            # Use mmap for files > 50MB to avoid loading entire file into memory
+            # Use mmap directly for files > 50MB to avoid loading entire file into memory;
+            # mmap supports the buffer protocol and can be passed directly as a readable stream.
             if self._file_size > 50_000_000:
                 mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
                 self._raw_data = mm
-                buf = io.BytesIO(mm)
+                buf = mm  # Use mmap directly — it has read(), seek(), tell()
             else:
                 self._raw_data = f.read()
                 buf = io.BytesIO(self._raw_data)
@@ -1474,10 +1502,10 @@ class HLParser:
                     self.parse_constants(buf, progress_callback)
                 except HLParserError as e:
                     self._warn("CONST", f"Constants parsing failed (function pool may be incomplete): {e}")
-                # Post-parse validation
-                val = ParseValidator(self)
-                val_warnings = val.validate()
-                for w in val_warnings:
-                    self._warn(w["tag"], w["message"])
+            # Post-parse validation
+            val = ParseValidator(self)
+            val_warnings = val.validate()
+            for w in val_warnings:
+                self._warn(w["tag"], w["message"])
             if progress_callback:
                 progress_callback("Parsing completed.", 100)

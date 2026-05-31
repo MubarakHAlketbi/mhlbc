@@ -35,6 +35,10 @@ class HLParseWorker(QThread):
 class HLDecompileWorker(QThread):
     """Decompile a parsed HLParser in a background thread.
 
+    Uses cooperative cancellation: call cancel() to request early exit.
+    Stale results from workers that completed after cancellation are
+    handled by signal guards in the UI.
+
     Signals:
         progress(str, int): status message + percent
         finished(HLParser, dict): parser + {filename → source_text}
@@ -48,21 +52,42 @@ class HLDecompileWorker(QThread):
         super().__init__()
         self.parser = parser
         self._logger = logger
+        self._cancel_requested = False
+
+    def cancel(self) -> None:
+        """Request cooperative cancellation. Worker checks this flag at
+        stage boundaries and exits early when set."""
+        self._cancel_requested = True
+
+    def _check_cancelled(self) -> bool:
+        """Return True if cancellation was requested. Subclasses or
+        callers that need to abort should check this periodically."""
+        return self._cancel_requested
 
     def run(self):
         try:
             from hl_disasm import Disassembler
             from hl_decompile import Decompiler, HaxeWriter
+            if self._check_cancelled():
+                return
             self.progress.emit("Building disassembler...", 10)
             disasm = Disassembler(self.parser)
+            if self._check_cancelled():
+                return
             self.progress.emit("Building decompiler...", 30)
             decompiler = Decompiler(self.parser, disasm, logger=self._logger)
+            if self._check_cancelled():
+                return
             self.progress.emit("Decompiling all functions...", 50)
             result = decompiler.decompile_all()
+            if self._check_cancelled():
+                return
             self.progress.emit("Writing output...", 80)
             writer = HaxeWriter(decompiler.type_resolver, self.parser,
                                 include_comments=True)
             files = writer.write_output(result)
+            if self._check_cancelled():
+                return
             self.progress.emit("Done", 100)
             self.finished.emit(self.parser, files)
         except Exception as e:

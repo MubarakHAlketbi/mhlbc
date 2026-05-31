@@ -1,14 +1,56 @@
-# Session Tracking
-
-## Session 41 — July 3, 2026 (ACTIVE) — B23 Evidence Retention
-- Start: New session initialized on Discord (OmniDecomp / Session 41).
-- Model: deepseek/deepseek-v4-flash via OpenRouter.
-- Version: g6.0-41-g8aacbab (clean tree).
-- Project state: 623 passed, 4 skipped.
-- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
-- Track B: 200 sampled, 0 errors, 5,120 output files.
-- Previous session: Session 40 closed B20-B23.
-- **B23 Evidence Retention: Per-case detail table added to MEMORY.md appendix. Validation confirms 30/30 cases match B23 closure. No decompiler or report behavior changed.**
+|     1|# Session Tracking
+     2|
+     3|## Session 42 — July 4, 2026 (CLOSED) — B24 Artifact/Path Reconciliation + Third-Party Robustness
+     4|- Start: New session initialized on Discord (OmniDecomp / Session 42).
+     5|- Model: deepseek/deepseek-v4-flash via OpenRouter.
+|     6|- Version: g6.0-42-g5b7a0fe → g6.0-42-g5b7a0fe (modified, +425/-6 in 7 files).
+|     7|- Project state: 632 passed, 4 skipped (+9 new B24 tests, 0 regressions).
+     8|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+     9|- Track B: 200 sampled, 0 errors, 5,120 output files.
+    10|- Previous session: Session 41 closed B23 evidence retention.
+    11|- **B24: Artifact/path reconciliation + 6 third-party robustness fixes — COMPLETE**
+    12|
+    13|### B24 Changes
+    14|
+    15|**B23 Evidence Path Reconciliation:**
+    16|1. `scripts/extract_b23_null_detail.py`: JSON output path fixed from `<repo_root>/extract_b23_null_detail.json` to `decompiler_quality_report/b23_null_detail.json` (now matches MEMORY.md claim). `os.makedirs` added for safety. Old stale file removed.
+    17|2. B23 extraction confirmed deterministic: seed=42, sample=200, 30/30 cases match closure subcategory breakdown.
+    18|
+    19|**Parser Robustness (3 fixes):**
+    20|1. `hl_parser/_parser.py` `execute()`: ParseValidator moved outside `if self.nconstants > 0:` block in the file-path branch, matching the stream branch. Post-parse validation now runs regardless of constants presence.
+    21|2. `hl_parser/_parser.py` `parse_header()`: Added negative-value bounds checks for all 10 header count fields (nints, nfloats, nstrings, nbytes, ntypes, nglobals, nnatives, nfunctions, nconstants, entrypoint). Added negative/impossible-size checks for strings_size and bytes_size in parse_pools().
+    22|3. `hl_parser/_parser.py` `execute()`: Fixed misleading mmap optimization — BytesIO(mm) copies the whole mapping, defeating mmap. Changed to pass mmap directly as the stream buffer (mmap supports read/seek/tell).
+    23|
+    24|**GUI Robustness (2 fixes):**
+    25|1. `hl_worker.py` + `app.py`: Replaced ineffective `QThread.quit()` (no-op for threads without event loops) with cooperative cancellation. Added `cancel()` / `_check_cancelled()` to HLDecompileWorker with checks at each pipeline stage boundary. `app.py` calls `cancel()` + `wait(500)` instead of `quit()`.
+    26|2. `app.py` `GlobalsListModel`: Fixed type resolution — was using `type_idx` directly as a `KIND_NAMES` key (kind ID lookup on a type index). Now resolves through `parser.types[type_idx].kind` for the kind name and resolves object/struct/enum/abstract names via the string pool, mirroring CLI logic.
+    27|
+    28|**CLI Robustness (1 fix):**
+    29|1. `cli.py` `decompile --comments`: Changed from `action="store_true", default=True` (impossible to disable) to `argparse.BooleanOptionalAction` with `--no-comments` to disable. Help text updated.
+|    30|
+|    31|**B24 Regression Tests (9 new, all PASS):**
+|    32|1. `TestB24Hardening::test_parsevalidator_runs_on_no_constants` — v4 `nconstants=0` triggers ParseValidator OOB warning.
+|    33|2. `TestB24Hardening::test_negative_nints_raises_error` — `nints=-1` → `HLParserError`.
+|    34|3. `TestB24Hardening::test_negative_nstrings_raises_error` — `nstrings=-5` → `HLParserError`.
+|    35|4. `TestB24Hardening::test_negative_ntypes_raises_error` — `ntypes=-3` → `HLParserError`.
+|    36|5. `TestB24Hardening::test_negative_nfunctions_raises_error` — `nfunctions=-1` → `HLParserError`.
+|    37|6. `TestB24Hardening::test_negative_strings_size_raises_error` — `strings_size=-100` → `HLParserError`.
+|    38|7. `TestB24Hardening::test_negative_bytes_size_raises_error` — v5 `bytes_size=-200` → `HLParserError`.
+|    39|8. `TestB24Hardening::test_strings_size_exceeds_file_size_raises_error` — oversized strings_size → `HLParserError`.
+|    40|9. `test_cli.py::test_decompile_no_comments_accepted` — `--no-comments` suppresses `// L` debug comments.
+|    41|
+|    42|**GlobalsListModel:** No PyQt6 GUI test infrastructure exists (no `test_app*.py`). Manually verified: `data()` now
+|    43|resolves `parser.types[type_idx].kind` + string pool names instead of treating `type_idx` as `KIND_NAMES` key.
+|    44|
+|    45|## Session 41 — July 3, 2026 (B23 Evidence Retention)
+|    46|- Start: New session initialized on Discord (OmniDecomp / Session 41).
+|    47|- Model: deepseek/deepseek-v4-flash via OpenRouter.
+|    48|- Version: g6.0-41-g8aacbab (clean tree).
+|    49|- Project state: 623 passed, 4 skipped.
+|    50|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+|    51|- Track B: 200 sampled, 0 errors, 5,120 output files.
+|    52|- Previous session: Session 40 closed B20-B23.
+|    53|- **B23 Evidence Retention: Per-case detail table added to MEMORY.md appendix. Validation confirms 30/30 cases match B23 closure. No decompiler or report behavior changed.**
 
 ## Session 40 — June 10, 2026 (B20 + B21 + B22 + B23 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 40).

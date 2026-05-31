@@ -286,7 +286,7 @@ def main():
 
     # ── Output JSON for reference ──
     print()
-    print("See JSON dump for machine-readable detail: extract_b23_null_detail.json")
+    print("See JSON dump for machine-readable detail: decompiler_quality_report/b23_null_detail.json")
 
     # Write JSON
     import json
@@ -298,7 +298,9 @@ def main():
         "subcategory_breakdown": dict(subcat_counts),
         "cases": null_cases,
     }
-    out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "extract_b23_null_detail.json")
+    out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "decompiler_quality_report")
+    os.makedirs(out_dir, exist_ok=True)
+    out_path = os.path.join(out_dir, "b23_null_detail.json")
     with open(out_path, "w") as f:
         json.dump(output, f, indent=2, default=str)
     print(f"JSON written to {out_path}")

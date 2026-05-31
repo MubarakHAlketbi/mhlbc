@@ -104,3 +104,17 @@ class TestCLIExitCodes:
             assert result_err.returncode == 1, f"Expected 1, got {result_err.returncode}"
         finally:
             os.unlink(tmppath)
+
+    def test_decompile_no_comments_accepted(self):
+        """--no-comments must be accepted, produce valid output, and suppress L# comments."""
+        path = _find_fixture("hello.hl")
+        # With --no-comments
+        result = _run_cli("decompile", path, "--function", "0", "--no-comments")
+        assert result.returncode == 0, f"Expected 0, got {result.returncode}"
+        # Output should not contain "// L" debug line comments
+        if result.stdout:
+            assert "// L" not in result.stdout, \
+                "Expected no debug line comments with --no-comments"
+        # With explicit --comments (should still work as before)
+        result_yes = _run_cli("decompile", path, "--function", "0", "--comments")
+        assert result_yes.returncode == 0, f"Expected 0, got {result_yes.returncode}"
