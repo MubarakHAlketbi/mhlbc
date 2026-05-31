@@ -1,5 +1,15 @@
 # Session Tracking
 
+## Session 41 — July 3, 2026 (ACTIVE) — B23 Evidence Retention
+- Start: New session initialized on Discord (OmniDecomp / Session 41).
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-41-g8aacbab (clean tree).
+- Project state: 623 passed, 4 skipped.
+- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+- Track B: 200 sampled, 0 errors, 5,120 output files.
+- Previous session: Session 40 closed B20-B23.
+- **B23 Evidence Retention: Per-case detail table added to MEMORY.md appendix. Validation confirms 30/30 cases match B23 closure. No decompiler or report behavior changed.**
+
 ## Session 40 — June 10, 2026 (B20 + B21 + B22 + B23 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 40).
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
@@ -188,6 +198,51 @@ Null-without-target-type: **resolved** (all 30 expected/non-actionable, removed 
 
 ### B23 Report Rewrite (Session 40 final turn)
 Added dedicated B23 detail section to `decompiler_quality_report.py` (~+134 lines), following B18/B19 pattern — subcategory table with per-row assessment, per-subcategory explanation paragraphs, unknown-cases detail (apply[22059] v14 + hide[16049] t4), classification fix description, and closure statement. Report regenerated: section appears at lines 363-397 in `report.md`. Removed unused variable/dead code. Files: `scripts/decompiler_quality_report.py` (+256/-94 total, including B23 inline section + B23 frontier removal).
+
+### B23 Evidence Appendix (Session 41)
+Per-case null-without-target-type detail table for durable evidence retention. Covers all 30 cases from Track B (sample=200). Regeneratable via `scripts/extract_b23_null_detail.py workspace/Farever/hlboot.dat`. JSON dump: `decompiler_quality_report/b23_null_detail.json`.
+
+**Validation:** Subcategory counts match B23 closure exactly — 15 virtual_unsupported, 8 fun_or_method_type, 4 declared_dynamic, 2 unknown, 1 phi_or_branch_merge. Total: 30/30.
+
+| # | Func Idx | Func Name | FIndex | Instr | Dest Var | Type Kind | Subcategory | Reason |
+|---|----------|-----------|--------|-------|----------|-----------|-------------|--------|
+| 1 | 3796 | charAt | 20131 | 23:ONull | v1 | enum | null_target_phi_or_branch_merge | Branch/phi merge |
+| 2 | 4679 | delete | 18253 | 14:OThrow | v8 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 3 | 5613 | mainLoop | 22334 | 24:OMov | v4 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 4 | 5613 | mainLoop | 22334 | 34:OMov | v8 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 5 | 5697 | getAbstractCast | 22496 | 39:OThrow | v21 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 6 | 5697 | getAbstractCast | 22496 | 71:OThrow | v26 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 7 | 7507 | toLowerCase | 24008 | 43:OMakeMethod | v14 | fun | null_target_fun_or_method_type | Function type, no target |
+| 8 | 7507 | toLowerCase | 24008 | 48:OMakeMethod | v16 | fun | null_target_fun_or_method_type | Function type, no target |
+| 9 | 7507 | toLowerCase | 24008 | 5:OMakeMethod | v4 | fun | null_target_fun_or_method_type | Function type, no target |
+| 10 | 9144 | toLowerCase | 19157 | 5:OMakeMethod | v4 | fun | null_target_fun_or_method_type | Function type, no target |
+| 11 | 9150 | toLowerCase | 25522 | 5:OMakeMethod | v4 | fun | null_target_fun_or_method_type | Function type, no target |
+| 12 | 12601 | toLowerCase | 19091 | 5:OMakeMethod | v4 | fun | null_target_fun_or_method_type | Function type, no target |
+| 13 | 13035 | toLowerCase | 27974 | 5:OMakeMethod | v4 | fun | null_target_fun_or_method_type | Function type, no target |
+| 14 | 13730 | init | 27819 | 23:ONull | t15 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 15 | 13730 | init | 27819 | 8:ONull | t7 | dyn | null_target_declared_dynamic | Declared Dynamic type |
+| 16 | 15256 | toLowerCase | 11631 | 6:ONull | t3 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 17 | 15692 | indexNext | 30562 | 13:OThrow | v5 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 18 | 16043 | drawLine | 26958 | 280:OThrow | v76 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 19 | 16049 | hide | 29375 | 5:ONull | t4 | enum | null_target_unknown | K_ENUM field idx arg to OSetThis, no tracked consumer |
+| 20 | 17261 | playLevelUp | 4646 | 2:ONull | t4 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 21 | 17261 | playLevelUp | 4646 | 5:ONull | t7 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 22 | 18024 | generateStartingGear | 7268 | 149:OThrow | v12 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 23 | 18024 | generateStartingGear | 7268 | 202:OThrow | v30 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 24 | 22059 | apply | 33055 | 190:ONull | v14 | enum | null_target_unknown | Optional arg to K_ENUM h3d.DepthBinding, valid optional null |
+| 25 | 24504 | mergeTypedefs | 33906 | 89:OThrow | v12 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+| 26 | 29735 | findChar | 38031 | 234:ONull | v12 | dyn | null_target_declared_dynamic | Declared Dynamic type |
+| 27 | 34757 | edit2 | 41111 | 13:OMakeMethod | v9 | fun | null_target_fun_or_method_type | Function type, no target |
+| 28 | 38618 | getParamValue | 9702 | 0:ONull | t2 | dyn | null_target_declared_dynamic | Declared Dynamic type |
+| 29 | 39453 | saveMeta | 18506 | 0:ONull | t3 | dyn | null_target_declared_dynamic | Declared Dynamic type |
+| 30 | 44348 | updateCurrentAmbient | 8606 | 175:OThrow | v9 | virtual | null_target_virtual_unsupported | Virtual type unsupported |
+
+Key observations:
+- **15 virtual_unsupported**: All have K_VIRTUAL declared type (anonymous structs), no structural type to resolve.
+- **8 fun_or_method_type**: All are K_FUN/K_METHOD declared type (function refs), 7 are OMakeMethod/OMakeClosure (creates closure, target not yet bound).
+- **4 declared_dynamic**: K_DYN declared type (Dynamic), nothing more specific possible.
+- **2 unknown** (both expected): apply[22059] v14 = optional enum constructor arg to K_ENUM h3d.DepthBinding; hide[16049] t4 = OSetThis field index arg with no consumer tracking.
+- **1 phi_or_branch_merge**: charAt[3796] v1 = null flows through branch merge.
 
 ## Session 39 — June 8, 2026 (B18 + B19 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 39).
