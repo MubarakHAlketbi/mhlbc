@@ -1824,7 +1824,7 @@ class TestExprBuilder:
         assert stmt is None
 
     def test_ocall_method(self):
-        """OCallMethod r3, r1, 1, r2 → r3 = obj.method(r2)"""
+        """OCallMethod args=[3, 1, 1, 2] → dst=r3, method_index=1, receiver=r2, no extra args."""
         instr = Instruction(0, 30, "OCallMethod", [3, 1, 1, 2], 0, 4)
         reg_names = {1: "this", 2: "arg", 3: "ret"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1833,6 +1833,8 @@ class TestExprBuilder:
         assert stmt.op == "assign"
         assert isinstance(stmt.src, IRExpr)
         assert stmt.src.op == "method_call" or stmt.src.op == "call"
+        # B20: receiver should be args[3] (not args[1] = method_index)
+        assert str(stmt.src) == "arg.meth[1]()", f"Unexpected OCallMethod rendering: {stmt.src}"
 
     def test_bool_op(self):
         """OBool r1, 1 → r1 = true"""
@@ -3551,8 +3553,8 @@ class TestReportFormatting:
             frontier = tb.get('quality_frontier', [])
             assert len(frontier) > 0, \
                 'Quality frontier must be non-empty for Farever'
-            assert len(frontier) >= 7, \
-                f'Expected at least 7 frontier buckets, got {len(frontier)}'
+            assert len(frontier) >= 4, \
+                f'Expected at least 4 frontier buckets, got {len(frontier)}'
 
             # Every frontier entry must have the required fields
             REQUIRED_FRONTIER_FIELDS = {
@@ -3958,6 +3960,99 @@ class TestB19OCallRendering:
         uses2 = RegisterLiveness.compute_uses(instrs2, nregs=6)
         assert 3 in uses2 and 4 in uses2, "OMakeEnum source regs correct"
         assert 1 not in uses2 and 2 not in uses2, "OMakeEnum ctor_idx/count not registers"
+
+
+class TestB20OCallMethodRendering:
+    """B20: OCallMethod _build_method_call fix — args[1] is method_index, not receiver register."""
+
+    def test_ocall_method_renders_meth_bracket_not_raw_r(self):
+        """OCallMethod with method_index > nregs produces meth[idx], not r{idx} in output."""
+        from hl_decompile import ExprBuilder, Instruction
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, build_type_primitive, stream_from_bytes
+        from hl_parser import K_I32, K_FUN, K_VOID
+        import io
+
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        data = build_minimal_bytecode(
+            version=4,
+            types=[i32_type, fun_type],
+            functions=[(0, 0, [K_I32], [])],
+        )
+        p = HLParser("<test>")
+        p.execute(io.BytesIO(data))
+
+        # OCallMethod: dst=r0, method_index=125, nargs=1, receiver=r2
+        instr = Instruction(0, 30, "OCallMethod", [0, 125, 1, 2], 0, 4)
+        reg_names = {0: "v0", 2: "v2"}
+        builder = ExprBuilder(p, None, reg_names)
+        stmt = builder._instr_to_stmt(instr, None)
+        stmt_str = str(stmt)
+        # Must NOT contain r125 — method_index 125 should not appear as raw register
+        assert "r125" not in stmt_str, f"OCallMethod should not emit r125 for method_index: {stmt_str}"
+        # Must contain meth[125] as method name fallback
+        assert "meth[125]" in stmt_str, f"OCallMethod should use meth[125] fallback: {stmt_str}"
+        # The receiver should be r2/v2, not r125
+        assert "v2" in stmt_str or "r2" in stmt_str, f"Receiver should reference actual register: {stmt_str}"
+
+    def test_ocall_method_with_args(self):
+        """OCallMethod with method args emits receiver.meth[idx](args) correctly."""
+        from hl_decompile import ExprBuilder, Instruction
+        import io
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, build_type_primitive
+        from hl_parser import K_I32, K_FUN, K_VOID
+
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        data = build_minimal_bytecode(
+            version=4,
+            types=[i32_type, fun_type],
+            functions=[(0, 0, [K_I32], [])],
+        )
+        p = HLParser("<test>")
+        p.execute(io.BytesIO(data))
+
+        # OCallMethod: dst=r0, method_index=29, nargs=2, extra=[r3, r5] (receiver=r3, arg=r5)
+        instr = Instruction(0, 30, "OCallMethod", [0, 29, 2, 3, 5], 0, 5)
+        reg_names = {0: "dst", 3: "recv", 5: "arg1"}
+        builder = ExprBuilder(p, None, reg_names)
+        stmt = builder._instr_to_stmt(instr, None)
+        stmt_str = str(stmt)
+        assert "r29" not in stmt_str, f"method_index 29 should not appear as r29: {stmt_str}"
+        assert "meth[29]" in stmt_str, f"Should use meth[29]: {stmt_str}"
+        assert "recv" in stmt_str, f"Receiver should be register 3: {stmt_str}"
+        assert "arg1" in stmt_str, f"Method arg should be register 5: {stmt_str}"
+
+    def test_ocall_method_b19_callee_fallback_unchanged(self):
+        """B20 fix must not break B19 _build_call fix (OCall0-4 still uses fun[], not meth[])."""
+        from hl_decompile import ExprBuilder, Instruction
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, build_type_primitive
+        from hl_parser import K_I32, K_FUN, K_VOID
+        import io
+
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        data = build_minimal_bytecode(
+            version=4,
+            types=[i32_type, fun_type],
+            functions=[(0, 0, [K_I32], [])],
+        )
+        p = HLParser("<test>")
+        p.execute(io.BytesIO(data))
+
+        # OCall1 (op 25): dst=r0, callee_idx=0 (function index), arg=r1
+        instr = Instruction(0, 25, "OCall1", [0, 0, 1], 0, 3)
+        reg_names = {0: "v0", 1: "v1"}
+        builder = ExprBuilder(p, None, reg_names)
+        stmt = builder._instr_to_stmt(instr, None)
+        stmt_str = str(stmt)
+        # Must NOT contain r0( — should be fun[0]( not r0(
+        assert "r0(" not in stmt_str, f"OOB: OCall1 should emit fun[0], not r0: {stmt_str}"
+        assert "fun[0]" in stmt_str or not ("r" in stmt_str and "(" in stmt_str), \
+            f"OOB: fun[0] expected: {stmt_str}"
 
 
 class TestGiantSectionMarkers:

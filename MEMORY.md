@@ -1,5 +1,194 @@
 # Session Tracking
 
+## Session 40 — June 10, 2026 (B20 + B21 + B22 + B23 CLOSED)
+- Start: New session initialized on Discord (OmniDecomp / Session 40).
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-40-g0daad01 (clean tree) → g6.0-40-g0daad01 (modified, 295+/94- in 4 files).
+- Project state: 623 passed, 4 skipped (+3 B20 tests, 0 regressions).
+- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+- Track B: 200 sampled, 0 errors, 5,120 output files.
+- **B20: True Dead/Raw Register Fallback Audit and Closure — CLOSED**
+- **B21: Giant Init Single-Case Audit and Closure — CLOSED**
+- **B22: Track B Call-Return Unresolved Audit and Closure — CLOSED**
+- **B23: Track B Null-Without-Target-Type Audit and Closure — CLOSED**
+
+### B20: Root Cause Analysis
+All 7 remaining true dead/raw register fallback cases were OCallMethod (op 30) method_index treated as receiver register — same bug class as B17/B19.
+
+**Root cause:** `_build_method_call()` in `ExprBuilder` at line 1945 used `obj = self._reg_var(args[1])`, but `args[1]` for OCallMethod is the **method_index** (proto index), not a register. The actual receiver register is `args[3]` (extra[0]).
+
+**7 cases** (all OCallMethod with method_index > nregs):
+| File | Func | rN | Receiver | Root |
+|------|------|----|----------|------|
+| ent.Unit.hx | receiveHeal[17335] | r125 → meth[125] | r13 | method_index bug |
+| ent.Unit.hx | receiveHeal[17335] | r29 → meth[29] | r25 | method_index bug |
+| ent.Unit.hx | receiveHeal[17335] | r134 → meth[134] | r13 | method_index bug |
+| h3d.prim.ModelCache.hx | loadPrefab[5229] | r24 → meth[24] | r2 | method_index bug |
+| st.ShopBundle.hx | getName[41905] | r33 → meth[33] | r9 | method_index bug |
+| st.skill.Skill.hx | getCost[13934] | r70 → meth[70] | r3 | method_index bug |
+| ui.notify.SmallNotify.hx | setText[6973] | r27 → meth[27] | r2 | method_index bug |
+
+**Fix (`hl_decompile.py`):** In `_build_method_call()`, OCallMethod now correctly:
+- Reads `args[3]` as receiver register (extra[0])
+- Reads `args[4:]` as method argument registers (extra[1:])
+- Uses `meth[{method_index}]` as neutral fallback method name
+- Never routes method_index through `_reg_var()`
+
+The `_get_src_regs()` for OCallMethod was already fixed by B16 (line 559-567 excluded args[1] from source registers). The rendering counterpart (`_build_method_call`) was the missing half.
+
+### Impact (B20)
+- total_r10_plus: 7 → **0**
+- true_register_count: 7 → **0**
+- function_index_ref_count: 0 (B19 fix intact)
+- All receiver registers now refer to actual register indices (within nregs range)
+- Renderings like `r125.r13()` → `r13.meth[125]()` (receiver correct, method name truthful)
+
+### Tests (3 new, 1 updated, B20)
+- `TestB20OCallMethodRendering.test_ocall_method_renders_meth_bracket_not_raw_r`: method_index 125 not emitted as r125
+- `TestB20OCallMethodRendering.test_ocall_method_with_args`: args rendered correctly
+- `TestB20OCallMethodRendering.test_ocall_method_b19_callee_fallback_unchanged`: B19 fix preserved
+- `TestExprBuilder.test_ocall_method`: updated comment + rendering assertion
+
+### Validation (B20)
+- pytest: 623 passed, 4 skipped (+3 tests, 0 regressions)
+- Track A: 7/7, zero frontier locked (actionable_dynamic=0, null=0, call_return=0)
+- Track B: 200 sampled, 0 errors, 0 r10+ occurrences
+- ASCII: PASS
+- Farever parity: 9/9 PASS
+
+---
+
+### B21: Giant Init Single-Case Audit and Closure
+
+**Target:** Giant init function `func[46044]` named `init` — 109814 nops, 4728 regs.
+
+**Finding:** The Haxe compiler generates a single `__init__` function that initializes all module-level globals. This is standard Haxe behavior — every compiled HL program has one. Farever's init is large because the game has ~28K globals. The decompiler output is correct (all opcodes decoded, 0 errors) and B12 safeguards (GIANT FUNCTION header + section markers at 20K stmt intervals) are active.
+
+**Evidence:**
+- Compiler-generated: Yes — __init__ initialization of all module globals
+- Correctly decompiled: Yes — 109814 ops, 0 errors, all opcodes decoded
+- Already safeguarded: Yes — B12 giant_section_size markers active
+- Any possible decompiler fix? NO — function size is compiler-driven by ~28K Farever globals. No possible decompiler change can reduce instruction count
+- Farever-specific? NO — any large HL program will have a large init
+- Actionable? NO — this is expected compiler behavior
+
+**Changes:**
+- `scripts/decompiler_quality_report.py`: Removed Bucket 9 (giant init) from `analyze_farever_quality_frontier()`; added B21 row to "Previously Resolved Frontiers" table; updated frontier intro text
+- `tests/test_decompile.py`: Updated minimum frontier count from >=7 to >=6
+
+**Result:** Giant init moved from Active Independent Frontier to Previously Resolved Frontiers (B21). Documented as expected compiler behavior. Still monitored via Largest 20 Functions table.
+
+### Post-B21 Active Frontier (6 buckets)
+| # | Bucket | Count | Classification |
+|---|---|---|---|
+| 1 | Raw goto/label comments | 718 | diagnostic_only |
+| 2 | Dynamic type references (all categories) | 204 | diagnostic_only |
+| 3 | Unresolved field names | 149 | diagnostic_only |
+| 4 | Virtual type unsupported | 61 | speculative_blocked |
+| 5 | Null-without-target-type | 30 | diagnostic_only |
+| 6 | Call return unresolved | 17 | diagnostic_only |
+
+Giant init: **resolved** (safe_expected, non-actionable, removed from active frontier).
+
+### Validation (B21)
+- pytest: 623 passed, 4 skipped (no regressions, test updated for frontier count)
+- Track A: 7/7, zero frontier locked (actionable_dynamic=0, null=0, call_return=0)
+- Track B: 6 frontier entries (giant init removed), 0 errors, 0 r10+ occurrences, func_idx_ref=0
+- ASCII: PASS
+- Farever parity: 9/9 PASS
+
+---
+
+### B22: Track B Call-Return Unresolved Audit and Closure
+
+**Target:** 17 call_return_unresolved cases in Track B (sample=200).
+
+**Full classification:**
+
+| Count | Category | Assessment |
+|-------|----------|------------|
+| 11 | declared_void | Callee returns Void — expected |
+| 3 | declared_dynamic | Callee returns Dynamic — expected |
+| 1 | virtual_receiver | K_VIRTUAL receiver type — expected |
+| **2** | **unclassified → resolved_concrete** | **Classification bug fix (B22): had concrete resolved types (String, ArrayObj) but were marked default "unclassified". Now correctly "resolved_concrete".** |
+
+**Operand-kind bug fix in `_analyze_call_return()`:** When `is_resolvable=True` (concrete return type found), set `unresolved_category = CR_CAT_RESOLVED_CONCRETE` instead of leaving the default `CR_CAT_UNCLASSIFIED`. This prevents 2 successfully-resolved cases from being counted as "unclassified" unresolved.
+
+**Changes (5 files):**
+- `hl_decompile.py`: Added `CR_CAT_RESOLVED_CONCRETE` constant (+1 line); set it in `_analyze_call_return()` for resolvable cases (+4 lines)
+- `scripts/decompiler_quality_report.py`: Imported `CR_CAT_RESOLVED_CONCRETE` (+1 line); added to `_CR_EXPECTED_KEYS` (+1 line); removed Bucket 7 (call-return) from `analyze_farever_quality_frontier()` (-28 lines); added B22 row to Previously Resolved (+8 lines); updated header/intro (+3 lines)
+- `tests/test_decompile.py`: Updated minimum frontier count from >=6 to >=5 (-2 lines)
+
+**Result:** Call-return unresolved bucket removed from Active Independent Frontier. All 17 cases documented as expected/non-actionable in Previously Resolved Frontiers. 0 actionable call returns remain.
+
+### Post-B22 Active Frontier (5 buckets)
+| # | Bucket | Count | Classification |
+|---|---|---|---|
+| 1 | Raw goto/label comments | 718 | diagnostic_only |
+| 2 | Dynamic type references (all categories) | 204 | diagnostic_only |
+| 3 | Unresolved field names | 149 | diagnostic_only |
+| 4 | Virtual type unsupported | 61 | speculative_blocked |
+| 5 | Null-without-target-type | 30 | diagnostic_only |
+
+Call return unresolved: **resolved** (all 17 expected/non-actionable, removed from active frontier with B22).
+
+### Validation (B22)
+- pytest: 623 passed, 4 skipped (no regressions)
+- Track A: 7/7, zero frontier locked (actionable_dynamic=0, null=0, call_return=0)
+- Track B: 5 frontier entries (call-return removed), 0 errors, 0 r10+ occurrences, func_idx_ref=0
+- Call-return subcategories: 0 unclassified, 2 resolved_concrete (was 2 unclassified)
+- ASCII: PASS
+- Farever parity: 9/9 PASS
+
+---
+
+### B23: Track B Null-Without-Target-Type Audit and Closure
+
+**Target:** 30 null_without_target_type cases in Track B (sample=200).
+
+**Full classification:**
+
+| Count | Subcategory | Assessment |
+|-------|-------------|-----------|
+| 15 | null_target_virtual_unsupported | K_VIRTUAL → Dynamic — expected |
+| 8 | null_target_fun_or_method_type | K_FUN/K_METHOD → Dynamic — expected |
+| 4 | null_target_declared_dynamic | K_DYN — expected |
+| 2 | null_target_unknown | **Expected:** apply[22059] v14 = call argument (known K_ENUM h3d.DepthBinding); hide[16049] t4 = null register with no tracked consumer (K_ENUM world.terrain.CellFlag, field index arg to OSetThis) |
+| 1 | null_target_phi_or_branch_merge | Branch/phi merge — expected |
+
+**All 30 cases non-actionable.** 0 actionable null targets remain in Track B.
+
+**Classification fix** (`hl_decompile.py`): Added OSetThis (op 41) to `has_field_store` consumer check alongside OSetField (op 39). This is correct for future cases where OSetThis tracks source registers, though the current 2 unknown cases are not affected because `_get_src_regs_instr()` doesn't yet return registers for OSetThis (args[1] is a field index, not a register reference).
+
+**Changes (4 files):**
+- `hl_decompile.py`: Added OSetThis (op 41) to `has_field_store` consumer check in `_classify_null_single()` (+1 line)
+- `scripts/decompiler_quality_report.py`: Removed Bucket 6 (null-without-target) from `analyze_farever_quality_frontier()` (-24 lines); added B23 row to Previously Resolved (+8 lines); updated header/intro (+2 lines)
+- `tests/test_decompile.py`: Updated minimum frontier count from >=5 to >=4 (-2 lines)
+- `MEMORY.md`: B23 closure record
+
+**Result:** Null-without-target-type bucket removed from Active Independent Frontier. All 30 cases documented as expected/non-actionable in Previously Resolved Frontiers. 0 actionable null targets remain.
+
+### Post-B23 Active Frontier (4 buckets)
+| # | Bucket | Count | Classification |
+|---|---|---|---|
+| 1 | Raw goto/label comments | 718 | diagnostic_only |
+| 2 | Dynamic type references (all categories) | 204 | diagnostic_only |
+| 3 | Unresolved field names | 149 | diagnostic_only |
+| 4 | Virtual type unsupported | 61 | speculative_blocked |
+
+Null-without-target-type: **resolved** (all 30 expected/non-actionable, removed from active frontier with B23).
+
+### Validation (B23)
+- pytest: 623 passed, 4 skipped (no regressions)
+- Track A: 7/7, zero frontier locked (actionable_dynamic=0, null=0, call_return=0)
+- Track B: 4 frontier entries (null removed), 0 errors, 0 r10+, func_idx_ref=0, call-return still 17
+- Null-target subcategories: 0 actionable, 2 unknown (both expected — call arg + unused null)
+- ASCII: PASS
+- Farever parity: 9/9 PASS
+
+### B23 Report Rewrite (Session 40 final turn)
+Added dedicated B23 detail section to `decompiler_quality_report.py` (~+134 lines), following B18/B19 pattern — subcategory table with per-row assessment, per-subcategory explanation paragraphs, unknown-cases detail (apply[22059] v14 + hide[16049] t4), classification fix description, and closure statement. Report regenerated: section appears at lines 363-397 in `report.md`. Removed unused variable/dead code. Files: `scripts/decompiler_quality_report.py` (+256/-94 total, including B23 inline section + B23 frontier removal).
+
 ## Session 39 — June 8, 2026 (B18 + B19 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 39).
 - Model: deepseek/deepseek-v4-pro via OpenRouter.

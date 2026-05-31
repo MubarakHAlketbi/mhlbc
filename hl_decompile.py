@@ -100,6 +100,8 @@ CR_CAT_METHOD_BINDING_MISS  = "method_binding_missing"
 CR_CAT_RECEIVER_TYPE_MISS   = "receiver_type_missing"
 CR_CAT_VIRTUAL_RECEIVER    = "virtual_receiver"
 CR_CAT_UNCLASSIFIED         = "unclassified"
+# Resolvable with concrete return type (not unresolved, but was left as default unclassified)
+CR_CAT_RESOLVED_CONCRETE    = "resolved_concrete"
 
 # Null target subcategory constants (null_without_target_type classification)
 # Non-actionable / expected
@@ -1941,12 +1943,19 @@ class ExprBuilder:
                          for i in range(min(count, len(args) - 3))]
             expr = IRExpr("call", [fun_reg] + call_args)
 
-        elif op == 30:  # OCallMethod: dst, obj, count, args...
-            obj = self._reg_var(args[1])
-            count = args[2] if len(args) >= 3 else 0
-            method_args = [self._reg_var(args[3 + i])
-                           for i in range(min(count, len(args) - 3))]
-            expr = IRExpr("method_call", [obj] + method_args)
+        elif op == 30:  # OCallMethod: dst, method_index, nargs, extra[0]=receiver, extra[1:]=args
+            # args[1] is method_index (proto index), NOT a register
+            # args[2] is nargs (total extra elements including receiver)
+            # extra[0]=args[3] is the receiver register
+            # extra[1:]=args[4:] are the method argument registers
+            method_idx = args[1] if len(args) >= 2 else None
+            nargs = args[2] if len(args) >= 3 else 0
+            receiver = self._reg_var(args[3]) if len(args) >= 4 else IRVar("?")
+            n_method_args = max(0, nargs - 1)  # exclude receiver from method args
+            method_args = [self._reg_var(args[4 + i])
+                           for i in range(min(n_method_args, max(0, len(args) - 4)))]
+            method_name = IRVar(f"meth[{method_idx}]") if method_idx is not None else IRVar("?")
+            expr = IRExpr("method_call", [receiver, method_name] + method_args)
 
         elif op == 31:  # OCallThis: dst, count, args...
             count = args[1] if len(args) >= 2 else 0
@@ -3967,6 +3976,10 @@ class Decompiler:
                         record.unresolved_category = CR_CAT_UNKNOWN_CALLEE
                 else:
                     record.unresolved_category = CR_CAT_UNCLASSIFIED
+            else:
+                # Resolvable — call return has a concrete type (String, Int, etc.)
+                # Not truly unresolved; categorize as resolved for clean accounting
+                record.unresolved_category = CR_CAT_RESOLVED_CONCRETE
 
             result[vname] = record
 
@@ -4102,7 +4115,7 @@ class Decompiler:
 
         # Check consumer patterns
         reg_consumers = consumers.get(reg_idx, [])
-        has_field_store = any(i.opcode == 39 for i in reg_consumers)
+        has_field_store = any(i.opcode in (39, 41) for i in reg_consumers)  # OSetField, OSetThis
         has_global_store = any(i.opcode == 36 for i in reg_consumers)
         has_array_store = any(i.opcode in (81, 91, 92) for i in reg_consumers)
         has_omov = any(i.opcode == 1 for i in reg_consumers)
