@@ -1895,20 +1895,34 @@ class ExprBuilder:
                       comment=f"UNKNOWN: {op_name} {args}")
 
     def _build_call(self, instr: Instruction) -> IRStmt:
-        """Build a call statement for fixed-arg calls (OCall0-4)."""
+        """Build a call statement for fixed-arg calls (OCall0-4).
+
+        args[1] is either:
+        - A function index (findex) when 0 <= args[1] < len(parser.functions)
+        - A type index (K_FUN/K_METHOD) when args[1] >= len(parser.functions)
+
+        In BOTH cases, args[1] is NOT a register.  Before B19 the code
+        incorrectly routed it through _reg_var(args[1]) which falls back to
+        ``r{args[1]}`` when the value is not found in reg_names — producing
+        misleading ``r3327(...)`` instead of a resolved function name or a
+        neutral ``fun[3327](...)`` fallback.
+        """
         args = instr.args
         op = instr.opcode
         if not args:
             return IRStmt("comment", comment="empty call")
 
         dst = self._reg_var(args[0])
-        fun_reg = self._reg_var(args[1]) if len(args) >= 2 else IRConst("?")
 
-        # Determine arg registers from args[2:]
+        # args[1] is a function index or type index, NOT a register
+        callee_idx = args[1] if len(args) >= 2 else -1
+        callee_name = self._resolve_callee_name(callee_idx)
+        fun_target: IRValue = IRConst(callee_name)
+
+        # Actual argument registers are at args[2:]
         call_args = [self._reg_var(a) for a in args[2:]]
-        nargs_expected = {24: 0, 25: 1, 26: 2, 27: 3, 28: 4}.get(op, 0)
 
-        expr = IRExpr("call", [fun_reg] + call_args)
+        expr = IRExpr("call", [fun_target] + call_args)
         return IRStmt("assign", dst=dst, src=expr)
 
     def _build_vararg_call(self, instr: Instruction) -> IRStmt:
@@ -1984,6 +1998,46 @@ class ExprBuilder:
         except Exception:
             pass
         return f"str[{idx}]"
+
+    def _resolve_callee_name(self, callee_idx: int) -> str:
+        """Resolve an OCall0-4 call target (args[1]) to a display name.
+
+        args[1] can be:
+        - A function index (findex): 0 <= callee_idx < len(parser.functions)
+        - A type index (K_FUN/K_METHOD): callee_idx >= len(parser.functions) and
+          valid type with fun/method kind
+
+        Returns a resolved function name if available, otherwise a neutral
+        deterministic fallback (``fun[{findex}]`` or ``fun_{type_idx}``).
+        Never returns an ``rN``-style register name.
+        """
+        from hl_parser import K_FUN, K_METHOD
+
+        # ── Function-index path ────────────────────────────────────────
+        try:
+            if 0 <= callee_idx < len(self.parser.functions):
+                func = self.parser.functions[callee_idx]
+                if func.name and func.name != "?":
+                    return func.name
+                # Valid function index, no name — use neutral fallback
+                return f"fun[{func.findex}]"
+        except Exception:
+            pass
+
+        # ── Type-index path (K_FUN / K_METHOD) ─────────────────────────
+        try:
+            if 0 <= callee_idx < len(self.parser.types):
+                t = self.parser.types[callee_idx]
+                if t.kind in (K_FUN, K_METHOD):
+                    # Try to resolve via string pool
+                    if t.name is not None and 0 <= t.name < len(self.parser.strings):
+                        return self.parser.strings[t.name]
+                    return f"type_{callee_idx}"
+        except Exception:
+            pass
+
+        # ── Nothing resolved — neutral fallback ────────────────────────
+        return f"fun[{callee_idx}]"
 
     def _resolve_findex_name(self, findex: int) -> str:
         """Resolve a function index to a name."""

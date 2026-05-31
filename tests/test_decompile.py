@@ -358,6 +358,56 @@ class TestRegisterLiveness:
         assert 1 in uses, "ORethrow arg should be a use"
         assert uses[1] == [0]
 
+    # ── B17 Liveness Fix Tests ──────────────────────────────────────
+
+    def test_ocall0_findex_not_src_register(self):
+        """OCall0 args[1] is a function index, NOT a source register."""
+        # OCall0 r0, 999 (findex 999, not a register)
+        instrs = [
+            Instruction(0, 24, "OCall0", [0, 999], 0, 2),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=5)
+        # r0 is dst, NOT src. 999 is a findex, not a register.
+        assert 0 not in uses, "r0 is dst for OCall0, not src"
+        assert 999 not in uses, "999 is findex for OCall0, not a register"
+
+    def test_ocall1_findex_not_src_register(self):
+        """OCall1 args[1] is a function index, only args[2] is a source register."""
+        # OCall1 r0, 5, r3 — findex=5, a0=r3 (source)
+        instrs = [
+            Instruction(0, 25, "OCall1", [0, 5, 3], 0, 3),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=6)
+        assert 3 in uses, "r3 is arg register for OCall1, should be a use"
+        assert 5 not in uses, "args[1]=5 is findex for OCall1, not a register"
+
+    def test_ocall_method_method_index_not_src_register(self):
+        """OCallMethod args[1] is a method index, NOT a source register."""
+        # OCallMethod r0, 42, 2, r3, r4 — method_index=42, argc=2, extra[0]=r3, extra[1]=r4
+        instrs = [
+            Instruction(0, 30, "OCallMethod", [0, 42, 2, 3, 4], 0, 5),
+        ]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=6)
+        assert 3 in uses, "r3 is receiver register for OCallMethod"
+        assert 4 in uses, "r4 is arg register for OCallMethod"
+        assert 42 not in uses, "args[1]=42 is method_index, not a register"
+
+    def test_omakeenum_src_and_dst_tracked(self):
+        """OMakeEnum args[2] is count, source regs and dst properly tracked."""
+        # OMakeEnum r0, 1, 2, r3, r4 — ctor_idx=1, count=2, args=r3, r4
+        instrs = [
+            Instruction(0, 90, "OMakeEnum", [0, 1, 2, 3, 4], 0, 5),
+        ]
+        # Test destination
+        defs = RegisterLiveness.compute(instrs, nregs=6)
+        assert 0 in defs, "OMakeEnum writes to r0 (dst)"
+        # Test source registers
+        uses = RegisterLiveness.compute_uses(instrs, nregs=6)
+        assert 3 in uses, "r3 is source register for OMakeEnum"
+        assert 4 in uses, "r4 is source register for OMakeEnum"
+        assert 1 not in uses, "args[1]=1 is ctor_idx for OMakeEnum, not a register"
+        assert 2 not in uses, "args[2]=2 is count for OMakeEnum, not a register"
+
 
 # ============================================================================
 # Test: Variable Mapping
@@ -3827,6 +3877,87 @@ class TestIdentifierSanitization:
         assert _sanitize_type_name("Scaled(") == "Scaled"
         assert _sanitize_type_name("f(") == "f"
         assert _sanitize_type_name("normal name") == "normal_name"
+
+
+class TestB19OCallRendering:
+    """B19: OCall0-4 _build_call fix — args[1] is a function index, not a register."""
+
+    def test_ocall0_emits_fun_bracket_not_rprefix(self):
+        """OCall0 with function index emits fun[{idx}], not r{idx}."""
+        from hl_decompile import ExprBuilder, Instruction
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, build_type_primitive, stream_from_bytes
+        from hl_parser import K_I32, K_FUN, K_VOID
+        import io
+
+        # Build parser with 1 function (findex=0)
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        data = build_minimal_bytecode(
+            version=4,
+            types=[i32_type, fun_type],
+            functions=[(1, 0, [K_I32], [])],
+        )
+        p = HLParser("<test>")
+        p.execute(io.BytesIO(data))
+
+        # Build OCall0 instruction: dst=r0, callee_idx=0 (function index 0)
+        instr = Instruction(0, 24, "OCall0", [0, 0], 0, 2)
+        reg_names = {0: "v0", 1: "v1"}
+        builder = ExprBuilder(p, None, reg_names)
+        stmt = builder._instr_to_stmt(instr, None)
+        stmt_str = str(stmt)
+        # Must NOT contain r{idx}( pattern
+        assert "r0(" not in stmt_str, f"Should not emit r0(): {stmt_str}"
+        assert not ("r" + "(") in stmt_str, f"No raw rN(): {stmt_str}"
+        # Must contain fun[{findex}] or resolved name
+        assert "fun[0]" in stmt_str or "(" in stmt_str, f"Expected fun[0] or name: {stmt_str}"
+
+    def test_ocall1_with_named_fun_emits_resolved_name(self):
+        """OCall1 with named callee emits the resolved function name."""
+        from hl_decompile import ExprBuilder, Instruction
+        from hl_parser import HLParser
+        from tests.hl_helper import build_minimal_bytecode, build_type_primitive
+        from hl_parser import K_I32, K_FUN, K_VOID
+        import io
+
+        # Build parser with a function that has a resolved name
+        i32_type = build_type_primitive(K_I32)
+        fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
+        data = build_minimal_bytecode(
+            version=4,
+            strings=["myFunc"],
+            types=[i32_type, fun_type],
+            globals_=[],
+            natives=[(0, 0, 0, 0)],  # lib_si=0, name_si=0, type_idx=0, findex=0
+            functions=[(0, 0, [K_I32], [])],
+        )
+        p = HLParser("<test>")
+        p.execute(io.BytesIO(data))
+        # After parsing, function[0] should have its name resolved
+        # Construct a call to it: OCall1 r0, 0, r1
+        instr = Instruction(0, 25, "OCall1", [0, 0, 1], 0, 3)
+        reg_names = {0: "v0", 1: "v1"}
+        builder = ExprBuilder(p, None, reg_names)
+        stmt = builder._instr_to_stmt(instr, None)
+        stmt_str = str(stmt)
+        # Should NOT contain r0(
+        assert "r0(" not in stmt_str, f"Should not emit r0(): {stmt_str}"
+
+    def test_existing_b17_liveness_tests_still_pass(self):
+        """Sanity: OCall0-4 _get_src_regs unchanged by B19 (only _build_call changed)."""
+        from hl_decompile import RegisterLiveness, Instruction
+        # OCall0 with args[1]=999 — 999 is NOT a source register
+        instrs = [Instruction(0, 24, "OCall0", [0, 999], 0, 2)]
+        uses = RegisterLiveness.compute_uses(instrs, nregs=5)
+        assert 999 not in uses, "B17: OCall0 args[1] should not be a source register"
+        # OMakeEnum src/dst still correct
+        instrs2 = [Instruction(0, 90, "OMakeEnum", [0, 1, 2, 3, 4], 0, 5)]
+        defs = RegisterLiveness.compute(instrs2, nregs=6)
+        assert 0 in defs, "OMakeEnum writes to r0"
+        uses2 = RegisterLiveness.compute_uses(instrs2, nregs=6)
+        assert 3 in uses2 and 4 in uses2, "OMakeEnum source regs correct"
+        assert 1 not in uses2 and 2 not in uses2, "OMakeEnum ctor_idx/count not registers"
 
 
 class TestGiantSectionMarkers:

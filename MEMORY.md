@@ -1,5 +1,55 @@
 # Session Tracking
 
+## Session 39 — June 8, 2026 (B18 + B19 CLOSED)
+- Start: New session initialized on Discord (OmniDecomp / Session 39).
+- Model: deepseek/deepseek-v4-pro via OpenRouter.
+- Project state: 620 passed, 4 skipped.
+- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+- Track B: 200 sampled, 0 errors, 5,120 output files.
+- **B18: Register Name Leakage Metric Validation and Subcategory Audit -- CLOSED**
+- **B19: Function-Index Callee Fallback Audit and Safe Direct-Call Naming Probe -- CLOSED**
+
+### B18: Metric Corrected, Bucket Split
+- Old "Register name leakage: 433" bucket removed, mislabeled
+- Split into: Function-index callee fallback (383) + True dead/raw register fallback (50)
+- Both diagnostic_only
+
+### B19: Deterministic _build_call Fix (383 → 0)
+**Root cause:** `_build_call()` routed `args[1]` through `_reg_var()`, producing `r{findex}(...)` instead of resolved name or neutral fallback. Same class of bug as B17 (args[1] treated as register).
+
+**Fix (`hl_decompile.py`):**
+- Changed `_build_call()` to use `_resolve_callee_name(args[1])` instead of `_reg_var(args[1])`
+- Added `_resolve_callee_name()`: resolves to FunctionDef.name, falls back to `fun[{findex}]`, handles K_FUN/K_METHOD type-index path
+
+**Impact:** Function-index callee fallback 383 → 0. True registers 50 → 7. Total r10+ 433 → 7.
+
+### Changes (B18 + B19 combined)
+- `hl_decompile.py`: `_build_call()` fix, `_resolve_callee_name()` added, B17 liveness unchanged
+- `scripts/decompiler_quality_report.py`: `analyze_register_leakage()`, `_classify_rN_semantic_type()`, B18+B19 report sections, resolved frontiers updated
+- `tests/test_decompile.py`: 4 B17 liveness tests + 3 B19 rendering tests
+
+### Post-B19 Active Frontier (7 independent buckets)
+| # | Bucket | Count | Classification |
+|---|---|---|---|
+| 1 | Raw goto/label comments | 718 | diagnostic_only |
+| 2 | Unresolved field names | 149 | diagnostic_only |
+| 3 | Virtual type unsupported | 61 | speculative_blocked |
+| 4 | Null-without-target-type | 30 | diagnostic_only |
+| 5 | Call return unresolved | 17 | diagnostic_only |
+| 6 | True dead/raw register fallback | 7 | diagnostic_only |
+| 7 | Giant init func[46044] | 1 | safe_deterministic |
+
+(+ Dynamic type refs 204 rollup_only; Function-index callee fallback 383 → 0 resolved by B19)
+
+### Validation
+- pytest: 620 passed, 4 skipped (+7 new tests: 4 B17 + 3 B19, 0 regressions)
+- Track A: 7/7, zero frontier locked
+- Track B: 200 sampled, 0 errors
+- ASCII-safety: PASS
+- Farever parity: 9/9 PASS
+
+**Session 39 closed — commit and push.**
+
 ## Session 38 — June 8, 2026 (CLOSED)
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
