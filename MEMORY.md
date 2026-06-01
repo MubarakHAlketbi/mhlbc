@@ -1,6 +1,61 @@
 |     1|# Session Tracking
      2|
-     3|## Session 44 -- July 6, 2026
+     3|## Session 45 -- June 1, 2026
+|- Start: New session initialized on Discord (OmniDecomp / Session 45).
+|- Model: deepseek/deepseek-v4-flash via OpenRouter.
+|- Version: g6.0-45-gcb7e496 (clean tree).
+|- Project state: 632 passed, 4 skipped (Session 44 final state).
+|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+|- Track B: 200 sampled, 0 errors, 5,120 output files.
+|- Previous session: Session 44 completed B28 target_inside_structured_block source-visible validation + B29 Phase 1 preflight (Phase 2 not safe).
+|- **B30: Raw-goto frontier reclassification and pause decision -- COMPLETE**
+|- **Next task: B31 -- Virtual type unsupported evidence audit and closure.**
+
+### B30: Raw-Goto Frontier Reclassification and Pause Decision
+
+**Goal:** Decide whether raw-goto behavior work should pause until ControlStructurer work is intentionally unlocked, and recommend B31.
+
+**Accepted state confirmed:** B29 closed as diagnostic-only. No B29 Phase 2. No after_if-* goto suppression.
+
+**Raw-goto frontier summary (B26-B29 evidence, sample=200, seed=42):**
+
+| Bucket | IR Count | Source-Visible | Assessment |
+|--------|----------|----------------|------------|
+| `backward_loop_candidate` | 124 | ~124 | Blocked -- needs loop recovery |
+| `switch_case_or_break_candidate` | 98 | 6 | Blocked -- 94% cleaned by cleanup; 6 survivors need switch-case structuring |
+| `after_if-then_block` | 299 | 286 | Blocked -- B29 proved 0 structurally redundant; all genuine non-local flow |
+| `after_if-else_block` | 142 | 135 | Blocked -- same as after_if-then |
+| `after_goto_block` | 151 | 144 | Blocked -- needs ControlStructurer change (goto-to-goto chain) |
+| `after_while-header_block` | 66 | 64 | Blocked -- needs loop/control structuring |
+| Other patterns | 0 | 0 | -- |
+| **Total** | **870** | **718** | **All diagnostic_only, no cleanup path** |
+
+**B29 IR position analysis of 421 source-visible after_if-* gotos:**
+- `flat_before_if`: 95 (skip entire if/else from earlier branch)
+- `inside_body_not_last`: 297 (early exit from mid-block)
+- `other`: 29 (various non-redundant positions)
+- `last_in_then_before_else`: **0** (no redundant end-of-block gotos)
+- `last_in_else`: **0** (no redundant end-of-block gotos)
+
+**Decision:** Pause raw-goto behavior work. NO bucket is suitable for simple HaxeWriter cleanup. All require ControlStructurer enhancements (loop recovery, switch structuring, goto-to-goto chain handling) which is an intentionally unlocked engineering task, not diagnostic work.
+
+**Non-goto Track B frontier comparison:**
+
+| Bucket | Count | Classification | Risk |
+|--------|-------|----------------|------|
+| Raw goto/label comments | 718 | diagnostic_only | low |
+| Unresolved field names | 149 | diagnostic_only | low |
+| Virtual type unsupported | 61 | speculative_blocked | medium |
+
+*Note on field-name subcounts:* The 149 is a source-text regex count across all 5,120 generated .hx files. The IR-level subcategory breakdown (receiver_oob=69, this_oob=13, enum_receiver=8, enum_field_unresolved=4, plus other subcategories) is measured from the 200-function decompilation sample and totals 94. The gap (149-94=55) represents fN patterns in output files from functions outside the 200-function sample, plus ClassBuilder/HaxeWriter post-processing transformations. Both metrics are diagnostic_only.
+
+**B31 recommendation:** Virtual type unsupported evidence audit and closure. Audit all 61 cases to confirm they are truly anonymous structs (K_VIRTUAL) vs possible misclassifications. Expected closure: reclassify to diagnostic_only. Normal mode (no smart mode needed).
+
+**Files changed:** MEMORY.md only. No behavior code modified.
+**Scripts tracked:** `scripts/b26_analyze_goto_patterns.py`, `b27_analyze_switch_cases.py`, `b28_analyze_structured_block.py`, `b29_preflight.py`, `b29_ir_position_analysis.py`, `b29_report.py` -- all already in git (Session 44).
+**Generated artifacts** (gitignored, regenerable): `decompiler_quality_report/` B26-B29 detail JSON and summaries.
+|
+|## Session 44 -- July 6, 2026
 - Start: New session initialized on Discord (OmniDecomp / Session 44).
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Version: g6.0-44-g2c20bd2 (clean tree).
