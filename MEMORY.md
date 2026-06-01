@@ -1,14 +1,81 @@
 |     1|# Session Tracking
      2|
-     3|## Session 42 — July 4, 2026 (CLOSED) — B24 Artifact/Path Reconciliation + Third-Party Robustness
+     3|## Session 43 -- July 5, 2026
+- Start: New session initialized on Discord (OmniDecomp / Session 43).
+- Model: deepseek/deepseek-v4-flash via OpenRouter.
+- Version: g6.0-43-g2496c07 (clean tree).
+- Project state: 632 passed, 4 skipped (Session 42 final state).
+- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+- Track B: 200 sampled, 0 errors, 5,120 output files.
+- Previous session: Session 42 closed B24 artifact/path reconciliation + third-party robustness.
+- **B25 (this session): Track B frontier selection -- goto/label recommended as B26 target.**
+- **B26 (this session): Goto/label CFG pattern classification -- COMPLETE.**
+
+### B26 Summary
+
+**Goal:** Classify all 718 raw goto/label comments into CFG-based pattern buckets to identify which are safe candidates for B27 restructuring.
+
+**Method:** Extraction script `scripts/b26_analyze_goto_patterns.py` -- parses Farever, decompiles 200 sampled functions (seed=42), classifies each IRStmt("goto") using the function's CFG (Disassembler.build_cfg). Output: `decompiler_quality_report/b26_goto_label_detail.json` (per-case JSON) + `b26_summary.md` (human summary).
+
+**Results (IR-level, 870 gotos):**
+- `target_inside_structured_block`: **658** (75.6%) -- SAFE for restructuring
+- `backward_loop_candidate`: **124** (14.3%) -- BLOCKED (needs while-loop recovery)
+- `switch_case_or_break_candidate`: **88** (10.1%) -- SAFE for restructuring
+- `if_else_join_candidate`: 0
+- `forward_break_or_continue_candidate`: 0
+- `try_catch_or_exception_candidate`: 0
+- `unknown_needs_cfg_context`: **0** -- every goto classified
+
+**Source-text canonical counts (from quality report):** 653 gotos + 65 labels = 718 total. The IR count (870) includes 217 gotos removed by `_cleanup_goto_labels()` (no-op goto-to-next-label pairs).
+
+**Evidence tokens (top):**
+| Evidence | Count |
+|----------|-------|
+| after_if-then_block | 299 |
+| after_goto_block | 151 |
+| after_if-else_block | 142 |
+| preceded_by_oswitch | 88 |
+| loop_header_backedges | 82 |
+| after_while-header_block | 66 |
+| target_is_loop_latch | 42 |
+
+**Files changed:** `scripts/b26_analyze_goto_patterns.py` (new, report-only).
+**Track A unchanged.** No parser, decompiler, writer, CLI, GUI, or test code modified.
+
+**Files changed:** `scripts/b26_analyze_goto_patterns.py`, `decompiler_quality_report/b26_goto_label_detail.json`, `decompiler_quality_report/b26_summary.md`, `MEMORY.md`.
+
+### B27 Phase 1 -- Switch-Case/Break Candidate Validation -- COMPLETE
+
+**Goal:** Validate the 88 `switch_case_or_break_candidate` IR-level cases from B26: determine source-visible survivorship, classify as break vs fallthrough prevention vs other, assess Phase 2 feasibility.
+
+**Method:** Extraction script `scripts/b27_analyze_switch_cases.py` -- same pipeline as B26 (200 samples, seed=42), with OSwitch block detection and block-topology classification.
+
+**Results:**
+
+| Metric | Count |
+|--------|-------|
+| IR-level switch-case gotos | 98 |
+| Source-visible survivors | 6 |
+| Cleaned by `_cleanup_goto_labels()` | 92 (94%) |
+| Break/exit (targets post-switch) | 0 -- all cleaned |
+| Fallthrough prevention (targets another case) | 98 IR / 6 src-visible |
+| `label_exists=false` (no matching source label) | 6/6 source-visible |
+
+**Key finding:** The "break/exit" switch case pattern is **already fully cleaned** by `_cleanup_goto_labels()`. Zero break/exit gotos survive to source text. The 6 surviving source-visible cases are all `charAt` stdlib functions where the goto targets another case block start (fallthrough prevention) without a matching label at the target -- `_cleanup_goto_labels()` cannot remove them because there is no label to match.
+
+**Phase 2 assessment:** The 6 survivors are limited to 2 stdlib functions (`charAt[3796]`, `charAt[4337]`). Fixing them requires deeper switch-case structuring in ControlStructurer -- not a simple HaxeWriter change. The existing `_cleanup_goto_labels()` already handles 94% of the switch-case pattern. Phase 2 is not warranted for switch-case alone. Recommend redirecting B27 effort to the broader `target_inside_structured_block` bucket (658 IR cases) instead.
+
+**Files changed:** `scripts/b27_analyze_switch_cases.py` (new, report-only), `decompiler_quality_report/b27_switch_case_analysis.json` (generated).
+
+## Session 42 -- July 4, 2026 (CLOSED) -- B24 Artifact/Path Reconciliation + Third-Party Robustness
      4|- Start: New session initialized on Discord (OmniDecomp / Session 42).
      5|- Model: deepseek/deepseek-v4-flash via OpenRouter.
-|     6|- Version: g6.0-42-g5b7a0fe → g6.0-42-g5b7a0fe (modified, +425/-6 in 7 files).
+|     6|- Version: g6.0-42-g5b7a0fe -> g6.0-42-g5b7a0fe (modified, +425/-6 in 7 files).
 |     7|- Project state: 632 passed, 4 skipped (+9 new B24 tests, 0 regressions).
      8|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
      9|- Track B: 200 sampled, 0 errors, 5,120 output files.
     10|- Previous session: Session 41 closed B23 evidence retention.
-    11|- **B24: Artifact/path reconciliation + 6 third-party robustness fixes — COMPLETE**
+    11|- **B24: Artifact/path reconciliation + 6 third-party robustness fixes -- COMPLETE**
     12|
     13|### B24 Changes
     14|
@@ -19,30 +86,30 @@
     19|**Parser Robustness (3 fixes):**
     20|1. `hl_parser/_parser.py` `execute()`: ParseValidator moved outside `if self.nconstants > 0:` block in the file-path branch, matching the stream branch. Post-parse validation now runs regardless of constants presence.
     21|2. `hl_parser/_parser.py` `parse_header()`: Added negative-value bounds checks for all 10 header count fields (nints, nfloats, nstrings, nbytes, ntypes, nglobals, nnatives, nfunctions, nconstants, entrypoint). Added negative/impossible-size checks for strings_size and bytes_size in parse_pools().
-    22|3. `hl_parser/_parser.py` `execute()`: Fixed misleading mmap optimization — BytesIO(mm) copies the whole mapping, defeating mmap. Changed to pass mmap directly as the stream buffer (mmap supports read/seek/tell).
+    22|3. `hl_parser/_parser.py` `execute()`: Fixed misleading mmap optimization -- BytesIO(mm) copies the whole mapping, defeating mmap. Changed to pass mmap directly as the stream buffer (mmap supports read/seek/tell).
     23|
     24|**GUI Robustness (2 fixes):**
     25|1. `hl_worker.py` + `app.py`: Replaced ineffective `QThread.quit()` (no-op for threads without event loops) with cooperative cancellation. Added `cancel()` / `_check_cancelled()` to HLDecompileWorker with checks at each pipeline stage boundary. `app.py` calls `cancel()` + `wait(500)` instead of `quit()`.
-    26|2. `app.py` `GlobalsListModel`: Fixed type resolution — was using `type_idx` directly as a `KIND_NAMES` key (kind ID lookup on a type index). Now resolves through `parser.types[type_idx].kind` for the kind name and resolves object/struct/enum/abstract names via the string pool, mirroring CLI logic.
+    26|2. `app.py` `GlobalsListModel`: Fixed type resolution -- was using `type_idx` directly as a `KIND_NAMES` key (kind ID lookup on a type index). Now resolves through `parser.types[type_idx].kind` for the kind name and resolves object/struct/enum/abstract names via the string pool, mirroring CLI logic.
     27|
     28|**CLI Robustness (1 fix):**
     29|1. `cli.py` `decompile --comments`: Changed from `action="store_true", default=True` (impossible to disable) to `argparse.BooleanOptionalAction` with `--no-comments` to disable. Help text updated.
 |    30|
 |    31|**B24 Regression Tests (9 new, all PASS):**
-|    32|1. `TestB24Hardening::test_parsevalidator_runs_on_no_constants` — v4 `nconstants=0` triggers ParseValidator OOB warning.
-|    33|2. `TestB24Hardening::test_negative_nints_raises_error` — `nints=-1` → `HLParserError`.
-|    34|3. `TestB24Hardening::test_negative_nstrings_raises_error` — `nstrings=-5` → `HLParserError`.
-|    35|4. `TestB24Hardening::test_negative_ntypes_raises_error` — `ntypes=-3` → `HLParserError`.
-|    36|5. `TestB24Hardening::test_negative_nfunctions_raises_error` — `nfunctions=-1` → `HLParserError`.
-|    37|6. `TestB24Hardening::test_negative_strings_size_raises_error` — `strings_size=-100` → `HLParserError`.
-|    38|7. `TestB24Hardening::test_negative_bytes_size_raises_error` — v5 `bytes_size=-200` → `HLParserError`.
-|    39|8. `TestB24Hardening::test_strings_size_exceeds_file_size_raises_error` — oversized strings_size → `HLParserError`.
-|    40|9. `test_cli.py::test_decompile_no_comments_accepted` — `--no-comments` suppresses `// L` debug comments.
+|    32|1. `TestB24Hardening::test_parsevalidator_runs_on_no_constants` -- v4 `nconstants=0` triggers ParseValidator OOB warning.
+|    33|2. `TestB24Hardening::test_negative_nints_raises_error` -- `nints=-1` -> `HLParserError`.
+|    34|3. `TestB24Hardening::test_negative_nstrings_raises_error` -- `nstrings=-5` -> `HLParserError`.
+|    35|4. `TestB24Hardening::test_negative_ntypes_raises_error` -- `ntypes=-3` -> `HLParserError`.
+|    36|5. `TestB24Hardening::test_negative_nfunctions_raises_error` -- `nfunctions=-1` -> `HLParserError`.
+|    37|6. `TestB24Hardening::test_negative_strings_size_raises_error` -- `strings_size=-100` -> `HLParserError`.
+|    38|7. `TestB24Hardening::test_negative_bytes_size_raises_error` -- v5 `bytes_size=-200` -> `HLParserError`.
+|    39|8. `TestB24Hardening::test_strings_size_exceeds_file_size_raises_error` -- oversized strings_size -> `HLParserError`.
+|    40|9. `test_cli.py::test_decompile_no_comments_accepted` -- `--no-comments` suppresses `// L` debug comments.
 |    41|
 |    42|**GlobalsListModel:** No PyQt6 GUI test infrastructure exists (no `test_app*.py`). Manually verified: `data()` now
 |    43|resolves `parser.types[type_idx].kind` + string pool names instead of treating `type_idx` as `KIND_NAMES` key.
 |    44|
-|    45|## Session 41 — July 3, 2026 (B23 Evidence Retention)
+|    45|## Session 41 -- July 3, 2026 (B23 Evidence Retention)
 |    46|- Start: New session initialized on Discord (OmniDecomp / Session 41).
 |    47|- Model: deepseek/deepseek-v4-flash via OpenRouter.
 |    48|- Version: g6.0-41-g8aacbab (clean tree).
@@ -52,33 +119,33 @@
 |    52|- Previous session: Session 40 closed B20-B23.
 |    53|- **B23 Evidence Retention: Per-case detail table added to MEMORY.md appendix. Validation confirms 30/30 cases match B23 closure. No decompiler or report behavior changed.**
 
-## Session 40 — June 10, 2026 (B20 + B21 + B22 + B23 CLOSED)
+## Session 40 -- June 10, 2026 (B20 + B21 + B22 + B23 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 40).
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
-- Version: g6.0-40-g0daad01 (clean tree) → g6.0-40-g0daad01 (modified, 295+/94- in 4 files).
+- Version: g6.0-40-g0daad01 (clean tree) -> g6.0-40-g0daad01 (modified, 295+/94- in 4 files).
 - Project state: 623 passed, 4 skipped (+3 B20 tests, 0 regressions).
 - Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
 - Track B: 200 sampled, 0 errors, 5,120 output files.
-- **B20: True Dead/Raw Register Fallback Audit and Closure — CLOSED**
-- **B21: Giant Init Single-Case Audit and Closure — CLOSED**
-- **B22: Track B Call-Return Unresolved Audit and Closure — CLOSED**
-- **B23: Track B Null-Without-Target-Type Audit and Closure — CLOSED**
+- **B20: True Dead/Raw Register Fallback Audit and Closure -- CLOSED**
+- **B21: Giant Init Single-Case Audit and Closure -- CLOSED**
+- **B22: Track B Call-Return Unresolved Audit and Closure -- CLOSED**
+- **B23: Track B Null-Without-Target-Type Audit and Closure -- CLOSED**
 
 ### B20: Root Cause Analysis
-All 7 remaining true dead/raw register fallback cases were OCallMethod (op 30) method_index treated as receiver register — same bug class as B17/B19.
+All 7 remaining true dead/raw register fallback cases were OCallMethod (op 30) method_index treated as receiver register -- same bug class as B17/B19.
 
 **Root cause:** `_build_method_call()` in `ExprBuilder` at line 1945 used `obj = self._reg_var(args[1])`, but `args[1]` for OCallMethod is the **method_index** (proto index), not a register. The actual receiver register is `args[3]` (extra[0]).
 
 **7 cases** (all OCallMethod with method_index > nregs):
 | File | Func | rN | Receiver | Root |
 |------|------|----|----------|------|
-| ent.Unit.hx | receiveHeal[17335] | r125 → meth[125] | r13 | method_index bug |
-| ent.Unit.hx | receiveHeal[17335] | r29 → meth[29] | r25 | method_index bug |
-| ent.Unit.hx | receiveHeal[17335] | r134 → meth[134] | r13 | method_index bug |
-| h3d.prim.ModelCache.hx | loadPrefab[5229] | r24 → meth[24] | r2 | method_index bug |
-| st.ShopBundle.hx | getName[41905] | r33 → meth[33] | r9 | method_index bug |
-| st.skill.Skill.hx | getCost[13934] | r70 → meth[70] | r3 | method_index bug |
-| ui.notify.SmallNotify.hx | setText[6973] | r27 → meth[27] | r2 | method_index bug |
+| ent.Unit.hx | receiveHeal[17335] | r125 -> meth[125] | r13 | method_index bug |
+| ent.Unit.hx | receiveHeal[17335] | r29 -> meth[29] | r25 | method_index bug |
+| ent.Unit.hx | receiveHeal[17335] | r134 -> meth[134] | r13 | method_index bug |
+| h3d.prim.ModelCache.hx | loadPrefab[5229] | r24 -> meth[24] | r2 | method_index bug |
+| st.ShopBundle.hx | getName[41905] | r33 -> meth[33] | r9 | method_index bug |
+| st.skill.Skill.hx | getCost[13934] | r70 -> meth[70] | r3 | method_index bug |
+| ui.notify.SmallNotify.hx | setText[6973] | r27 -> meth[27] | r2 | method_index bug |
 
 **Fix (`hl_decompile.py`):** In `_build_method_call()`, OCallMethod now correctly:
 - Reads `args[3]` as receiver register (extra[0])
@@ -89,11 +156,11 @@ All 7 remaining true dead/raw register fallback cases were OCallMethod (op 30) m
 The `_get_src_regs()` for OCallMethod was already fixed by B16 (line 559-567 excluded args[1] from source registers). The rendering counterpart (`_build_method_call`) was the missing half.
 
 ### Impact (B20)
-- total_r10_plus: 7 → **0**
-- true_register_count: 7 → **0**
+- total_r10_plus: 7 -> **0**
+- true_register_count: 7 -> **0**
 - function_index_ref_count: 0 (B19 fix intact)
 - All receiver registers now refer to actual register indices (within nregs range)
-- Renderings like `r125.r13()` → `r13.meth[125]()` (receiver correct, method name truthful)
+- Renderings like `r125.r13()` -> `r13.meth[125]()` (receiver correct, method name truthful)
 
 ### Tests (3 new, 1 updated, B20)
 - `TestB20OCallMethodRendering.test_ocall_method_renders_meth_bracket_not_raw_r`: method_index 125 not emitted as r125
@@ -112,17 +179,17 @@ The `_get_src_regs()` for OCallMethod was already fixed by B16 (line 559-567 exc
 
 ### B21: Giant Init Single-Case Audit and Closure
 
-**Target:** Giant init function `func[46044]` named `init` — 109814 nops, 4728 regs.
+**Target:** Giant init function `func[46044]` named `init` -- 109814 nops, 4728 regs.
 
-**Finding:** The Haxe compiler generates a single `__init__` function that initializes all module-level globals. This is standard Haxe behavior — every compiled HL program has one. Farever's init is large because the game has ~28K globals. The decompiler output is correct (all opcodes decoded, 0 errors) and B12 safeguards (GIANT FUNCTION header + section markers at 20K stmt intervals) are active.
+**Finding:** The Haxe compiler generates a single `__init__` function that initializes all module-level globals. This is standard Haxe behavior -- every compiled HL program has one. Farever's init is large because the game has ~28K globals. The decompiler output is correct (all opcodes decoded, 0 errors) and B12 safeguards (GIANT FUNCTION header + section markers at 20K stmt intervals) are active.
 
 **Evidence:**
-- Compiler-generated: Yes — __init__ initialization of all module globals
-- Correctly decompiled: Yes — 109814 ops, 0 errors, all opcodes decoded
-- Already safeguarded: Yes — B12 giant_section_size markers active
-- Any possible decompiler fix? NO — function size is compiler-driven by ~28K Farever globals. No possible decompiler change can reduce instruction count
-- Farever-specific? NO — any large HL program will have a large init
-- Actionable? NO — this is expected compiler behavior
+- Compiler-generated: Yes -- __init__ initialization of all module globals
+- Correctly decompiled: Yes -- 109814 ops, 0 errors, all opcodes decoded
+- Already safeguarded: Yes -- B12 giant_section_size markers active
+- Any possible decompiler fix? NO -- function size is compiler-driven by ~28K Farever globals. No possible decompiler change can reduce instruction count
+- Farever-specific? NO -- any large HL program will have a large init
+- Actionable? NO -- this is expected compiler behavior
 
 **Changes:**
 - `scripts/decompiler_quality_report.py`: Removed Bucket 9 (giant init) from `analyze_farever_quality_frontier()`; added B21 row to "Previously Resolved Frontiers" table; updated frontier intro text
@@ -159,10 +226,10 @@ Giant init: **resolved** (safe_expected, non-actionable, removed from active fro
 
 | Count | Category | Assessment |
 |-------|----------|------------|
-| 11 | declared_void | Callee returns Void — expected |
-| 3 | declared_dynamic | Callee returns Dynamic — expected |
-| 1 | virtual_receiver | K_VIRTUAL receiver type — expected |
-| **2** | **unclassified → resolved_concrete** | **Classification bug fix (B22): had concrete resolved types (String, ArrayObj) but were marked default "unclassified". Now correctly "resolved_concrete".** |
+| 11 | declared_void | Callee returns Void -- expected |
+| 3 | declared_dynamic | Callee returns Dynamic -- expected |
+| 1 | virtual_receiver | K_VIRTUAL receiver type -- expected |
+| **2** | **unclassified -> resolved_concrete** | **Classification bug fix (B22): had concrete resolved types (String, ArrayObj) but were marked default "unclassified". Now correctly "resolved_concrete".** |
 
 **Operand-kind bug fix in `_analyze_call_return()`:** When `is_resolvable=True` (concrete return type found), set `unresolved_category = CR_CAT_RESOLVED_CONCRETE` instead of leaving the default `CR_CAT_UNCLASSIFIED`. This prevents 2 successfully-resolved cases from being counted as "unclassified" unresolved.
 
@@ -202,11 +269,11 @@ Call return unresolved: **resolved** (all 17 expected/non-actionable, removed fr
 
 | Count | Subcategory | Assessment |
 |-------|-------------|-----------|
-| 15 | null_target_virtual_unsupported | K_VIRTUAL → Dynamic — expected |
-| 8 | null_target_fun_or_method_type | K_FUN/K_METHOD → Dynamic — expected |
-| 4 | null_target_declared_dynamic | K_DYN — expected |
+| 15 | null_target_virtual_unsupported | K_VIRTUAL -> Dynamic -- expected |
+| 8 | null_target_fun_or_method_type | K_FUN/K_METHOD -> Dynamic -- expected |
+| 4 | null_target_declared_dynamic | K_DYN -- expected |
 | 2 | null_target_unknown | **Expected:** apply[22059] v14 = call argument (known K_ENUM h3d.DepthBinding); hide[16049] t4 = null register with no tracked consumer (K_ENUM world.terrain.CellFlag, field index arg to OSetThis) |
-| 1 | null_target_phi_or_branch_merge | Branch/phi merge — expected |
+| 1 | null_target_phi_or_branch_merge | Branch/phi merge -- expected |
 
 **All 30 cases non-actionable.** 0 actionable null targets remain in Track B.
 
@@ -234,17 +301,17 @@ Null-without-target-type: **resolved** (all 30 expected/non-actionable, removed 
 - pytest: 623 passed, 4 skipped (no regressions)
 - Track A: 7/7, zero frontier locked (actionable_dynamic=0, null=0, call_return=0)
 - Track B: 4 frontier entries (null removed), 0 errors, 0 r10+, func_idx_ref=0, call-return still 17
-- Null-target subcategories: 0 actionable, 2 unknown (both expected — call arg + unused null)
+- Null-target subcategories: 0 actionable, 2 unknown (both expected -- call arg + unused null)
 - ASCII: PASS
 - Farever parity: 9/9 PASS
 
 ### B23 Report Rewrite (Session 40 final turn)
-Added dedicated B23 detail section to `decompiler_quality_report.py` (~+134 lines), following B18/B19 pattern — subcategory table with per-row assessment, per-subcategory explanation paragraphs, unknown-cases detail (apply[22059] v14 + hide[16049] t4), classification fix description, and closure statement. Report regenerated: section appears at lines 363-397 in `report.md`. Removed unused variable/dead code. Files: `scripts/decompiler_quality_report.py` (+256/-94 total, including B23 inline section + B23 frontier removal).
+Added dedicated B23 detail section to `decompiler_quality_report.py` (~+134 lines), following B18/B19 pattern -- subcategory table with per-row assessment, per-subcategory explanation paragraphs, unknown-cases detail (apply[22059] v14 + hide[16049] t4), classification fix description, and closure statement. Report regenerated: section appears at lines 363-397 in `report.md`. Removed unused variable/dead code. Files: `scripts/decompiler_quality_report.py` (+256/-94 total, including B23 inline section + B23 frontier removal).
 
 ### B23 Evidence Appendix (Session 41)
 Per-case null-without-target-type detail table for durable evidence retention. Covers all 30 cases from Track B (sample=200). Regeneratable via `scripts/extract_b23_null_detail.py workspace/Farever/hlboot.dat`. JSON dump: `decompiler_quality_report/b23_null_detail.json`.
 
-**Validation:** Subcategory counts match B23 closure exactly — 15 virtual_unsupported, 8 fun_or_method_type, 4 declared_dynamic, 2 unknown, 1 phi_or_branch_merge. Total: 30/30.
+**Validation:** Subcategory counts match B23 closure exactly -- 15 virtual_unsupported, 8 fun_or_method_type, 4 declared_dynamic, 2 unknown, 1 phi_or_branch_merge. Total: 30/30.
 
 | # | Func Idx | Func Name | FIndex | Instr | Dest Var | Type Kind | Subcategory | Reason |
 |---|----------|-----------|--------|-------|----------|-----------|-------------|--------|
@@ -286,7 +353,7 @@ Key observations:
 - **2 unknown** (both expected): apply[22059] v14 = optional enum constructor arg to K_ENUM h3d.DepthBinding; hide[16049] t4 = OSetThis field index arg with no consumer tracking.
 - **1 phi_or_branch_merge**: charAt[3796] v1 = null flows through branch merge.
 
-## Session 39 — June 8, 2026 (B18 + B19 CLOSED)
+## Session 39 -- June 8, 2026 (B18 + B19 CLOSED)
 - Start: New session initialized on Discord (OmniDecomp / Session 39).
 - Model: deepseek/deepseek-v4-pro via OpenRouter.
 - Project state: 620 passed, 4 skipped.
@@ -300,14 +367,14 @@ Key observations:
 - Split into: Function-index callee fallback (383) + True dead/raw register fallback (50)
 - Both diagnostic_only
 
-### B19: Deterministic _build_call Fix (383 → 0)
+### B19: Deterministic _build_call Fix (383 -> 0)
 **Root cause:** `_build_call()` routed `args[1]` through `_reg_var()`, producing `r{findex}(...)` instead of resolved name or neutral fallback. Same class of bug as B17 (args[1] treated as register).
 
 **Fix (`hl_decompile.py`):**
 - Changed `_build_call()` to use `_resolve_callee_name(args[1])` instead of `_reg_var(args[1])`
 - Added `_resolve_callee_name()`: resolves to FunctionDef.name, falls back to `fun[{findex}]`, handles K_FUN/K_METHOD type-index path
 
-**Impact:** Function-index callee fallback 383 → 0. True registers 50 → 7. Total r10+ 433 → 7.
+**Impact:** Function-index callee fallback 383 -> 0. True registers 50 -> 7. Total r10+ 433 -> 7.
 
 ### Changes (B18 + B19 combined)
 - `hl_decompile.py`: `_build_call()` fix, `_resolve_callee_name()` added, B17 liveness unchanged
@@ -325,7 +392,7 @@ Key observations:
 | 6 | True dead/raw register fallback | 7 | diagnostic_only |
 | 7 | Giant init func[46044] | 1 | safe_deterministic |
 
-(+ Dynamic type refs 204 rollup_only; Function-index callee fallback 383 → 0 resolved by B19)
+(+ Dynamic type refs 204 rollup_only; Function-index callee fallback 383 -> 0 resolved by B19)
 
 ### Validation
 - pytest: 620 passed, 4 skipped (+7 new tests: 4 B17 + 3 B19, 0 regressions)
@@ -334,9 +401,9 @@ Key observations:
 - ASCII-safety: PASS
 - Farever parity: 9/9 PASS
 
-**Session 39 closed — commit and push.**
+**Session 39 closed -- commit and push.**
 
-## Session 38 — June 8, 2026 (CLOSED)
+## Session 38 -- June 8, 2026 (CLOSED)
 - Start: New session initialized on Discord OmniDecomp thread.
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
 - Version: g6.0-38-g060a341 -> g6.0-38-65-g98be7c8 (8 files changed, +877/-539).
@@ -364,7 +431,7 @@ Key observations:
 | **Output files** | 5,120 |
 | **Parser errors** | 0 |
 | **Parser malformed** | 0 |
-| **Session label** | Session 38 — June 8, 2026 (post-May 29 Steam update) |
+| **Session label** | Session 38 -- June 8, 2026 (post-May 29 Steam update) |
 
 ### Historical Comparison (Pre-Update)
 Pre-update values (hlboot.dat old backup, MD5 `7014abbad...`, 13,311,404 bytes):
