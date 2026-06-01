@@ -1,6 +1,23 @@
 |     1|# Session Tracking
      2|
-     3|## Session 46 -- June 1, 2026
+     3|## Session 47 -- June 1, 2026
+     4|- Start: New session initialized on Discord (OmniDecomp / Session 47).
+     5|- Model: deepseek/deepseek-v4-flash via OpenRouter.
+     6|- Version: g6.0-47-g04d4363 (clean tree).
+     7|- Project state: 636 passed, 4 skipped (Session 46 final state).
+     8|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+     9|- Track B: 200 sampled, 0 errors, 5,120 output files.
+    10|- Active frontier: 2 buckets -- goto/label (718 diagnostic_only), unresolved fields (149 diagnostic_only).
+    11|- B34 completed: goto chain resolution (negative probe -- pure bridge detection does not resolve after_goto_block).
+    12|- **B35: After-goto-block diagnostic deep-dive -- COMPLETE**
+    13|- **B35 outcome:** 150 after_goto_block cases classified: 143 (95%) loop_switch_if_boundary, 7 (4%) real_predecessor_has_side_effects. Zero label-to-label chains, missed cleanups, or dead blocks.
+    14|- **B36 recommendation: NO-GO.** 100% of after_goto_block cases are structurally required. No safe diagnostic behavior target exists.
+    15|- **B36: Field-name frontier preflight -- COMPLETE**
+    16|- **B36 outcome:** 149 IR-level fallbacks analyzed: 145 (97%) object_struct_field_table_missing_or_ambiguous, 4 (3%) enum_field_unresolved_or_misclassified. Zero direct type-pool evidence cases. 50 source-text fN patterns reconciled across 10 files.
+    17|- **B37 recommendation: NO-GO.** Zero cases with direct type-pool field name evidence. All 149 fallback cases are genuinely unresolvable from HL type metadata.
+    18|- **Next task: UNKNOWN -- awaiting instructions.**
+    19|
+    20|## Session 46 -- June 1, 2026
 |- Start: New session initialized on Discord (OmniDecomp / Session 46).
 |- Model: deepseek/deepseek-v4-flash via OpenRouter.
 |- Version: g6.0-46-g7085d1b (clean tree).
@@ -12,6 +29,147 @@
 |- **Accepted frontier:** 2 independent buckets -- goto/label (718 diagnostic_only), unresolved fields (149 diagnostic_only).
 |- **B34 outcome:** _resolve_goto_chains() implemented and tested. Effectively zero Track B impact. Pure CFG bridge detection does not resolve after_goto_block cases.
 |- **Key finding:** after_goto_block cases (150) are not resolvable via pure bridge detection -- targets are after a goto block, not AT a bridge. Resolution requires label-to-label chain detection at IR statement level. B33 hypothesis was wrong; B34 corrects it.
+
+### B35: After-Goto-Block Diagnostic Deep-Dive
+
+**Goal:** Diagnose the true structure behind after_goto_block cases after B34 proved pure CFG bridge resolution is not the answer.
+
+**Scope:** Diagnostic-only. No parser/decompiler/writer/CLI/GUI behavior changes.
+
+**Method:** Reused B26/B28 pipeline (parse Farever hlboot.dat, sample 200 functions with seed=42, decompile each, write Haxe output). For each after_goto_block goto (classified via CFG `structure="goto"` predecessor check in `classify_goto_with_cfg()`), collected:
+- Function info (name, func_idx, findex, nops, nregs)
+- IR statement window around the goto
+- Source statement window around the goto
+- Predecessor CFG block details (structure, opcodes, instructions)
+- Target CFG block details (structure, opcodes, predecessors)
+- Label chain analysis: stmts following the target label
+
+**Subcategory Classification Logic:**
+1. `ir_label_to_label_chain`: Target label immediately followed by another `goto @M` in the IR -- the first goto could be redirected.
+2. `missed_goto_to_next_label_cleanup`: `label @N` follows `goto @N` at non-immediate position, missed by `_cleanup_goto_labels()`.
+3. `loop_switch_if_boundary`: Target block has a predecessor with a control-flow structure label (`if-then`, `if-else`, `while-header`, `switch`, `then`, `else`, `loop-latch`).
+4. `real_predecessor_has_side_effects`: Predecessor block with `structure="goto"` contains real instructions (vars, field ops, calls) before the final OJAlways.
+5. `unreachable_dead_block`: Target block has no predecessors.
+6. `unknown`: Default fallback.
+
+**Results (200-function sample, seed=42):**
+
+| Subcategory | Count | Percentage |
+|-------------|-------|------------|
+| `loop_switch_if_boundary` | 143 | 95% |
+| `real_predecessor_has_side_effects` | 7 | 4% |
+| `ir_label_to_label_chain` | 0 | 0% |
+| `missed_goto_to_next_label_cleanup` | 0 | 0% |
+| `unreachable_dead_block` | 0 | 0% |
+| `unknown` | 0 | 0% |
+| **Total** | **150** | **100%** |
+
+**Key Findings:**
+
+1. **95% are loop/switch/if boundary cases.** The after_goto_block goto targets a block whose predecessor (in the CFG) is a control-flow structure boundary (`then`, `else`, `while-header`, `switch`, etc.). The goto bridges control flow from a flat region into a structured region.
+
+2. **4% have real side effects in the predecessor.** The predecessor `structure="goto"` block contains real instructions (e.g., OP6, OP36) before the final OJAlways. The goto documents flow across a goto-structured boundary.
+
+3. **Zero label-to-label chains (0/150).** None of the after_goto_block cases have the `goto @N -> label @N -> goto @M` pattern. The B34 hypothesis that IR-level label-to-label chain detection would resolve after_goto_block was incorrect.
+
+4. **Zero missed cleanup targets (0/150).** `_cleanup_goto_labels()` already handles all immediate goto-to-next-label pairs. No remaining after_goto_block cases are simple cleanup misses.
+
+5. **Zero dead blocks (0/150).** All target blocks have valid predecessors.
+
+**B36 Recommendation: NO-GO.**
+
+No subcategory has zero side-effect count suitable for a safe behavior target:
+- **143 cases** require ControlStructurer enhancement (intentional engineering, not diagnostic work) -- they document genuine control flow across structured boundaries.
+- **7 cases** are structurally required -- they have real instructions in the predecessor block.
+- **0 cases** are label-to-label chains or missed cleanup opportunities -- the most promising B36 direction is eliminated.
+
+**Pause after_goto_block. No safe diagnostic milestone remains.**
+
+**Artifacts created:**
+- `scripts/b35_analyze_after_goto_block.py` (new, report-only, follows B26/B28 pattern)
+- `decompiler_quality_report/b35_after_goto_block_detail.json` (generated, gitignored, 150-case detail dump)
+- `decompiler_quality_report/b35_summary.md` (generated, gitignored)
+
+**Validation:**
+- pytest: 636 passed, 4 skipped (0 regressions)
+- Track A: 7/7, zero frontier LOCKED (unchanged)
+- Track B: 200 sampled, 0 errors, 2 active frontier entries (unchanged)
+- Actually modifies: MEMORY.md + new extraction script only. No parser, decompiler, writer, CLI, GUI, or test code modified.
+- ASCII-safety: PASS on all generated artifacts and MEMORY.md.
+
+### B36: Field-Name Frontier Preflight
+
+**Goal:** Diagnostic-only preflight of unresolved field names (fN fallbacks) in Track B output, to decide whether field-name behavior has a safe, evidence-backed next milestone.
+
+**Scope:** Diagnostic-only. No parser/decompiler/writer/CLI/GUI behavior changes.
+
+**Method:** Reused B26/B28/B35 pipeline (parse Farever hlboot.dat, sample 200 functions with seed=42, decompile each, write Haxe output). For each IR-level field_resolve_diag fallback (is_fallback=True), collected:
+- Function info, receiver type details, opcode, field index
+- Type pool evidence check: does the parsed type table contain the field name at the requested index?
+- Cross-referenced with source-text regex scan (`\bf\d+\b` across all 5120 output files)
+
+**Reconciliation with B30 Baseline:**
+
+| Metric | B36 Value | Equivalent B30 Reference | Explanation |
+|--------|-----------|--------------------------|-------------|
+| Source-text fN regex count | 50 | 50 (not 149) | Same 200-sample scope. The B30 note calling 149 "source-text" was inaccurate: the quality report's frontier displays `field_diag_total` (IR-level) when available, falling back to source-text regex only when instrumentation is absent. The `likely_cause` text confirms: "IR-level field_resolve_diag count: 149 fallbacks... Regex source-text scan counts 50 fN patterns." |
+| IR-level field_resolve_diag fallbacks | 149 | 149 (currently) / 94 (old binary) | Current binary gives 149. B30's "94" was from the pre-Session-38 binary (different hlboot.dat); the binary update added +98 functions, +62 types, producing more OOB field indices in the bytecode. |
+| IR-level resolved field names | 1,859 | 1,859 | Consistent with quality report. |
+| Gap source-text vs IR-level | 99 | Same | HaxeWriter/ClassBuilder post-processing transforms some fN fallbacks into representations not matching the `\bf\d+\b` regex (e.g., `field{idx}`, `f_{idx}`, or optimized away). These are output-only presentation differences -- every IR-level fallback corresponds to a genuine bytecode field-index resolution failure. |
+
+**Scope confirmation:** B36 measures the SAME 200-function sample (seed=42) as B30. Both the source-text count (50) and IR-level count (149) are from the identical decompilation scope. No "functions outside the 200-sample scope" affect either number.
+
+**B6 Subcategory Breakdown (IR level, 149 fallbacks):**
+| Subcategory | Count |
+|-------------|-------|
+| receiver_object_field_index_oob | 127 |
+| this_field_index_oob | 18 |
+| enum_receiver_not_enum_opcode | 4 |
+| **Total** | **149** |
+
+**B36 Subcategory Breakdown (149 total):**
+| Subcategory | Count | Pct | Actionability |
+|-------------|-------|-----|---------------|
+| object_struct_field_table_missing_or_ambiguous | 145 | 97% | diagnostic_only |
+| enum_field_unresolved_or_misclassified | 4 | 3% | diagnostic_only |
+| direct_type_pool_field_name_available_but_not_propagated | 0 | 0% | speculative_blocked |
+| receiver_type_unknown_dynamic | 0 | 0% | diagnostic_only |
+| virtual_anonymous_structural_field | 0 | 0% | diagnostic_only |
+| output_only_classbuilder_haxewriter_artifact | 0 | 0% | diagnostic_only |
+| invalid_oob_field_evidence | 0 | 0% | diagnostic_only |
+| unknown | 0 | 0% | diagnostic_only |
+
+**Key Findings:**
+
+1. **Zero direct type-pool evidence cases (0/149).** For every single fallback, a type-pool evidence check confirmed that no field name exists at the requested field index for the resolved receiver type. The `_resolve_field_name` resolver is not missing any propagation -- the type metadata simply doesn't contain the answer.
+
+2. **97% are object/struct field index OOB.** 145 cases where the receiver is K_OBJ or K_STRUCT but the field index exceeds the known field table (including inherited fields). These are genuine OOB: the field index in the bytecode references a field position that doesn't exist in the parsed type's field table.
+
+3. **3% are enum receiver via wrong opcode.** 4 cases where a K_ENUM receiver is accessed through OField/OSetField (non-enum opcodes) instead of OEnumField/OSetEnumField. The opcode type mismatch prevents the enum field resolver from being used.
+
+4. **IR-level fallback count (149) matches Track B frontier.** All 149 cases map to known B6 subcategories. No new or unclassified patterns discovered.
+
+**B37 Recommendation: NO-GO.**
+
+Zero cases have direct type-pool field name evidence that isn't already being propagated:
+- **145 cases** are genuine field index OOB -- no field name exists in the type table.
+- **4 cases** are enum-via-wrong-opcode -- opcode mismatch prevents enum resolution.
+- **0 cases** have a known field name in the type pool that was missed.
+
+**Pause field-name work. No safe diagnostic milestone remains.**
+
+**Artifacts created:**
+- `scripts/b36_analyze_field_names.py` (new, report-only, follows B26/B28/B35 pattern)
+- `decompiler_quality_report/b36_field_name_detail.json` (generated, gitignored, 149-case detail with type-pool evidence per case)
+- `decompiler_quality_report/b36_summary.md` (generated, gitignored)
+
+**Validation:**
+- pytest: 636 passed, 4 skipped (0 regressions)
+- Track A: 7/7, zero frontier LOCKED (unchanged)
+- Track B: 200 sampled, 0 errors, 2 active frontier entries (unchanged)
+- Actually modifies: MEMORY.md + new extraction script only. No parser, decompiler, writer, CLI, GUI, or test code modified.
+- ASCII-safety: PASS on all generated artifacts and MEMORY.md.
+
 
 ### B31: Virtual Type Unsupported Evidence Audit and Closure
 
