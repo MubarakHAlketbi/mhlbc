@@ -308,7 +308,11 @@ class IRExpr(IRValue):
         if n == 0:
             return f"/* malformed: {self.op}() */"
         if n == 1:
-            return f"{self.op}{self.args[0]}"
+            inner = str(self.args[0])
+            # Parenthesize compound inner expressions for unary ops like !
+            if isinstance(self.args[0], IRExpr) and len(self.args[0].args) >= 2:
+                inner = f"({inner})"
+            return f"{self.op}{inner}"
         if n == 2:
             return f"{self.args[0]} {self.op} {self.args[1]}"
         return f"{self.op}({', '.join(str(a) for a in self.args)})"
@@ -2521,7 +2525,7 @@ class ControlStructurer:
     WARNING — This is a **partial implementation**:
         - If/else: handled for simple conditional jumps (if-then, if-then-else)
         - While loops: handled for simple natural loops (header+body+latch pattern)
-        - Switch: NOT yet structured; OSwitch emits as a flat comment
+        - Switch: simple OSwitch regions with linear case bodies and provable breaks (B38)
         - Try/catch: NOT yet structured; OTrap/OCatch/OEndTrap emit as flat comments
 
         For complex control flow the structurer falls back to flat statement
@@ -2699,9 +2703,15 @@ class ControlStructurer:
                     func_stmts: Dict[int, List[IRStmt]],
                     visited: Set[int],
                     result: List[IRStmt],
-                    loop_info: Dict[int, Dict]):
-        """Recursively walk blocks in topological order, producing structured output."""
+                    loop_info: Dict[int, Dict],
+                    stop_at_merge: Optional[int] = None):
+        """Recursively walk blocks in topological order, producing structured output.
+
+        If *stop_at_merge* is set, edges targeting that block are not followed
+        and the block itself is not walked (left for the outer caller)."""
         if blk_id in visited or blk_id not in block_map:
+            return
+        if stop_at_merge is not None and blk_id == stop_at_merge:
             return
         visited.add(blk_id)
 
@@ -2730,11 +2740,19 @@ class ControlStructurer:
 
             condition = self._build_condition(last)
             if condition is not None:
-                # Emit non-branch statements from the header
-                result.extend(block_stmts)
-
-                # Collect loop body statements
+                # BUGFIX: Header non-branch stmts go INSIDE the loop body,
+                # not before the while.  The conditional jump (last) is the
+                # loop exit test; everything before it (label, incr, arith)
+                # is the loop body prologue.
                 body_stmts: List[IRStmt] = []
+                # All header stmts except the conditional jump (last one)
+                body_stmts.extend(block_stmts[:-1])
+
+                # BUGFIX: The conditional jump goes TO the exit when its
+                # condition is true.  The loop continues while its condition
+                # is false.  Negate so ``while (!cond)`` is correct.
+                neg_cond = IRExpr("!", [condition])
+
                 walked_body = set()
                 # Walk body entry blocks; recursive _walk_block follows
                 # successors internally, including nested if/else patterns.
@@ -2742,63 +2760,103 @@ class ControlStructurer:
                     if bid not in visited and bid not in walked_body:
                         walked_body.add(bid)
                         self._walk_block(bid, block_map, func_stmts,
-                                         visited, body_stmts, loop_info)
+                                         visited, body_stmts, loop_info,
+                                         stop_at_merge=stop_at_merge)
 
                 # Append latch blocks (if not already walked via body traversal)
                 for lid in info["latch_ids"]:
                     if lid not in visited and lid not in walked_body:
                         walked_body.add(lid)
                         self._walk_block(lid, block_map, func_stmts,
-                                         visited, body_stmts, loop_info)
-
+                                         visited, body_stmts, loop_info,
+                                         stop_at_merge=stop_at_merge)
                 # Create while IR statement
-                while_stmt = IRStmt("while", src=condition, blocks=[body_stmts])
+                while_stmt = IRStmt("while", src=neg_cond, blocks=[body_stmts])
                 result.append(while_stmt)
 
                 # Follow exit path
                 for eid in exit_ids:
                     if eid not in visited:
                         self._walk_block(eid, block_map, func_stmts,
-                                         visited, result, loop_info)
+                                         visited, result, loop_info,
+                                         stop_at_merge=stop_at_merge)
+                return
+        # --- SWITCH HEADER: structure OSwitch regions ---
+        if last and last.opcode == 70:
+            if self._try_structure_switch(blk, block_map, func_stmts,
+                                          visited, result, loop_info,
+                                          stop_at_merge=stop_at_merge):
                 return
 
         # --- STANDARD FLOW (non-loop blocks) ---
         result.extend(block_stmts)
 
         if last and last.opcode == 58:  # OJAlways
-            # Unconditional jump — follow if not back-edge
+            # Unconditional jump -- follow if not back-edge
             target = last.jump_target
             if target is not None and target <= blk.start_ip:
-                pass  # back-edge — handled by loop detection or silent fallback
+                pass  # back-edge -- handled by loop detection or silent fallback
             elif succs:
                 for sid in succs:
+                    if stop_at_merge is not None and sid == stop_at_merge:
+                        continue
                     self._walk_block(sid, block_map, func_stmts,
-                                     visited, result, loop_info)
+                                     visited, result, loop_info,
+                                     stop_at_merge=stop_at_merge)
 
         elif last and _JUMP_OPCODES and last.opcode in _JUMP_OPCODES and last.opcode != 58:
-            # Conditional jump — try if-then/if-else pattern
+            # Conditional jump -- try if-then/if-else pattern with merge detection
             condition = self._build_condition(last)
             if condition is not None:
-                if_res = IRStmt("if", src=condition, blocks=[[], []])
-                # Then block: first successor
-                if succs:
-                    then_stmts: List[IRStmt] = []
-                    self._walk_block(succs[0], block_map, func_stmts,
-                                     visited, then_stmts, loop_info)
-                    if_res.blocks[0] = then_stmts
-                # Else block: if there's a second successor
-                if len(succs) > 1:
-                    else_stmts: List[IRStmt] = []
-                    self._walk_block(succs[1], block_map, func_stmts,
-                                     visited, else_stmts, loop_info)
-                    if_res.blocks[1] = else_stmts
-                result.append(if_res)
+                merge_bid = self._find_if_merge(blk_id, succs, block_map,
+                                                 visited, loop_info,
+                                                 stop_at_merge)
+                if merge_bid is not None:
+                    # Provable merge exists -- structure if/else cleanly
+                    if_res = IRStmt("if", src=condition, blocks=[[], []])
+                    if succs:
+                        then_stmts: List[IRStmt] = []
+                        self._walk_block(succs[0], block_map, func_stmts,
+                                         visited, then_stmts, loop_info,
+                                         stop_at_merge=merge_bid)
+                        if_res.blocks[0] = then_stmts
+                    if len(succs) > 1:
+                        else_stmts: List[IRStmt] = []
+                        self._walk_block(succs[1], block_map, func_stmts,
+                                         visited, else_stmts, loop_info,
+                                         stop_at_merge=merge_bid)
+                        if_res.blocks[1] = else_stmts
+                    result.append(if_res)
+                    # Walk merge only if it is not the outer stop (else-if chain)
+                    if stop_at_merge is None or merge_bid != stop_at_merge:
+                        self._walk_block(merge_bid, block_map, func_stmts,
+                                         visited, result, loop_info,
+                                         stop_at_merge=stop_at_merge)
+                else:
+                    # No provable merge -- fall back to inline walk
+                    if_res = IRStmt("if", src=condition, blocks=[[], []])
+                    if succs:
+                        then_stmts: List[IRStmt] = []
+                        self._walk_block(succs[0], block_map, func_stmts,
+                                         visited, then_stmts, loop_info,
+                                         stop_at_merge=stop_at_merge)
+                        if_res.blocks[0] = then_stmts
+                    if len(succs) > 1:
+                        else_stmts: List[IRStmt] = []
+                        self._walk_block(succs[1], block_map, func_stmts,
+                                         visited, else_stmts, loop_info,
+                                         stop_at_merge=stop_at_merge)
+                        if_res.blocks[1] = else_stmts
+                    result.append(if_res)
         else:
             # Sequential: follow fall-through
             if succs:
                 for sid in succs:
+                    if stop_at_merge is not None and sid == stop_at_merge:
+                        continue
                     self._walk_block(sid, block_map, func_stmts,
-                                     visited, result, loop_info)
+                                     visited, result, loop_info,
+                                     stop_at_merge=stop_at_merge)
 
     def _build_condition(self, instr: Instruction) -> Optional[IRValue]:
         """Build a condition expression from a conditional jump instruction."""
@@ -2847,6 +2905,240 @@ class ControlStructurer:
         for idx in sorted(func_stmts.keys()):
             result.extend(func_stmts[idx])
         return result
+
+    # ── If/else merge detection ───────────────────────────────────────────
+
+    def _find_if_merge(self, header_bid: int,
+                       succs: List[int],
+                       block_map: Dict[int, BasicBlock],
+                       visited: Set[int],
+                       loop_info: Dict[int, Dict],
+                       stop_at_merge: Optional[int] = None) -> Optional[int]:
+        """Find the first block reachable from ALL branch targets.
+
+        Returns the merge block ID, or None if no common successor exists.
+        This is used to place the post-if merge block correctly (outside
+        the if/else) rather than inlining it into whichever branch is
+        walked first.
+
+        ``stop_at_merge`` is the outer boundary from a containing if/else;
+        blocks matching it are still included (they are the merge candidate
+        for an else-if chain).
+        """
+        if len(succs) < 2:
+            return None
+
+        branch_reach: List[Set[int]] = []
+        for sid in succs:
+            reachable: Set[int] = set()
+            queue = [sid]
+            seen: Set[int] = set()
+            while queue:
+                bid = queue.pop(0)
+                if bid in seen or bid not in block_map:
+                    continue
+                seen.add(bid)
+                # Allow the outer stop block -- it is the merge candidate
+                if bid in visited and bid != stop_at_merge:
+                    continue
+                if bid == header_bid:
+                    continue
+                # Skip blocks that are still in a loop body (not the merge)
+                if loop_info and bid in loop_info:
+                    continue
+                reachable.add(bid)
+                blk = block_map[bid]
+                for succ_id in blk.successors:
+                    if succ_id not in seen and succ_id != header_bid:
+                        queue.append(succ_id)
+            branch_reach.append(reachable)
+
+        if not branch_reach:
+            return None
+
+        common = branch_reach[0].copy()
+        for rs in branch_reach[1:]:
+            common &= rs
+
+        if not common:
+            return None
+
+        # Pick the first common block by block-ID order (topological)
+        merge_bid = min(common)
+        return merge_bid
+
+    # ── Switch structuring ────────────────────────────────────────────────
+
+    def _try_structure_switch(self, blk: BasicBlock,
+                               block_map: Dict[int, BasicBlock],
+                               func_stmts: Dict[int, List[IRStmt]],
+                               visited: Set[int],
+                               result: List[IRStmt],
+                               loop_info: Dict[int, Dict],
+                               stop_at_merge: Optional[int] = None) -> bool:
+        """Attempt to structure a simple OSwitch region.
+
+        Returns True if the switch was successfully structured.
+        Falls back (returns False) for complex / ambiguous cases.
+
+        Criteria for a "simple" switch:
+        - At least 2 case targets
+        - Each case entry block has the switch header as its sole predecessor
+        - Each case body is a strictly linear chain (no internal if/else/loop)
+        - Each case body ends with OJAlways break to the post-switch block
+          or is a terminal dead-end (ORet)
+        - Post-switch block exists (fall-through after OSwitch)
+        - No case entry is a loop header
+        """
+        last = blk.instructions[-1]
+        if last.opcode != 70:
+            return False
+
+        cases = last.jump_cases or []
+        default_target = last.jump_default
+
+        if len(cases) < 2:
+            return False
+
+        # ── Map case targets to block IDs ──
+        case_order: List[int] = []   # block IDs in case order
+        for t in cases:
+            bid = self._ip_to_block.get(t)
+            if bid is not None and bid != blk.id:
+                case_order.append(bid)
+        if default_target is not None:
+            bid = self._ip_to_block.get(default_target)
+            if bid is not None and bid != blk.id:
+                case_order.append(bid)
+
+        if not case_order:
+            return False
+
+        # ── Post-switch block (fall-through) ──
+        fall_through = last.index + 1
+        post_switch_bid = self._ip_to_block.get(fall_through)
+        if post_switch_bid is None:
+            self._log("STRUCT",
+                      f"OSwitch@{last.index}: no post-switch block, falling back",
+                      WARN)
+            return False
+
+        # ── Simplicity checks on case entries ──
+        for bid in case_order:
+            cb = block_map.get(bid)
+            if cb is None:
+                return False
+            if bid in visited:
+                return False
+            # Sole predecessor: switch header
+            if cb.predecessors != [blk.id]:
+                return False
+            # Not a loop header
+            if loop_info and bid in loop_info:
+                return False
+
+        # ── Verify each case body is simple and pre-collect IR stmts ──
+        case_bodies: List[List[IRStmt]] = []
+        blocks_to_mark: Set[int] = set()
+        for bid in case_order:
+            ok, stmts, local_blocks = self._walk_simple_case_body(
+                bid, post_switch_bid, block_map, func_stmts)
+            if not ok:
+                return False
+            case_bodies.append(stmts)
+            blocks_to_mark.update(local_blocks)
+
+        # ── Emit header statements (before OSwitch) ──
+        for instr in blk.instructions[:-1]:
+            s_list = func_stmts.get(instr.index, [])
+            result.extend(s_list)
+
+        # ── Mark all walked blocks as visited ──
+        visited.add(blk.id)
+        for bid in blocks_to_mark:
+            visited.add(bid)
+        visited.add(post_switch_bid)
+
+        # ── Build structured switch IR ──
+        val_reg = last.args[0]
+        val_name = self.reg_names.get(val_reg, f"r{val_reg}")
+        ncases = len(cases)
+        has_default = default_target is not None
+        switch_stmt = IRStmt("switch", src=IRVar(val_name, reg=val_reg),
+                              blocks=case_bodies,
+                              extra={"ncases": ncases,
+                                     "has_default": has_default})
+        result.append(switch_stmt)
+
+        # ── Walk post-switch block ──
+        if post_switch_bid not in visited:
+            self._walk_block(post_switch_bid, block_map, func_stmts,
+                             visited, result, loop_info,
+                             stop_at_merge=stop_at_merge)
+
+        return True
+
+    def _walk_simple_case_body(self, start_bid: int,
+                                post_switch_bid: int,
+                                block_map: Dict[int, BasicBlock],
+                                func_stmts: Dict[int, List[IRStmt]]):
+        """Walk a simple (linear, no internal control flow) case body.
+
+        Returns (ok, stmts, block_ids) where:
+        - ok: True if the body is a valid simple case body
+        - stmts: pre-collected IRStmts for the entire case body
+        - block_ids: set of block IDs walked (to mark as visited later)
+        """
+        stmts: List[IRStmt] = []
+        block_ids: Set[int] = set()
+        local_visited: Set[int] = set()
+
+        current_bid = start_bid
+        while current_bid is not None:
+            if current_bid in local_visited:
+                break  # cycle -- shouldn't happen in well-formed bytecode
+            local_visited.add(current_bid)
+            block_ids.add(current_bid)
+
+            cb = block_map.get(current_bid)
+            if cb is None:
+                return False, [], set()
+
+            # Collect statements for this block
+            for instr in cb.instructions:
+                s_list = func_stmts.get(instr.index, [])
+                stmts.extend(s_list)
+
+            last_instr = cb.instructions[-1] if cb.instructions else None
+            if last_instr is None:
+                break
+
+            # OJAlways → break to post-switch
+            if last_instr.opcode == 58:
+                target = last_instr.jump_target
+                target_bid = (self._ip_to_block.get(target)
+                              if target is not None else None)
+                if target_bid == post_switch_bid:
+                    return True, stmts, block_ids  # Valid break
+                # Jump to somewhere else → case body too complex
+                return False, [], set()
+
+            # Conditional jump inside case body → too complex
+            if last_instr.opcode in _JUMP_OPCODES:
+                return False, [], set()
+
+            # Sequential: follow first unvisited successor that is not
+            # the post-switch block (skip that -- will be walked after switch)
+            next_bid = None
+            for sid in cb.successors:
+                if sid not in local_visited and sid != post_switch_bid:
+                    next_bid = sid
+                    break
+            current_bid = next_bid
+
+        # Reached end of chain without break or dead-end
+        # Accept as valid if the case body doesn't leak into other cases
+        return True, stmts, block_ids
 
 
 # ============================================================================

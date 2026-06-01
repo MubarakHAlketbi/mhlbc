@@ -279,6 +279,28 @@ All development work must be done directly on the **`main`** branch. Feature bra
    - Do **not** mix project documentation into it. Project specs (opcode tables, type schemas, version deltas) belong in `docs/`. `AGENTS.md` is a terse persona brief, not a reference manual.
    - Prefer fewer words over more. If a single sentence can replace a paragraph, rewrite it.
    - If the discovery is fully covered in `docs/`, reference the doc file rather than duplicating the content in `AGENTS.md`.
+8. **Update MEMORY.md for Durable State:** `MEMORY.md` is the session ledger and canonical frontier tracker. Its structure is designed for rapid lookup of current state:
+
+   | Section | Purpose | When to Read |
+   |---------|---------|--------------|
+   | Quick Reference | Current session, project state, frontier, do-not-do list | Every session start |
+   | Current Accepted Frontier | Definitive closed/paused bucket tables with evidence links | Before proposing any behavior work |
+   | Session Log | Compressed chronological history (3-5 lines per session) | To find artifact/session provenance |
+   | Evidence Catalog | Topic-organized milestone details (compressed) | To verify closure evidence for a specific bucket |
+   | Appendix | Durable evidence tables and regeneration commands | When cross-referencing per-case data |
+
+   **Update rules:**
+   - Session start: add 3-5 line entry to Session Log
+   - Milestone complete: add to Evidence Catalog, update Quick Reference frontier tables
+   - Never duplicate frontier tables across sections -- reference by milestone ID (e.g., "B36 closure")
+   - Quick Reference frontier table is the single source of truth for bucket status
+   - Keep session entries compressed -- detailed B# evidence lives in Evidence Catalog
+
+   **How to find past work:**
+   - Bucket status: read Quick Reference -> Current Accepted Frontier
+   - Which session created a script: search Session Log for milestone ID
+   - Per-case evidence: check Appendix for regeneration commands
+   - Do-not-do list: read Quick Reference -> Locked Guardrails
 
 ---
 

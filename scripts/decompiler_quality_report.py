@@ -112,6 +112,8 @@ FIXTURE_META = {
     "types.hl": {"src": "Types.hx", "main_class": "Types"},
     "Natives.hl": {"src": "Natives.hx", "main_class": "Natives"},
     "Shapes.hl": {"src": "Shapes.hx", "main_class": "Shapes"},
+    "Switch.hl": {"src": "Switch.hx", "main_class": "Switch"},
+    "ControlFlow.hl": {"src": "ControlFlow.hx", "main_class": "ControlFlow"},
 }
 
 # Expected classes per fixture (from source files)
@@ -123,6 +125,8 @@ EXPECTED_CLASSES = {
     "types.hl": {"Types"},
     "Natives.hl": {"Natives"},
     "Shapes.hl": {"Shapes", "Circle", "Rect"},
+    "Switch.hl": {"Switch"},
+    "ControlFlow.hl": {"ControlFlow"},
 }
 
 # Expected methods per fixture class
@@ -152,6 +156,12 @@ EXPECTED_METHODS = {
     },
     "types.hl": {
         "Types": {"main"},
+    },
+    "Switch.hl": {
+        "Switch": {"main", "testSwitch"},
+    },
+    "ControlFlow.hl": {
+        "ControlFlow": {"main", "testIfElse", "testLoopBreak", "testLoopContinue"},
     },
 }
 
@@ -2350,12 +2360,17 @@ def analyze_farever_quality_frontier(
             f"After B4 audit: 85.9% have no matching label (target is inside structured block), "
             f"12.9% are backward jumps, 1.3% forward jumps. "
             f"All are required CFG diagnostics -- no presentation-only cleanup is possible. "
-            f"{label_cnt} labels exist (all referenced)."
+            f"{label_cnt} labels exist (all referenced). "
+            f"B34 negative probe: pure CFG goto-bridge detection has zero impact (53 bridges, 0 gotos target them). "
+            f"B35 closure: 150 after_goto_block cases are 100% structurally required (95% loop/switch/if boundaries, 4% real side effects). "
+            f"No narrow label-to-label chain resolution opportunity exists."
         ),
         "direct_evidence": True,
         "classification": "diagnostic_only",
-        "recommended_milestone": "Extend ControlStructurer to recognize switch-with-break, "
-            "try/catch, and multi-way if-else chains. This requires CFG restructuring work.",
+        "recommended_milestone": "Paused structural work. Requires explicit Sato unlock of ControlStructurer "
+            "for switch-with-break, try/catch, and multi-way if-else chains. "
+            "B34/B35 proved no narrow goto cleanup path exists without full CFG restructuring. "
+            "Do not attempt goto/label comment suppression or after_goto_block resolution.",
         "risk_level": "low",
     })
 
@@ -2435,19 +2450,21 @@ def analyze_farever_quality_frontier(
             f"(the difference is post-IR transformations in HaxeWriter + ClassBuilder field names). "
             f"B7 subcategory audit: {subcat_summary}. "
             f"All {effective_field_cnt} remaining field fallbacks are diagnostic_only. "
+            f"B36 closure: type-pool evidence check confirms 0 direct-evidence cases. "
             f"Field evidence packet closed."
         ),
         "direct_evidence": True,
         "classification": "diagnostic_only",
         "recommended_milestone": (
-            f"All {effective_field_cnt} remaining field fallbacks are diagnostic_only after B10. "
+            f"Paused type-system work. Requires explicit Sato unlock. "
+            f"All {effective_field_cnt} remaining field fallbacks are diagnostic_only after B10 + B36 verification: "
             f"{fn_subcat_counts.get('receiver_object_field_index_oob', 0)} receiver OOB, "
             f"{fn_subcat_counts.get('this_field_index_oob', 0)} this-field OOB are structural: "
             f"field indices exceed known type field counts (unresolvable without type system changes). "
             f"{fn_subcat_counts.get('enum_receiver_not_enum_opcode', 0)} enum_receiver cases have "
             f"incomplete type pool metadata. "
-            "Field evidence packet closed -- no Ghidra recovery pathway exists for "
-            "any remaining case."
+            "B36 confirmed 0 cases with known field names missed by propagation. "
+            "Do not implement field-name recovery or TypeResolver changes."
         ),
         "risk_level": "low",
         "field_diag_detail": field_diag_detail,
@@ -2810,6 +2827,9 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     if track_a:
         # Overall aggregation
         md_lines.append("### Track A -- Aggregate Metrics")
+        md_lines.append("")
+        md_lines.append("*(Scope: ALL 9 standard HLB fixture files, fully decompiled. "
+                         "Source-text counts via regex on generated .hx output.)*")
         md_lines.append("")
         for fname, fd in track_a['fixtures'].items():
             total_funcs += fd['function_level']['total_functions']
@@ -3237,6 +3257,9 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("")
             md_lines.append("### Source Text Patterns (in decompiled output)")
             md_lines.append("")
+            md_lines.append(f"*(Scope: {st_b.get('total_files', 0)} emitted .hx files from "
+                             f"{st_b.get('sample_size', 'sampled')} Track B functions. "
+                             f"Source-text counts via regex on generated .hx output.)*")
             md_lines.append(f"- **Generated files:** {st_b.get('total_files', 0)}")
             md_lines.append(f"- **Total lines:** {st_b.get('total_lines', 0)}")
             md_lines.append(f"- **Raw goto comments (preserved):** {pat_b.get('raw_goto_comments', 0)}")
@@ -3608,7 +3631,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("")
             md_lines.append("---")
             md_lines.append("")
-            md_lines.append("## Track B -- Previously Resolved Frontiers (B1-B4 + B10 + B14 + B15 + B19 + B21 + B22 + B23 + B31)")
+            md_lines.append("## Track B -- Previously Resolved Frontiers (B1-B4 + B10 + B14 + B15 + B19 + B21 + B22 + B23 + B31 + B34 + B35 + B36)")
             md_lines.append("")
             md_lines.append("The following frontier buckets were resolved by earlier cleanup milestones or audit resolutions or are expected compiler behavior:")
             md_lines.append("")
@@ -3681,6 +3704,30 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 "Reclassified from speculative_blocked to diagnostic_only. "
                 "Bucket closed. | B31 |"
             )
+            md_lines.append(
+                "| Goto chain resolution (B34 negative probe) | "
+                "B34: _resolve_goto_chains() implemented for pure CFG goto-bridge blocks. "
+                "53 pure bridges detected in 200-function sample; 0 IR gotos target them. "
+                "Corrected negative probe -- pure bridge detection does not resolve "
+                "after_goto_block cases. Implementation is correct and safe (4 new tests). | B34 |"
+            )
+            md_lines.append(
+                "| After-goto-block (was 150 cases) | "
+                "B35 audit: 150 after_goto_block cases classified: "
+                "143 (95%) loop/switch/if boundary, 7 (4%) real predecessor side effects. "
+                "100% structurally required -- no safe cleanup target exists. "
+                "Zero label-to-label chains, zero missed cleanups, zero dead blocks. "
+                "Bucket closed as diagnostic_only / no safe behavior target. | B35 |"
+            )
+            md_lines.append(
+                "| Field-name frontier (was 149 IR-level) | "
+                "B36 audit: 149 IR-level field_resolve_diag fallbacks analyzed with "
+                "type-pool evidence check. 145 (97%) object/struct field index OOB, "
+                "4 (3%) enum receiver via wrong opcode. "
+                "Zero cases with direct type-pool field name evidence available but not propagated. "
+                "Bucket closed as diagnostic_only -- no safe field-name recovery target. "
+                "Metric reconciliation confirmed: 149 IR-level, 50 source-text, 94 old binary. | B36 |"
+            )
             md_lines.append("")
             md_lines.append("")
             md_lines.append("---")
@@ -3698,7 +3745,10 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 "Buckets resolved by B14 (comment-only bodies), B15 (dynamic type references), "
                 "B21 (giant init expected behavior), B22 (call-return all expected), "
                 "B23 (null target all expected), "
-                "or B31 (virtual type unsupported all expected) "
+                "or B31 (virtual type unsupported all expected), "
+                "B34 (goto chain resolution negative probe), "
+                "B35 (after-goto-block all structurally required), "
+                "or B36 (field-name frontier all diagnostic_only) "
                 "are listed in the Previously Resolved section above."
             )
             md_lines.append("")
@@ -4330,12 +4380,12 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         md_lines.append("| actionable_dynamic_corrected | **0** | True deterministic frontier (zero) |")
         md_lines.append("| null_target_actionable | 0 | No actionable nulls remain |")
         md_lines.append("| call_return_actionable | 0 | No actionable call returns remain |")
-        md_lines.append("| errors | 0 | No decompilation errors across all 7 fixtures |")
-        md_lines.append("| unknown opcodes | 0 | No unknown opcodes across all 7 fixtures |")
-        md_lines.append("| Track A fixtures | 7/7 | All standard fixtures pass |")
+        md_lines.append("| errors | 0 | No decompilation errors across all 9 fixtures |")
+        md_lines.append("| unknown opcodes | 0 | No unknown opcodes across all 9 fixtures |")
+        md_lines.append("| Track A fixtures | 9/9 | All standard fixtures pass |")
         md_lines.append("")
-        md_lines.append("**Important:** Legacy unresolved-looking totals (null_without_target_type=127,")
-        md_lines.append("call_return_unresolved_total=102, Dynamic type refs=2058) are NOT automatically actionable.")
+        md_lines.append("**Important:** Legacy unresolved-looking totals (null_without_target_type=163,")
+        md_lines.append("call_return_unresolved_total=135, Dynamic type refs=2634) are NOT automatically actionable.")
         md_lines.append("They have been decomposed and classified. The true actionable frontier is")
         md_lines.append("`actionable_dynamic_corrected`, not any individual legacy bucket.")
         md_lines.append("")

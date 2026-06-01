@@ -74,6 +74,24 @@ Before starting work, agents should classify the task as one of:
 
 Roadmap expansion work is allowed when the owner explicitly asks for it or when the current repository documents mark it as active. Otherwise, agents should avoid silently expanding scope and should keep changes connected to the active task.
 
+### 4.1 MEMORY.md Structure (Session Ledger)
+
+`MEMORY.md` uses a top-down structure optimized for rapid lookup. Read brief sections first, dive into detail only when needed:
+
+| Section | Use When |
+|---------|----------|
+| Quick Reference | Every session start -- current state, frontier, do-not-do list |
+| Current Accepted Frontier | Before proposing behavior work -- definitive closed/paused bucket tables |
+| Session Log | Finding artifact provenance -- which session created which script |
+| Evidence Catalog | Verifying closure evidence for a specific bucket |
+| Appendix | Cross-referencing per-case data or regeneration commands |
+
+Key rules:
+- Quick Reference frontier table is the single source of truth for bucket status
+- Do not reopen closed buckets without new evidence
+- Paused buckets require explicit Sato unlock before behavior work
+- `MEMORY.md` is not proof by itself -- verify claims against current code/tests
+
 Native/runtime reverse engineering is allowed when it supports bytecode parser, disassembler, or decompiler correctness. It should not be treated as product-feature work unless the owner explicitly makes it part of the task.
 
 ## 5. HashLink Bytecode Rules
@@ -161,7 +179,32 @@ Debug file section:
 
 ### 5.4 Type System
 
-Use the existing kind constants and current docs as the source of truth. Do not invent payload schemas for unknown kind values.
+Use the existing kind constants as defined in `hl_decompile.py` and `hl_parser/_consts.py` as the source of truth. Do not invent payload schemas for unknown kind values.
+
+**Type-Kind Constant Numbering (B43/B44 guardrail):**
+
+The mhlbc codebase defines its own type-kind constant numbering. Do not assume that HashLink reference documentation, open-source `hashlink/src/code.c`, or one-off audit scripts use the same numeric values. Always reconcile symbol name, numeric value, and actual parsed `TypeDef.kind` evidence before changing any kind check.
+
+Verified `hl_decompile.py` constants (the source of truth for field resolution):
+
+| Symbol | Value | Description |
+|--------|-------|-------------|
+| `K_OBJ` | 11 | Object/class-like type (has fields, protos, bindings, super_idx) |
+| `K_STRUCT` | 21 | Struct type |
+| `K_METHOD` | 20 | Method function type (NOT a field-bearing class kind) |
+| `K_FUN` | 10 | Function type |
+| `K_VIRTUAL` | 15 | Virtual/anonymous structural type |
+
+Field resolution acceptance checks (`_resolve_field_from_type` line 22, `_resolve_field_name` line 19, `_record_field_diag` line 2219) use `t.kind in (K_OBJ, K_STRUCT)` = `t.kind in (11, 21)`. K_OBJ=11 is the field-bearing class kind and IS already accepted.
+
+**Before changing any type-kind check:**
+1. Inspect the actual constant values in `hl_decompile.py` (not external references).
+2. Verify actual parsed `TypeDef.kind` values from a real `.hl` fixture.
+3. Confirm the type's structural shape (fields, protos, bindings, super_idx).
+4. Add guardrail tests that assert the constant values.
+5. Document any numbering mismatch in `MEMORY.md`.
+
+Do not patch by symbol name alone -- a "K_METHOD" in HashLink source may be a different numeric value than `K_METHOD` in mhlbc.
 
 Known high-risk rules:
 
@@ -316,6 +359,14 @@ Documentation maintenance:
 - Update `AGENTS.md` only for concise agent-relevant domain knowledge or pitfalls.
 - Do not turn `AGENTS.md` into a full specification dump if the detail belongs in `docs/`.
 
+**Type-kind change checklist (B44 guardrail):** Before changing any `t.kind` check in `hl_decompile.py`:
+1. Read the actual constant values from `hl_decompile.py` (do not assume from memory).
+2. Parse at least one real `.hl` fixture and inspect `TypeDef.kind` values.
+3. Using `hl_decompile` constants, verify whether the kind IS or IS NOT in the current acceptance set.
+4. If the kind has fields/protos/bindings and is already accepted, no change needed.
+5. If a kind is genuinely missing from acceptance, add a guardrail test asserting its constant value before implementing the fix.
+6. Document the change in `MEMORY.md` with the exact constant value, symbol name, and binary evidence.
+
 Branch policy:
 
 - Work on `main` unless the project owner explicitly requests a branch.
@@ -343,18 +394,18 @@ Recovery logic must be bounded, logged, and tested. It must not hide parser bugs
 
 When Farever reveals a failure, classify it before changing code:
 
-1. **General HashLink format bug** — parser/decompiler wrong for all HL bytecode.
-2. **Missing standard compiler pattern** — valid Haxe output not yet handled.
-3. **Robustness/recovery issue** — malformed data, bounds checks, diagnostics.
-4. **Farever/shiroTools-specific quirk** — custom runtime behavior.
-5. **Future Tier 2 concern** — patching/modding, outside Tier 1 scope.
+1. **General HashLink format bug**  --  parser/decompiler wrong for all HL bytecode.
+2. **Missing standard compiler pattern**  --  valid Haxe output not yet handled.
+3. **Robustness/recovery issue**  --  malformed data, bounds checks, diagnostics.
+4. **Farever/shiroTools-specific quirk**  --  custom runtime behavior.
+5. **Future Tier 2 concern**  --  patching/modding, outside Tier 1 scope.
 
 Only categories 1-3 may change the core decompiler by default. Category 4 must be isolated behind explicit compatibility handling. Category 5 remains frozen.
 
 ### 10.2 Two Validation Tracks
 
-**Track A** — General Haxe/HL correctness (standard fixtures, Gate 6 validation).
-**Track B** — Farever progress (separate benchmark, does not define Gate 6).
+**Track A**  --  General Haxe/HL correctness (standard fixtures, Gate 6 validation).
+**Track B**  --  Farever progress (separate benchmark, does not define Gate 6).
 
 ### 10.3 Farever is the lighthouse, not the map
 
@@ -404,7 +455,8 @@ Do not do these:
 - Do not let UI work block the Qt main thread.
 - Do not add LLM-based reconstruction to the parser or decompiler critical path.
 - Do not expand scope into later tiers without explicit owner instruction.
-- Do not use non-ASCII Unicode in generated report output (em dashes `--`, arrows `->`). Terminal/Discord/email renderers corrupt or mangle characters like `—` and `→`. All generated text must use ASCII-safe alternatives.
+- Do not use non-ASCII Unicode in generated report output (em dashes `--`, arrows `->`). Terminal/Discord/email renderers corrupt or mangle characters like `--` and `->`. All generated text must use ASCII-safe alternatives.
+- Do not assume audit-script type-kind constants match `hl_decompile.py` constants. B43 audit used K_OBJ=7/K_METHOD=11 (HashLink reference) while mhlbc uses K_OBJ=11/K_METHOD=20. Audit scripts must import from `hl_decompile` or `hl_parser._consts` rather than hardcoding numeric values. Reconcile symbol name against numeric value against actual parsed `TypeDef.kind` before concluding a kind check is broken.
 
 ## 13. Agent Success Criteria
 
@@ -422,10 +474,10 @@ A good change should satisfy these checks:
 
 For OCall0-4 instructions (opcodes 24-28), `args[1]` is either:
 
-1. A **function index (findex)** when `0 <= args[1] < len(parser.functions)` — standard direct call.
-2. A **type index** when `args[1] >= len(parser.functions)` and `0 <= args[1] < len(parser.types)` and `parser.types[args[1]].kind in (K_FUN, K_METHOD)` — type-dispatched call.
+1. A **function index (findex)** when `0 <= args[1] < len(parser.functions)`  --  standard direct call.
+2. A **type index** when `args[1] >= len(parser.functions)` and `0 <= args[1] < len(parser.types)` and `parser.types[args[1]].kind in (K_FUN, K_METHOD)`  --  type-dispatched call.
 
-For type-indexed calls, the K_FUN type's `ret` field gives the callee's return type directly. This is safe bytecode evidence — no producer tracing needed.
+For type-indexed calls, the K_FUN type's `ret` field gives the callee's return type directly. This is safe bytecode evidence  --  no producer tracing needed.
 
 ### Resolution Rules
 
@@ -444,8 +496,8 @@ For type-indexed calls, the K_FUN type's `ret` field gives the callee's return t
 `null_analysis` is added to `IRFunction` as `Dict[str, str]` mapping variable names to null subcategories. Populated in `Decompiler._analyze_null_target()` (Step 9 in `_decompile_function()`).
 
 Classification priority:
-1. Register type kind check: K_DYN → `null_target_declared_dynamic`, K_VOID → `null_target_void_or_invalid_context`, K_VIRTUAL → `null_target_virtual_unsupported`, K_FUN/K_METHOD → `null_target_fun_or_method_type`, K_NULL → `null_target_nullable_type`.
-2. Consumer pattern check: OSetField → field store, OSetArray/OSArraySet → array/dynamic store, OMov → mov chain, conditional jumps → phi/branch merge.
+1. Register type kind check: K_DYN  ->  `null_target_declared_dynamic`, K_VOID  ->  `null_target_void_or_invalid_context`, K_VIRTUAL  ->  `null_target_virtual_unsupported`, K_FUN/K_METHOD  ->  `null_target_fun_or_method_type`, K_NULL  ->  `null_target_nullable_type`.
+2. Consumer pattern check: OSetField  ->  field store, OSetArray/OSArraySet  ->  array/dynamic store, OMov  ->  mov chain, conditional jumps  ->  phi/branch merge.
 3. Fallback: `null_target_unknown`.
 
 The `null_analysis` key is included in the quality report as `null_target_analysis` per fixture and aggregated in the "Null Without Target Type -- Subcategory Breakdown" section.

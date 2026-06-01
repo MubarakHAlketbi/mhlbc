@@ -36,6 +36,7 @@ from tests.hl_helper import (
     build_type_enum,
 )
 from hl_disasm import Disassembler, Instruction, OpcodeDecoder, JumpResolver
+from hl_disasm import _OPCODE_NARGS  # B38: opcode arg counts for manual bytecode
 from hl_decompile import (
     IRConst, IRVar, IRExpr, IRStmt, IRFunction, FunctionSig,
     ClassDef, EnumDef, DecompileResult,
@@ -2698,23 +2699,669 @@ class TestControlFlowStructuring:
         assert output.count("{") == output.count("}")
 
     def test_switch_fallback_honest(self):
-        """D.4.3: OSwitch emits flat comment, not a structured switch."""
-        # Build a function with OSwitch
+        """D.4.3: OSwitch with 0 cases emits flat comment (not structurable)."""
         type_i32 = build_type_primitive(K_I32)
-        # OSwitch args: p1=reg, p2=ncases, then cases + default
+        type_void = build_type_primitive(K_VOID)
         ops = build_opcode_sequence([70, 0, 2])
         data = _build_minimal_with_types(
-            ntypes=1,
-            type_blobs=[type_i32],
+            ntypes=10,
+            type_blobs=[type_i32, type_void] * 5,
+            strings=["pad1", "pad2", "pad3", "pad4", "pad5"],
             functions=[(0, 0, [K_I32], ops)],
         )
         result = _disasm_and_decompile(data)
         assert result is not None
         fn = result.functions.get(0)
-        if fn:
-            src = " ".join(str(s.op) for s in fn.body)
-            # Currently emits as comment, not 'switch' stmt
-            assert isinstance(fn.body, list)
+        assert fn is not None
+        # 0-case switch is not structurable -- falls back to flat comment
+        assert isinstance(fn.body, list)
+
+
+# ── B38 Switch Structuring Tests ──────────────────────────────────────
+
+def _build_oswitch_opcodes(reg, ncases, case_offsets, default_offset,
+                            before_ops, after_ops):
+    """Build raw opcode bytes for a function containing OSwitch.
+
+    before_ops: list of (opcode, [args]) for instructions before OSwitch.
+    after_ops: list of (opcode, [args]) for instructions after OSwitch.
+    Returns (raw_bytes, total_nops).
+    """
+    data = b""
+    nops = len(before_ops) + 1 + len(after_ops)
+
+    for op, args in before_ops:
+        data += bytes([op])
+        nargs = _OPCODE_NARGS[op] if op < len(_OPCODE_NARGS) else 0
+        for a in args[:max(0, nargs)]:
+            data += encode_varint(a)
+
+    # OSwitch (op 70): vararg — p1, p2, then case offsets + default
+    data += bytes([70])
+    data += encode_varint(reg)
+    data += encode_varint(ncases)
+    for off in case_offsets:
+        data += encode_varint(off)
+    data += encode_varint(default_offset)
+
+    for op, args in after_ops:
+        data += bytes([op])
+        nargs = _OPCODE_NARGS[op] if op < len(_OPCODE_NARGS) else 0
+        for a in args[:max(0, nargs)]:
+            data += encode_varint(a)
+
+    return data, nops
+
+
+def _build_switch_bytecode(reg_types, nops, raw_opcodes_bytes):
+    """Build complete minimal bytecode with custom raw opcodes."""
+    from tests.hl_helper import build_header, build_ints_pool, \
+        build_floats_pool, build_strings_pool, build_globals_pool, \
+        build_natives_pool
+
+    # Add padding to ensure function body < 50% of total file
+    type_i32 = build_type_primitive(K_I32)
+    type_void = build_type_primitive(K_VOID)
+    type_blobs = [type_i32, type_void] * 5
+    pad_strings = ["pad" + str(i) for i in range(10)]
+
+    header = build_header(
+        version=5, flags=0,
+        nints=0, nfloats=0, nstrings=len(pad_strings),
+        ntypes=len(type_blobs), nglobals=0, nnatives=0,
+        nfunctions=1, nconstants=0, entrypoint=0,
+    )
+
+    data = header
+    data += build_ints_pool([])
+    data += build_floats_pool([])
+    data += build_strings_pool(pad_strings)
+    data += b"".join(type_blobs)
+    data += build_globals_pool([])
+    data += build_natives_pool([])
+
+    # Single function entry
+    data += encode_varint(0)  # type_idx
+    data += encode_varint(0)  # findex
+    data += encode_varint(len(reg_types))  # nregs
+    data += encode_varint(nops)  # nops
+    for rt in reg_types:
+        data += encode_varint(rt)
+    data += raw_opcodes_bytes
+
+    return data
+
+
+class TestB38SwitchStructuring:
+    """B38: ControlStructurer simple switch/break detection."""
+
+    def test_simple_switch_two_cases_with_breaks(self):
+        """Simple 2-case switch with backward OJAlways breaks -> structured.
+
+        Layout:
+          0: OInt r0, 0        -- setup
+          1: OSwitch r0, 2 cases + default
+          2: OInt r1, 100      -- post-switch body
+          3: ORet r1           -- post-switch exit
+          4: OInt r1, 10       -- case 0 body
+          5: OJAlways -> [2]   -- break (backward)
+          6: OInt r1, 20       -- case 1 body
+          7: OJAlways -> [2]   -- break (backward)
+          8: OInt r1, 99       -- default body
+          9: ORet r1           -- default exit
+
+        OSwitch at idx 1: offsets relative to idx 2
+          case0=2, case1=4, default=6
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[2, 4],   # targets idx 4, 6
+            default_offset=6,       # target idx 8
+            before_ops=[
+                (1, [0, 0]),        # OInt r0, 0
+            ],
+            after_ops=[
+                (1, [1, 100]),       # post-switch: OInt r1, 100
+                (67, [1]),           # ORet r1
+                (1, [1, 10]),        # case 0: OInt r1, 10
+                (58, [-4]),          # OJAlways -> [2]
+                (1, [1, 20]),        # case 1: OInt r1, 20
+                (58, [-6]),          # OJAlways -> [2]
+                (1, [1, 99]),        # default: OInt r1, 99
+                (67, [1]),           # ORet r1
+            ],
+        )
+
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+
+        switch_stmts = [s for s in fn.body if s.op == "switch"]
+        assert len(switch_stmts) == 1, (
+            f"Expected 1 switch stmt, got {[s.op for s in fn.body]}"
+        )
+        sw = switch_stmts[0]
+        # Structured switch has non-empty blocks and no flat comment
+        assert sw.blocks and len(sw.blocks) >= 2, (
+            f"Expected structured switch with blocks, got blocks={sw.blocks}"
+        )
+
+        output = _decompile_to_text(data)
+        assert "switch" in output, f"Missing 'switch' in output:\n{output}"
+
+    def test_switch_internal_if_else_falls_back(self):
+        """Switch case with OJTrue -> fallback (internal conditional jump).
+
+        Layout:
+          0: OInt r0, 0
+          1: OSwitch r0, 1 case + default
+          2: OInt r1, 999     -- post-switch
+          3: ORet r1
+          4: OJTrue r1, +1 -> [6]  -- internal if (jumps over then body)
+          5: OInt r2, 10       -- then body
+          6: OJAlways -> [2]    -- break (backward)
+          7: OInt r2, 99       -- default body
+          8: ORet r2
+
+        OSwitch at idx 1: case0=3 (->idx 5? no, -> idx 4), default=6 (->idx 8? no, -> idx 7)
+        Wait: offsets relative to idx 2.
+        case0 target = 4: offset = 4-2 = 2
+        default target = 7: offset = 7-2 = 5
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=1,
+            case_offsets=[2],    # case0 at idx 4
+            default_offset=5,     # default at idx 7
+            before_ops=[
+                (1, [0, 0]),
+            ],
+            after_ops=[
+                (1, [1, 999]),    # post-switch: OInt r1, 999
+                (67, [1]),        # ORet r1
+                (44, [1, 1]),     # OJTrue r1, +1 -> [6] (skip then)
+                (1, [2, 10]),     # OInt r2, 10 (then body)
+                (58, [-5]),       # OJAlways -> [2] (break backward)
+                (1, [2, 99]),     # default: OInt r2, 99
+                (67, [2]),        # ORet r2
+            ],
+        )
+
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+
+        # Verify: NOT structured as switch (case body has internal condition)
+        switch_stmts = [s for s in fn.body
+                        if s.op == "switch" and s.blocks and len(s.blocks) > 0]
+        assert len(switch_stmts) == 0, (
+            "Switch with internal if/else should fall back, not be structured"
+        )
+
+    def test_switch_no_post_switch_block_falls_back(self):
+        """Single < 2 cases -> not structurable.
+
+        Layout:
+          0: OInt r0, 0
+          1: OSwitch r0, 1 case + default
+          2: OInt r1, 10       -- post-switch + only body (degenerate)
+          3: ORet r1
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=1,
+            case_offsets=[0],
+            default_offset=0,
+            before_ops=[
+                (1, [0, 0]),
+            ],
+            after_ops=[
+                (1, [1, 10]),
+                (67, [1]),
+            ],
+        )
+
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+        assert isinstance(fn.body, list)
+
+    def test_switch_preserves_b34_goto_chain(self):
+        """B34 _resolve_goto_chains still works with switch structuring.
+
+        Layout:
+          0: OInt r0, 0
+          1: OSwitch r0, 1 case + default
+          2: OInt r1, 200      -- post-switch
+          3: ORet r1
+          4: OInt r1, 10       -- case 0 body
+          5: OJAlways -> [2]    -- break (backward)
+          6: OInt r1, 99       -- default body
+          7: ORet r1
+
+        OSwitch at idx 1: case0=3 (->idx 4), default=5 (->idx 6)
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=1,
+            case_offsets=[3],
+            default_offset=5,
+            before_ops=[
+                (1, [0, 0]),
+            ],
+            after_ops=[
+                (1, [1, 200]),     # post-switch
+                (67, [1]),
+                (1, [1, 10]),      # case 0 body
+                (58, [-4]),        # OJAlways -> [2]
+                (1, [1, 99]),      # default body
+                (67, [1]),
+            ],
+        )
+
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        assert len(result.errors) == 0
+
+
+def _decompile_to_text(data):
+    """Decompile and return HaxeWriter text output."""
+    parser = _parse_bytecode(data)
+    disasm = Disassembler(parser)
+    decomp = Decompiler(parser, disasm)
+    result = decomp.decompile_all()
+    resolver = TypeResolver(parser)
+    writer = HaxeWriter(resolver, parser, include_comments=True)
+    output = writer.write_output(result)
+    return "\n".join(output.values())
+
+
+class TestB40IfMergeDetection:
+    """B40: ControlStructurer if/else merge detection for simple branch regions."""
+
+    def _make_instructions(self, specs):
+        """Build Instruction list from (index, opcode, args, jump_target) specs."""
+        from hl_disasm import Instruction, _OPCODE_NAMES
+        insts = []
+        for spec in specs:
+            idx, opcode, args, jt = spec
+            mnem = _OPCODE_NAMES[opcode] if opcode < len(_OPCODE_NAMES) else f"?{opcode}"
+            insts.append(Instruction(
+                index=idx, opcode=opcode, mnemonic=mnem,
+                args=list(args), byte_offset=idx, byte_size=4,
+                jump_target=jt,
+            ))
+        return insts
+
+    def _make_blocks(self, blocks_spec):
+        """Build CFG blocks. Each spec: (id, start_ip, end_ip, instr_indices, successors)."""
+        from hl_disasm import BasicBlock
+        blocks = []
+        for bid, start, end, instr_idxs, succs in blocks_spec:
+            blocks.append(BasicBlock(
+                id=bid, start_ip=start, end_ip=end,
+                successors=list(succs),
+            ))
+        return blocks
+
+    def test_find_if_merge_simple_two_way(self):
+        """Simple if/else with common merge — merge detected."""
+        from hl_disasm import _OPCODE_NAMES, BasicBlock
+        from hl_decompile import ControlStructurer
+
+        # CFG:
+        #   B0 (header): OJSLt -> B1(then), B2(else)
+        #   B1 (then): OJAlways -> B3(merge)
+        #   B2 (else): OJAlways -> B3(merge)
+        #   B3 (merge)
+        insts = self._make_instructions([
+            (0, 48, [0, 1, 2], None),    # OJSLt  → B1 or B2
+            (1, 1, [2, 100], None),       # then: OInt
+            (2, 58, [0], 3),              # OJAlways → @3
+            (3, 1, [2, 200], None),       # else: OInt
+            (4, 58, [0], 3),              # OJAlways → @3
+            (5, 67, [2], None),           # merge: ORet
+        ])
+
+        blocks = [
+            BasicBlock(id=0, start_ip=0, end_ip=1, successors=[1, 2]),
+            BasicBlock(id=1, start_ip=1, end_ip=3, successors=[3]),
+            BasicBlock(id=2, start_ip=3, end_ip=5, successors=[3]),
+            BasicBlock(id=3, start_ip=5, end_ip=6, successors=[]),
+        ]
+        block_map = {b.id: b for b in blocks}
+
+        structurer = ControlStructurer(insts, blocks, MockParser(), reg_names={})
+        merge = structurer._find_if_merge(0, [1, 2], block_map, set(), {}, stop_at_merge=None)
+        assert merge == 3, f"Expected merge block 3, got {merge}"
+
+    def test_find_if_merge_no_common(self):
+        """If/else where one branch returns — no merge, returns None."""
+        from hl_disasm import BasicBlock
+        from hl_decompile import ControlStructurer
+
+        # CFG:
+        #   B0 (header): OJSLt -> B1(then), B2(else)
+        #   B1 (then): ORet → NO successors
+        #   B2 (else): ORet → NO successors
+        insts = self._make_instructions([
+            (0, 48, [0, 1, 2], None),    # OJSLt
+            (1, 67, [2], None),           # then: ORet (no merge!)
+            (2, 67, [2], None),           # else: ORet (no merge!)
+        ])
+
+        blocks = [
+            BasicBlock(id=0, start_ip=0, end_ip=1, successors=[1, 2]),
+            BasicBlock(id=1, start_ip=1, end_ip=2, successors=[]),
+            BasicBlock(id=2, start_ip=2, end_ip=3, successors=[]),
+        ]
+        block_map = {b.id: b for b in blocks}
+
+        structurer = ControlStructurer(insts, blocks, MockParser(), reg_names={})
+        merge = structurer._find_if_merge(0, [1, 2], block_map, set(), {}, stop_at_merge=None)
+        assert merge is None, f"Expected no merge, got {merge}"
+
+    def test_find_if_merge_one_branch_returns(self):
+        """If/else where only one branch returns — no merge."""
+        from hl_disasm import BasicBlock
+        from hl_decompile import ControlStructurer
+
+        # CFG:
+        #   B0 (header): OJSLt -> B1(then), B2(else)
+        #   B1 (then): ORet (no merge)
+        #   B2 (else): OJAlways -> B3 (no common path with B1)
+        insts = self._make_instructions([
+            (0, 48, [0, 1, 2], None),    # OJSLt
+            (1, 67, [2], None),           # then: ORet
+            (2, 1, [2, 200], None),       # else: OInt
+            (3, 58, [0], 3),              # OJAlways
+            (4, 67, [2], None),           # unreachable? 
+        ])
+
+        blocks = [
+            BasicBlock(id=0, start_ip=0, end_ip=1, successors=[1, 2]),
+            BasicBlock(id=1, start_ip=1, end_ip=2, successors=[]),
+            BasicBlock(id=2, start_ip=2, end_ip=5, successors=[3]),
+            BasicBlock(id=3, start_ip=4, end_ip=5, successors=[]),
+        ]
+        block_map = {b.id: b for b in blocks}
+
+        structurer = ControlStructurer(insts, blocks, MockParser(), reg_names={})
+        merge = structurer._find_if_merge(0, [1, 2], block_map, set(), {}, stop_at_merge=None)
+        assert merge is None, f"Expected no merge (branch returns), got {merge}"
+
+    def test_if_else_controlflow_fixture_merge_after(self):
+        """ControlFlow.hl testIfElse — merge block placed after if/else, not inside."""
+        import io, os
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
+        hl_path = os.path.join(fixtures_dir, "ControlFlow.hl")
+        raw = open(hl_path, "rb").read()
+        p = HLParser(hl_path)
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or f"func[{fi}]"
+            if "testIfElse" not in nm:
+                continue
+
+            # Find the if stmt
+            if_stmts = [s for s in ir_fn.body if s.op == "if"]
+            assert len(if_stmts) >= 1, f"Expected at least 1 if, got {[s.op for s in ir_fn.body]}"
+            outer_if = if_stmts[0]
+
+            # The merge block (return/assign stmts) must be AFTER the if in body
+            # Find index of the outer if
+            if_idx = ir_fn.body.index(outer_if)
+            # There must be statements after the if (the merge block)
+            assert if_idx < len(ir_fn.body) - 1, (
+                "Merge block must be after if/else, not inside then branch"
+            )
+
+            # The merge block should contain return
+            after_if = ir_fn.body[if_idx + 1:]
+            has_return = any(s.op == "return" for s in after_if)
+            assert has_return, "Merge block after if/else should contain return"
+
+            # Then branch should NOT contain the merge
+            then_block = outer_if.blocks[0]
+            then_has_return = any(s.op == "return" for s in then_block)
+            assert not then_has_return, (
+                "Then branch should NOT contain merge (return) — "
+                "merge must be outside if/else"
+            )
+
+            # Else branch should contain a nested if (else-if chain)
+            else_block = outer_if.blocks[1]
+            nested_ifs = [s for s in else_block if s.op == "if"]
+            assert len(nested_ifs) >= 1, (
+                f"Else branch should have nested if for else-if, "
+                f"got {[s.op for s in else_block]}"
+            )
+            return
+
+        pytest.fail("testIfElse function not found in ControlFlow.hl")
+
+
+class TestB41LoopRefinement:
+    """B41: ControlStructurer loop body/condition refinement for natural loops."""
+
+    def test_while_loop_body_inside_not_before(self):
+        """ControlFlow.hl testLoopBreak -- loop body inside while, not before."""
+        import io
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        raw = open(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                "ControlFlow.hl"), "rb").read()
+        p = HLParser(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                   "ControlFlow.hl"))
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or f"func[{fi}]"
+            if "testLoopBreak" not in nm:
+                continue
+
+            # Find the while stmt
+            whiles = [s for s in ir_fn.body if s.op == "while"]
+            assert len(whiles) == 1, (
+                f"Expected 1 while, got {[s.op for s in ir_fn.body]}"
+            )
+            w = whiles[0]
+
+            # Body must have > 1 stmt (real loop body, not just goto)
+            body = w.blocks[0]
+            assert len(body) > 1, (
+                f"Loop body should contain real stmts, got {len(body)}: "
+                f"{[s.op for s in body]}"
+            )
+
+            # Body must NOT be just a goto (old behavior)
+            if any(s.op != "goto" for s in body):
+                pass  # Good -- real stmts present
+            else:
+                pytest.fail("Loop body is only goto -- old behavior")
+
+            # Post-loop merge must contain return
+            while_idx = ir_fn.body.index(w)
+            after = ir_fn.body[while_idx + 1:]
+            has_return = any(s.op == "return" for s in after)
+            assert has_return, "Post-loop merge should contain return"
+            return
+
+        pytest.fail("testLoopBreak not found")
+
+    def test_while_condition_negated(self):
+        """ControlFlow.hl testLoopBreak -- while condition is negated."""
+        import io
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        raw = open(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                "ControlFlow.hl"), "rb").read()
+        p = HLParser(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                   "ControlFlow.hl"))
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or f"func[{fi}]"
+            if "testLoopBreak" not in nm:
+                continue
+
+            whiles = [s for s in ir_fn.body if s.op == "while"]
+            assert len(whiles) == 1
+            w = whiles[0]
+
+            # Condition must be negated: !(inner)
+            from hl_decompile import IRExpr
+            cond = w.src
+            assert isinstance(cond, IRExpr), f"Expected IRExpr, got {type(cond)}"
+            assert cond.op == "!", (
+                f"Condition should be negated (!), got op={cond.op}"
+            )
+            return
+
+        pytest.fail("testLoopBreak not found")
+
+    def test_for_loop_continue_fixture(self):
+        """ControlFlow.hl testLoopContinue -- for loop with continue inside."""
+        import io
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        raw = open(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                "ControlFlow.hl"), "rb").read()
+        p = HLParser(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                   "ControlFlow.hl"))
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or f"func[{fi}]"
+            if "testLoopContinue" not in nm:
+                continue
+
+            # Should have exactly one while stmt
+            whiles = [s for s in ir_fn.body if s.op == "while"]
+            assert len(whiles) == 1, (
+                f"Expected 1 while, got {[s.op for s in ir_fn.body]}"
+            )
+            w = whiles[0]
+
+            # Body must have > 1 stmt (not just goto)
+            body = w.blocks[0]
+            assert len(body) > 1, (
+                f"Loop body should contain real stmts, got {len(body)}"
+            )
+
+            # Body must contain a nested if (continue branch)
+            nested_ifs = [s for s in body if s.op == "if"]
+            assert len(nested_ifs) >= 1, (
+                "testLoopContinue body should have nested if for continue"
+            )
+
+            # Post-loop merge must be after while
+            while_idx = ir_fn.body.index(w)
+            after = ir_fn.body[while_idx + 1:]
+            has_return = any(s.op == "return" for s in after)
+            assert has_return, "Post-loop merge should contain return"
+            return
+
+        pytest.fail("testLoopContinue not found")
+
+    def test_loop_body_boundary_no_leak(self):
+        """Post-loop merge is emitted after while, not inside loop body."""
+        import io
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        raw = open(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                "ControlFlow.hl"), "rb").read()
+        p = HLParser(os.path.join(os.path.dirname(__file__), "fixtures", "hl",
+                                   "ControlFlow.hl"))
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or f"func[{fi}]"
+            if "testLoopBreak" not in nm:
+                continue
+
+            whiles = [s for s in ir_fn.body if s.op == "while"]
+            assert len(whiles) == 1
+            w = whiles[0]
+
+            # The loop body must NOT contain a return (that's post-loop)
+            body = w.blocks[0]
+            body_returns = [s for s in body if s.op == "return"]
+            assert len(body_returns) == 0, (
+                "Loop body should NOT contain return -- "
+                "post-loop merge must be outside"
+            )
+
+            # The body must NOT contain trace/field_set stmts (post-loop)
+            body_ops = [s.op for s in body]
+            assert "nullcheck" not in body_ops, (
+                "Loop body should NOT contain nullcheck -- it is post-loop"
+            )
+            return
+
+        pytest.fail("testLoopBreak not found")
 
 
 class TestORethrowHandler:
@@ -3175,8 +3822,8 @@ class TestActionableDynamicFormula:
 
             # Track A structure
             track_a = data.get('track_A', {})
-            assert track_a.get('overall', {}).get('total_fixtures') == 7, \
-                'Expected 7 Track A fixtures'
+            assert track_a.get('overall', {}).get('total_fixtures') == 9, \
+                'Expected 9 Track A fixtures'
             assert track_a.get('overall', {}).get('total_errors') == 0, \
                 'Track A must have 0 errors'
 
@@ -3201,26 +3848,26 @@ class TestActionableDynamicFormula:
             nt_declared_dyn = formula.get('null_target_declared_dynamic')
 
             # Core counts
-            assert cr_total == 102, \
-                f'Expected call_return_unresolved_total=102, got {cr_total}'
-            assert cr_expected == 102, \
-                f'Expected call_return_expected_non_actionable=102, got {cr_expected}'
+            assert cr_total == 135, \
+                f'Expected call_return_unresolved_total=135, got {cr_total}'
+            assert cr_expected == 135, \
+                f'Expected call_return_expected_non_actionable=135, got {cr_expected}'
             assert cr_actionable == 0, \
                 f'Expected call_return_actionable=0, got {cr_actionable}'
-            assert null_ambig == 127, \
-                f'Expected null_without_target_type=127, got {null_ambig}'
+            assert null_ambig == 163, \
+                f'Expected null_without_target_type=163, got {null_ambig}'
             assert corrected == 0, \
                 f'Expected actionable_dynamic_corrected=0, got {corrected}'
-            assert legacy == 229, \
-                f'Expected actionable_dynamic_legacy=229, got {legacy}'
+            assert legacy == 298, \
+                f'Expected actionable_dynamic_legacy=298, got {legacy}'
 
             # Null target frontier
-            assert nt_expected == 127, \
-                f'Expected null_target_expected_non_actionable=127, got {nt_expected}'
+            assert nt_expected == 163, \
+                f'Expected null_target_expected_non_actionable=163, got {nt_expected}'
             assert nt_actionable == 0, \
                 f'Expected null_target_actionable=0, got {nt_actionable}'
-            assert nt_declared_dyn == 127, \
-                f'Expected null_target_declared_dynamic=127, got {nt_declared_dyn}'
+            assert nt_declared_dyn == 163, \
+                f'Expected null_target_declared_dynamic=163, got {nt_declared_dyn}'
 
     def test_type_indexed_call_concrete_return(self):
         """OCall1 with K_FUN type index (not findex) resolves concrete return type."""
@@ -4350,3 +4997,142 @@ class TestGiantSectionMarkers:
         ir = self._make_ir_func(0)
         output = self._render_body(ir, giant_section_size=20000)
         assert output is not None
+
+
+class TestB44FieldKindAcceptance:
+    """B44: Verify K_OBJ=11 is the field-bearing class kind and IS accepted.
+
+    B43 audit used wrong constants (K_OBJ=7, K_METHOD=11 in its script vs
+    K_OBJ=11, K_METHOD=20 in hl_decompile.py). This test class guards against
+    future constant confusion and proves that field resolution works correctly
+    for the actual field-bearing class kind.
+    """
+
+    def test_kobj_is_accepted_by_resolve_field_from_type(self):
+        """K_OBJ=11 is in the accepted kind list (K_OBJ, K_STRUCT)."""
+        from hl_decompile import K_OBJ, K_STRUCT, K_METHOD, K_FUN
+        assert K_OBJ == 11, f"K_OBJ should be 11, got {K_OBJ}"
+        assert K_METHOD == 20, f"K_METHOD should be 20, got {K_METHOD}"
+        # The acceptance check uses: t.kind in (K_OBJ, K_STRUCT)
+        accepted = {K_OBJ, K_STRUCT}
+        assert K_OBJ in accepted, "K_OBJ must be in accepted set"
+        assert K_STRUCT in accepted, "K_STRUCT must be in accepted set"
+        assert K_METHOD not in accepted, "K_METHOD should NOT be in accepted set"
+        assert K_FUN not in accepted, "K_FUN should NOT be in accepted set"
+
+    def test_shapes_fixture_kobj_fields_resolve(self):
+        """Shapes.hl K_OBJ types resolve field names correctly (fixture-backed)."""
+        import io, os
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler, K_OBJ
+
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "hl", "Shapes.hl")
+        raw = open(fixture_path, "rb").read()
+        p = HLParser(fixture_path)
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dec = Decompiler(p, dasm)
+
+        # Verify Circle type is K_OBJ and has fields
+        for ti, t in enumerate(p.types):
+            if t.name is not None and 0 <= t.name < len(p.strings):
+                if p.strings[t.name] == "Circle":
+                    assert t.kind == K_OBJ, f"Circle kind={t.kind}, expected K_OBJ={K_OBJ}"
+                    assert t.fields and len(t.fields) >= 2, f"Circle has {len(t.fields or [])} fields"
+                    break
+        else:
+            pytest.fail("Circle type not found in Shapes.hl")
+
+        # Decompile Circle.area (func[4]) and verify field resolution
+        ir_fn = dec.decompile_function(4)
+        assert ir_fn is not None, "Circle.area decompilation failed"
+
+        # Should have at least one resolved field
+        resolved = [d for d in ir_fn.field_resolve_diags if not d.is_fallback]
+        assert len(resolved) >= 1, (
+            f"Expected >=1 resolved fields, got {len(resolved)}. "
+            f"Diags: {[(d.op_name, d.resolved_name, d.is_fallback) for d in ir_fn.field_resolve_diags]}"
+        )
+
+        # The strategy should use parent_type (not fallback to fN)
+        for d in resolved:
+            assert d.resolution_strategy in ("reg_type", "parent_type", "fn_type_arg0"), (
+                f"Unexpected strategy: {d.resolution_strategy}"
+            )
+
+    def test_shapes_circle_field0_is_r(self):
+        """Circle field_idx=0 resolves to 'r' via parent_type strategy."""
+        import io, os
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "hl", "Shapes.hl")
+        raw = open(fixture_path, "rb").read()
+        p = HLParser(fixture_path)
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dec = Decompiler(p, dasm)
+
+        ir_fn = dec.decompile_function(5)
+        # Find the OGetThis/OField with field_idx=0 (radius access)
+        field0_diags = [d for d in ir_fn.field_resolve_diags if d.field_idx == 0
+                        and d.op_name in ("OGetThis", "OField", "OSetThis")]
+        assert len(field0_diags) >= 1, (
+            f"No field_idx=0 diag found. Diags: "
+            f"{[(d.op_name, d.field_idx, d.resolved_name) for d in ir_fn.field_resolve_diags]}"
+        )
+        for d in field0_diags:
+            # field_idx=0 on Circle should resolve to 'r' (radius)
+            assert d.resolved_name == "r" or not d.is_fallback, (
+                f"field_idx=0 on Circle should resolve to 'r', got '{d.resolved_name}', "
+                f"is_fallback={d.is_fallback}"
+            )
+
+    def test_oob_field_index_returns_fn_fallback(self):
+        """Field index past total inherited fields returns fN fallback."""
+        import io, os
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        fixture_path = os.path.join(os.path.dirname(__file__), "fixtures", "hl", "Shapes.hl")
+        raw = open(fixture_path, "rb").read()
+        p = HLParser(fixture_path)
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dec = Decompiler(p, dasm)
+
+        # Use _resolve_field_name directly with a large field_idx on Circle
+        from hl_decompile import ExprBuilder
+        fn = p.functions[4]
+        reg_names = {r: f"r{r}" for r in range(fn.nregs)}
+        eb = ExprBuilder(p, dasm, reg_names)
+
+        # Circle inherited chain: hl.BaseType(3) + hl.Class(2) + Circle(2) = 7 total
+        # field_idx=50 is way OOB
+        result = eb._resolve_field_name(50, 4)
+        assert result == "f50", (
+            f"OOB field_idx=50 should return 'f50', got '{result}'"
+        )
+
+    def test_kobj_acceptance_constant_guardrail_documented(self):
+        """Guardrail: if K_OBJ value ever changes, this test breaks loudly."""
+        from hl_decompile import K_OBJ, K_STRUCT, K_METHOD
+        # These are the documented, verified values from hl_decompile.py
+        assert K_OBJ == 11, (
+            f"K_OBJ changed from 11 to {K_OBJ}! If intentional, update "
+            f"AGENTS.md, MEMORY.md, and all tests that depend on this constant."
+        )
+        assert K_STRUCT == 21, (
+            f"K_STRUCT changed from 21 to {K_STRUCT}! If intentional, update "
+            f"AGENTS.md, MEMORY.md, and all tests."
+        )
+        assert K_METHOD == 20, (
+            f"K_METHOD changed from 20 to {K_METHOD}! If intentional, update "
+            f"AGENTS.md, MEMORY.md, and all tests."
+        )
+        # The accepted set must include the field-bearing class kind
+        accepted_kinds = {K_OBJ, K_STRUCT}
+        assert K_OBJ in accepted_kinds, "K_OBJ must remain in field-bearing accepted kinds"

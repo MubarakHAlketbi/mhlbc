@@ -57,6 +57,16 @@ FIXTURE_META = {
         "ntypes": 424, "nglobals": 98, "nnatives": 54,
         "nfunctions": 336, "nconstants": 53, "entrypoint": 389,
     },
+    "Switch.hl": {
+        "version": 4, "nints": 47, "nfloats": 1, "nstrings": 379,
+        "ntypes": 416, "nglobals": 95, "nnatives": 52,
+        "nfunctions": 334, "nconstants": 52, "entrypoint": 385,
+    },
+    "ControlFlow.hl": {
+        "version": 4, "nints": 50, "nfloats": 1, "nstrings": 384,
+        "ntypes": 418, "nglobals": 98, "nnatives": 52,
+        "nfunctions": 336, "nconstants": 55, "entrypoint": 387,
+    },
 }
 
 
