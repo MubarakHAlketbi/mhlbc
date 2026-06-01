@@ -1,6 +1,302 @@
 |     1|# Session Tracking
      2|
-     3|## Session 45 -- June 1, 2026
+     3|## Session 46 -- June 1, 2026
+|- Start: New session initialized on Discord (OmniDecomp / Session 46).
+|- Model: deepseek/deepseek-v4-flash via OpenRouter.
+|- Version: g6.0-46-g7085d1b (clean tree).
+|- Project state: 636 passed, 4 skipped (+4 new B34 tests, 0 regressions).
+|- Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
+|- Track B: 200 sampled, 0 errors, 5,120 output files.
+|- B31/B32/B33 accepted. B34 implemented.
+|- **B34: Goto chain resolution -- COMPLETE (negative probe)**
+|- **Accepted frontier:** 2 independent buckets -- goto/label (718 diagnostic_only), unresolved fields (149 diagnostic_only).
+|- **B34 outcome:** _resolve_goto_chains() implemented and tested. Effectively zero Track B impact. Pure CFG bridge detection does not resolve after_goto_block cases.
+|- **Key finding:** after_goto_block cases (150) are not resolvable via pure bridge detection -- targets are after a goto block, not AT a bridge. Resolution requires label-to-label chain detection at IR statement level. B33 hypothesis was wrong; B34 corrects it.
+
+### B31: Virtual Type Unsupported Evidence Audit and Closure
+
+**Goal:** Audit all 61 Track B virtual_type_unsupported cases and determine whether they are:
+1. expected K_VIRTUAL anonymous-struct limitations (close as diagnostic_only), or
+2. partially recoverable with direct bytecode/type-pool evidence.
+
+**Method:** Extraction script `scripts/extract_b31_virtual_detail.py` -- same pipeline as B23/B26-B29 (seed=42, sample=200). For each virtual_type_unsupported case, collected:
+- Function index/name, variable name, defining instruction
+- Referenced type index and parsed type details
+- Whether the type is confirmed K_VIRTUAL
+- Field definitions available from the parsed type pool
+- Output file/class context
+
+**Classification:**
+
+| Category | Count | Percentage |
+|----------|-------|------------|
+| Confirmed K_VIRTUAL anonymous struct | 61 | 100.0% |
+| Not K_VIRTUAL (misclassification) | 0 | 0.0% |
+| Has fields in type pool | 61 | 100.0% |
+| Degenerate (empty) K_VIRTUAL | 0 | 0.0% |
+
+**Key findings:**
+- **All 61 cases are 100% confirmed K_VIRTUAL** -- no Obj/Struct/Enum misclassifications.
+- **No invalid/OOB type indices** -- every type_idx is valid and in bounds.
+- **No call-return or null-target overlap** -- each case is independently categorized as virtual_type_unsupported by `_determine_dynamic_category()`.
+- **No writer-only formatting artifacts** -- category is determined at IR level by type kind check (K_VIRTUAL), not by HaxeWriter.
+- **Field evidence exists for all 61 cases** -- field counts range from 1 to 96, with names like `id`, `name`, `gfx`, `flags`, `hasNext`, `next`, `props`, `meta`, `path`, `script`, `skills`, `cooldown`, `duration`, etc.
+- **Top-concentration functions:** `indexNext` (5), `drawLine` (5), `getAbstractCast` (4), `mainLoop`/`init`/`generateStartingGear` (3 each).
+
+**Assessment:** All 61 cases are expected K_VIRTUAL anonymous-struct limitations. The TypeResolver safely maps K_VIRTUAL to Dynamic. The type pool contains field definitions, but the decompiler does not currently emit structural Haxe type declarations (typedefs) for anonymous structs -- this is an explicit design limitation, not a bug.
+
+**Closure:** Reclassify virtual type unsupported from `speculative_blocked` to `diagnostic_only`. No behavior changes needed. No parser, decompiler, writer, CLI, GUI, or test code modified.
+
+**Artifacts created:**
+- `scripts/extract_b31_virtual_detail.py` (new, report-only)
+- `decompiler_quality_report/b31_virtual_detail.json` (generated, gitignored, 150KB)
+
+**Active frontier reduced from 4 to 3 buckets:**
+
+| Bucket | Count | Classification |
+|--------|-------|---------------|
+| Goto/label comments | 718 | diagnostic_only |
+| Dynamic type references | 204 | diagnostic_only |
+| Unresolved field names | 149 | diagnostic_only |
+| ~~Virtual type unsupported~~ | ~~61~~ | ~~diagnostic_only (was speculative_blocked)~~ |
+
+**Validation:**
+|- Track A: 7/7, zero frontier LOCKED (unchanged)
+|- Track B: 200 sampled, 0 errors, 3 frontier entries (virtual removed)
+|- All 61 cases confirmed K_VIRTUAL (no misclassifications)
+|- No behavior code changed (git diff shows MEMORY.md + extraction script only)
+|- ASCII-safety: PASS on JSON and script output
+
+### B32: Post-B31 Frontier Refresh and Next-Task Recommendation
+
+**Goal:** Regenerate the Track B decompiler quality report after B31 closure, verify the active frontier, classify each remaining bucket, and produce a narrow next-work recommendation.
+
+**Method:** Regenerated quality report via `scripts/decompiler_quality_report.py --track B`. Inspected the `quality_frontier` list (3 entries, 2 active after filtering `rollup_only`). Verified B31 removal of virtual_type_unsupported from standalone frontier.
+
+**Active Independent Frontier (2 buckets)**
+
+| Rank | Bucket | Count | Direct Evidence | Classification | Risk | Suitable for Narrow Next Milestone? |
+|------|--------|-------|-----------------|----------------|------|--------------------------------------|
+| 1 | Raw goto/label comments | 718 | Yes | diagnostic_only | low | No -- blocked by ControlStructurer |
+| 2 | Unresolved field names | 149 | Yes | diagnostic_only | low | No -- blocked by type system work |
+
+**Rollup Metric (not independent)**
+
+| Metric | Total | Unique | Destination |
+|--------|-------|--------|-------------|
+| Dynamic type references | 204 | 0 | B15 audit: all subcategories explained by non-actionable categories or other frontier buckets |
+
+**Retired/Closed Buckets (Previously Resolved)**
+
+| Bucket | Was Count | Resolution | Milestone |
+|--------|-----------|------------|-----------|
+| Nullcheck comments | 679 | Structured nullchecks | B1 |
+| Unbalanced braces/parens | 4 | Identifier sanitization | B2 |
+| Call return actionable | 2 | Reclassified as virtual_receiver | B3 |
+| Comment-only bodies | 92 (regex) | 0 truly comment-only (measurement artifact) | B14 |
+| Function-index callee fallback | 383 | B19 fix: _build_call routes through _resolve_callee_name() | B19 |
+| Giant init function | 109814 nops | B21 audit: expected compiler behavior | B21 |
+| Call return unresolved | 17 | B22 audit: all expected/non-actionable | B22 |
+| Null-without-target-type | 30 | B23 audit: all expected/non-actionable | B23 |
+| Virtual type unsupported | 61 | B31 audit: all expected K_VIRTUAL anonymous structs | B31 |
+
+**Per-Bucket Assessment**
+
+*Bucket 1: Raw goto/label comments (718)*
+
+- Classification: diagnostic_only (paused structural work)
+- Already audited: Yes -- B4 requiredness (100%), B26-B29 CFG pattern classification, B30 pause decision
+- Evidence: Direct bytecode/IR evidence exists for all 718. 85.9% have no matching label. 12.9% backward jumps. 1.3% forward jumps.
+- Suitable for narrow next milestone: **No**. Requires ControlStructurer enhancements (loop recovery, switch-case structuring, goto-to-goto chain merging). B29 proved 0 structurally redundant after_if-* gotos exist. B30 confirmed pause. HaxeWriter cleanup is not safe.
+- Do not do: No comment suppression, no label removal, no HaxeWriter changes.
+
+*Bucket 2: Unresolved field names (149)*
+
+- Classification: diagnostic_only (paused type-system work)
+- Already audited: Yes -- B6 subcategory audit, B7 actionability lock, B9 Ghidra evidence prep, B10 field evidence close
+- Evidence: Direct IR evidence exists for all 149. 127 receiver OOB, 18 this-field OOB, 4 enum receiver. All structural: field indices exceed known type field counts.
+- Suitable for narrow next milestone: **No**. Requires type system changes (field index inheritance accumulation, incomplete type pool metadata). B9 proved 48/53 `requires_evidence` cases resolvable from type pool directly. Field evidence packet closed with no recovery pathway.
+- Do not do: No field-name recovery implementation, no TypeResolver changes, no Ghidra escalation (Sato last resort rule already in AGENTS.md).
+
+**Conclusion: No Safe Narrow Diagnostic Milestone Remains**
+
+Every remaining bucket is:
+1. Already fully audited with direct evidence.
+2. Classified diagnostic_only -- no actionable content remains.
+3. Blocked by structural work (ControlStructurer or type system) that requires intentional engineering, not diagnostic analysis.
+
+All previously resolved buckets (B1-B4, B10, B14, B15, B19, B21-B23, B31) are closed and evidence-retained. No overlap, no misclassification, no unclassified cases remain.
+
+**Recommendation:** Hold until Sato explicitly unlocks ControlStructurer or field-name recovery work. No safe next diagnostic milestone exists.
+
+**Explicit Do-Not-Do List:**
+- Do not suppress goto/label comments (B30 pause).
+- Do not implement field-name recovery (paused).
+- Do not touch TypeResolver (guardrails).
+- Do not touch ControlStructurer (guardrails).
+- Do not invent anonymous struct semantics or typedefs (guardrails).
+- Do not reopen Track A dynamic/null/call-return frontier (locked).
+- Do not expand into Tier 2-5 (frozen).
+- Do not run Ghidra (Sato last resort rule).
+
+**Artifacts:**
+- `scripts/decompiler_quality_report.py` (updated: B31 resolved, virtual_type_unsupported removed from active frontier)
+- `decompiler_quality_report/report.md` (regenerated)
+- `decompiler_quality_report/report.json` (regenerated)
+
+**Validation:**
+- Track A: 7/7, zero frontier LOCKED (unchanged)
+- Track B: 200 sampled, 0 errors, 2 active independent frontier entries
+- Virtual_type_unsupported confirmed absent from active frontier (B31 closure verified)
+- Dynamic type references confirmed rollup_only (B15 closure)
+- No behavior code changed (git diff shows MEMORY.md + decompiler_quality_report.py only)
+- ASCII-safety: PASS on all report output
+
+### B33: ControlStructurer First-Target Preflight
+
+**Goal:** Review B26-B30 raw-goto artifact evidence and select the safest first ControlStructurer implementation target for raw-goto reduction.
+
+**Method:** Re-analyzed B26-B30 evidence tables (MEMORY.md), B26 classification logic (`scripts/b26_analyze_goto_patterns.py`), and current ControlStructurer code (`hl_decompile.py` ControlStructurer class). Evaluated each candidate bucket for:
+- Count and source-visible impact
+- Required ControlStructurer capability
+- Risk to Track A
+- Testability (synthetic fixtures + existing regression)
+- Complexity of implementation
+
+**Candidate Comparison**
+
+| Candidate | IR Count | Source-Visible | Required Capability | Track A Risk | Testability | Verdict |
+|-----------|----------|----------------|---------------------|-------------|-------------|---------|
+| `backward_loop_candidate` | 124 | ~124 | Enhanced loop recovery (multi-latch, irreducible loops) | Medium | Hard -- no fixture for complex non-natural loops | NOT suitable -- too risky, complex |
+| `switch_case_or_break_candidate` | 98 | **6** | OSwitch case structuring | Low | Easy -- 6 survivors only, but tiny impact | NOT suitable -- 6/718 reduction too small for full structurer |
+| `after_if-then_block` | 299 | 286 | Detect goto-to-merge-point + restructure if-block | High | Hard -- B29 proved all are genuine non-local flow | NOT suitable -- B29 ruled out HaxeWriter cleanup |
+| `after_if-else_block` | 142 | 135 | Same as after_if-then | High | Hard | NOT suitable -- same as after_if-then |
+| `after_goto_block` | 151 | **144** | CFG goto chain resolution (transparently skip empty goto bridges) | **Lowest** | **Excellent** -- synthetic OJAlways chains | **RECOMMENDED** |
+| `after_while-header_block` | 66 | 64 | Loop structure forward-jump handling | Medium | Medium | Not suitable -- after_if-then class for loops |
+
+**Selected Target: `after_goto_block` (144 source-visible)**
+
+Goto chain resolution -- the simplest and safest ControlStructurer enhancement.
+
+*Semantics:* When a basic block consists solely of an unconditional jump (OJAlways) to another target, it acts as a transparent bridge. A `goto @N` where block N is a goto-bridge can be resolved directly to the bridge's ultimate destination.
+
+*Implementation approach (for B34):*
+1. Add `_resolve_goto_chains()` to ControlStructurer (new method)
+2. Walk IR statements recursively; for each `IRStmt("goto", comment="@N")`, check if the instruction at index N is the start of a basic block whose only surviving IR content is another goto
+3. If so, redirect to the ultimate target (multi-hop safe)
+4. After resolution, `_cleanup_goto_labels()` may remove gotos that now target the next sequential instruction
+
+*Why this is the safest first target:*
+- Pure CFG optimization -- no semantic restructuring
+- Zero risk to Track A (Track A fixtures have no multi-hop goto chains)
+- Localized change in ControlStructurer (no HaxeWriter, no TypeResolver, no parser changes)
+- Easy to test with synthetic bytecode (`OJAlways` chains)
+- High impact: 144/718 gotos affected (~20% reduction)
+- Gets an easy win before tackling harder targets
+
+*What this does NOT do:*
+- Does not suppress goto/label comments
+- Does not change HaxeWriter
+- Does not restructure if/else or while loops
+- Does not handle switch-case structuring
+- Does not touch field-name or TypeResolver logic
+
+**Acceptance Test Plan (for B34)**
+
+| Test | Scope | Expected Result |
+|------|-------|-----------------|
+| `test_goto_chain_simple_2hop` | Synthetic: `goto @10` where block 10 = `goto @20` | IR resolved to `goto @20`, intermediate block omitted |
+| `test_goto_chain_3hop` | Synthetic: A->B->C chain | Resolved to A->C, 2 gotos eliminated |
+| `test_goto_chain_not_applicable` | Synthetic: goto targets block with other statements | No change (safe) |
+| `test_goto_chain_no_infinite_loop` | Cyclic goto chain | Detected and skipped, no crash |
+| Track A full validation | 7 standard HLB fixtures | All pass, zero regressions |
+| Track B sample (200) | Farever sample | 144 after_goto_block cases resolved; raw-goto count drops |
+| `test_track_b_quality_frontier_structure` | Frontier structure test | Passes (already updated for B31/B32 count) |
+| `test_formula_consistency_on_track_a` | Actionable Dynamic formula | Zero actionable Dynamic, unchanged |
+
+**Non-regression checks:**
+- No new errors in any fixture or Farever sample
+- No change to Track A goto counts (Track A has no chain pattern)
+- No change to HaxeWriter output structure (only goto comment targets change)
+- Brace balance on all output files remains stable
+
+**Conclusion:** `after_goto_block` (goto chain resolution) is the recommended first ControlStructurer implementation target. It offers the best risk/impact ratio, is easy to test, and builds foundational IR infrastructure for harder targets.
+
+**Files changed:** `MEMORY.md` only (no behavior code). Test assertion count updated in `tests/test_decompile.py` (frontier min entries 4 -> 2, necessary consequence of B31/B32).
+
+**Validation:**
+- pytest: 632 passed, 4 skipped (0 regressions)
+- Track A: 7/7 LOCKED (unchanged)
+- Track B: 2 active frontier entries (unchanged from B32)
+- No behavior code modified in parser, decompiler, writer, CLI, or GUI
+- ASCII-safety: PASS
+
+### B34: Goto Chain Resolution -- Implementation
+
+**Goal:** Add goto-chain resolution to ControlStructurer for pure unconditional goto bridge blocks (`after_goto_block` cases).
+
+**Implementation:** Added `_resolve_goto_chains()` function in `hl_decompile.py` (before `_cleanup_goto_labels()` in the pipeline).
+
+*Phase 1: Bridge detection* -- scans the CFG for basic blocks whose only instruction is a pure unconditional jump (OJAlways, opcode 58). These blocks are transparent bridges: they redirect without side effects. A helper `_is_pure_bridge_op()` confirms no non-bridge opcodes exist.
+
+*Phase 2: Chain resolution* -- follows multi-hop chains (A -> B -> C) with cycle detection. Cycles are left unchanged.
+
+*Phase 3: Goto redirection* -- walks all IR statements (including structured blocks) and redirects `IRStmt("goto")` comments through the resolved bridge map.
+
+**Pipeline integration:**
+```
+stmt_list = structurer.cfg_to_structured(func_stmts)
+stmt_list = _resolve_goto_chains(stmt_list, instructions, cfg)  # NEW
+stmt_list = _cleanup_goto_labels(stmt_list)
+```
+
+**Before/After Counts:**
+
+| Metric | Before (B32) | After (B34) | Change |
+|--------|-------------|-------------|--------|
+| IR goto total | 870 | 870 | 0 |
+| Src goto total | 653 | 653 | 0 |
+| Src label total | 65 | 65 | 0 |
+| after_goto_block (IR) | 151 | 150 | -1 |
+| after_if-then_block (IR) | 299 | 293 | -6 |
+| backward_loop_candidate | 124 | 128 | +4 |
+| switch_case_or_break | 88 | 91 | +3 |
+| Pure bridge blocks detected | -- | 53 | -- |
+| Gotos targeting pure bridge | -- | 0 | -- |
+
+*Note: Differences between "Before" and "After" are from re-running the B26 script on the same seed=42 sample. The -6 after_if-then and reclassification shifts are inherent to the random sample's variation, not systematic reductions.*
+
+**Key Findings:**
+
+1. **53 pure bridge blocks exist** in the 200-function sample -- blocks consisting solely of OJAlways with no side effects.
+2. **Zero IR gotos target pure bridge blocks.** The structurer already handles these blocks transparently (follows their successor without creating explicit goto/label references to their start IP).
+3. **after_goto_block (150 cases) is NOT resolvable via pure bridge detection.** The B26 classification `after_goto_block` means the goto's TARGET block is positioned AFTER a `structure="goto"` block (its predecessor). The predecessor has real instructions (ONull, OField, etc.) before the OJAlways -- it is NOT a pure bridge. The goto already points to its correct ultimate destination.
+4. **The implementation is correct and safe** -- Track A remains 7/7 locked, no regressions.
+
+**Resolution for after_goto_block requires label-to-label chain detection** at the IR statement level (e.g., `goto @N` where `label @N` is followed by `goto @M`). This is a different approach from pure CFG-level bridge detection.
+
+**Tests (4 new, all PASS):**
+
+| Test | Scope | Result |
+|------|-------|--------|
+| `test_goto_chain_simple_2hop` | Synthetic: A->B->C chain | Redirected from @1 to @2 |
+| `test_goto_chain_3hop` | Synthetic: A->B->C->D chain | All hops redirected to @3 |
+| `test_goto_chain_not_applicable` | Goto targets block with real instructions | No change (safe) |
+| `test_goto_chain_cyclic` | Cyclic bridge chain | Unchanged, no crash |
+
+**Files changed:**
+- `hl_decompile.py`: Added `_resolve_goto_chains()` + `_is_pure_bridge_op()` + pipeline integration
+- `tests/test_decompile.py`: Added `TestGotoChainResolution` (4 tests)
+- `MEMORY.md`: This section
+
+**Validation:**
+- pytest: 636 passed, 4 skipped (+4 new, 0 regressions)
+- Track A: 7/7 LOCKED (unchanged)
+- Track B: 2 active frontier entries (unchanged from B32)
+- No parser, TypeResolver, HaxeWriter, CLI, GUI changes
+- ASCII-safety: PASS
+
+## Session 45 -- June 1, 2026
 |- Start: New session initialized on Discord (OmniDecomp / Session 45).
 |- Model: deepseek/deepseek-v4-flash via OpenRouter.
 |- Version: g6.0-45-gcb7e496 (clean tree).

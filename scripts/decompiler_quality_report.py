@@ -2506,24 +2506,12 @@ def analyze_farever_quality_frontier(
     })
 
     # ============================================================
-    # Bucket 5: Virtual type unsupported
+    # Bucket 5: Virtual type unsupported (RESOLVED by B31)
     # ============================================================
-    if virtual_unsupported > 0:
-        frontiers.append({
-            "bucket": "Virtual type unsupported (K_VIRTUAL -> Dynamic)",
-            "count": virtual_unsupported,
-            "example_functions": _top_funcs_for_dyn_cat("virtual_type_unsupported"),
-            "likely_cause": (
-                "K_VIRTUAL types represent anonymous structs. The decompiler cannot "
-                "emit structural type declarations for these, falling back to Dynamic. "
-                "This is an explicit design limitation."
-            ),
-            "direct_evidence": True,
-            "classification": "speculative_blocked",
-            "recommended_milestone": "Requires structural type representation -- "
-                "define anonymous struct schema or emit as haxe.DynamicAccess<T>.",
-            "risk_level": "medium",
-        })
+    # B31 audit: 61/61 confirmed K_VIRTUAL anonymous structs.
+    # All have field definitions in parsed type pool. All expected behavior.
+    # Reclassified from speculative_blocked to diagnostic_only.
+    # Removed from active frontier. See Previously Resolved section.
 
     # ============================================================
     # Bucket 6: Null without target type
@@ -3620,7 +3608,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("")
             md_lines.append("---")
             md_lines.append("")
-            md_lines.append("## Track B -- Previously Resolved Frontiers (B1-B4 + B10 + B14 + B15 + B19 + B21 + B22 + B23)")
+            md_lines.append("## Track B -- Previously Resolved Frontiers (B1-B4 + B10 + B14 + B15 + B19 + B21 + B22 + B23 + B31)")
             md_lines.append("")
             md_lines.append("The following frontier buckets were resolved by earlier cleanup milestones or audit resolutions or are expected compiler behavior:")
             md_lines.append("")
@@ -3683,6 +3671,16 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 "(reclassifies hide[16049] t4 from unknown to field_store). "
                 "0 actionable null targets remain. | B23 |"
             )
+            md_lines.append(
+                "| Virtual type unsupported (was 61) | "
+                "B31 audit: 61/61 confirmed K_VIRTUAL anonymous structs. "
+                "All have field definitions in parsed type pool. "
+                "No misclassified Obj/Struct/Enum, no invalid/OOB indices. "
+                "TypeResolver safely maps K_VIRTUAL to Dynamic. "
+                "Anonymous structural Haxe reconstruction not currently implemented. "
+                "Reclassified from speculative_blocked to diagnostic_only. "
+                "Bucket closed. | B31 |"
+            )
             md_lines.append("")
             md_lines.append("")
             md_lines.append("---")
@@ -3699,7 +3697,8 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 "by evidence quality and recommended action. "
                 "Buckets resolved by B14 (comment-only bodies), B15 (dynamic type references), "
                 "B21 (giant init expected behavior), B22 (call-return all expected), "
-                "or B23 (null target all expected) "
+                "B23 (null target all expected), "
+                "or B31 (virtual type unsupported all expected) "
                 "are listed in the Previously Resolved section above."
             )
             md_lines.append("")

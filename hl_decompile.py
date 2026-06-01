@@ -2352,6 +2352,138 @@ def _block_can_reach_any(block_map: Dict[int, 'BasicBlock'],
     return False
 
 
+def _resolve_goto_chains(
+    stmts: List[IRStmt],
+    instructions: List[Instruction],
+    cfg: Optional[List[BasicBlock]] = None,
+) -> List[IRStmt]:
+    """Resolve goto chains through pure unconditional goto bridge blocks.
+
+    A "goto bridge" is a basic block whose only meaningful content is an
+    unconditional jump (OJAlways, opcode 58).  Any ``IRStmt("goto", "@N")``
+    whose target instruction N is the start of a pure bridge can be redirected
+    directly to the bridge's destination.  Multi-hop chains are resolved safely
+    with cycle detection.
+
+    Runs purely on IR statements; requires the instruction list to check
+    opcodes and jump targets.
+
+    Args:
+        stmts: IR statement list (may be mutated in place).
+        instructions: Function instruction list (for opcode/jump-target lookup).
+        cfg: Optional CFG for block-level bridge detection (fallback).
+
+    Returns:
+        The same *stmts* list, mutated.
+    """
+    if not stmts or not instructions:
+        return stmts
+
+    # --- Phase 1: Identify pure bridge instruction indices ---
+    # A pure bridge is an OJAlways (op 58) whose block has no other
+    # meaningful side effects.  For our purposes, ANY OJAlways whose
+    # instruction index starts the block is a potential bridge.
+    bridge_targets: Dict[int, int] = {}  # src_ip -> dst_ip (single hop)
+
+    if cfg:
+        # Use CFG for precise block-level identification
+        block_map = {b.id: b for b in cfg}
+        for blk in cfg:
+            if not blk.instructions:
+                continue
+            last = blk.instructions[-1]
+            if last.opcode != 58:  # not OJAlways
+                continue
+            # Check that all instructions in the block are non-side-effect
+            # (OJAlways plus maybe debug annotations).  A block with only
+            # an unconditional jump is a pure bridge.
+            has_other_ops = False
+            for instr in blk.instructions[:-1]:  # exclude last (OJAlways)
+                if not _is_pure_bridge_op(instr):
+                    has_other_ops = True
+                    break
+            if has_other_ops:
+                continue
+            start_ip = blk.start_ip
+            target = last.jump_target
+            if target is not None and target != start_ip:
+                bridge_targets[start_ip] = target
+    else:
+        # Fallback: scan instructions directly
+        for i, instr in enumerate(instructions):
+            if instr.opcode == 58:  # OJAlways
+                prev_ops_compatible = True
+                # Check that earlier instructions at same position are clean
+                # (no side effects — just debug info or nop-like)
+                for j in range(max(0, i - 3), i):
+                    if j < len(instructions) and not _is_pure_bridge_op(instructions[j]):
+                        prev_ops_compatible = False
+                        break
+                if prev_ops_compatible and instr.jump_target is not None:
+                    bridge_targets[i] = instr.jump_target
+
+    if not bridge_targets:
+        return stmts
+
+    # --- Phase 2: Resolve chains with cycle detection ---
+    def _resolve_chain(ip: int, seen: Set[int]) -> Optional[int]:
+        """Follow bridge chain to ultimate target.  Returns None on cycle."""
+        while ip in bridge_targets:
+            if ip in seen:
+                return None  # cycle
+            seen.add(ip)
+            ip = bridge_targets[ip]
+        return ip
+
+    # Build resolved map: original_ip -> ultimate_ip (only if different)
+    resolved: Dict[int, int] = {}
+    for bridge_ip in bridge_targets:
+        ultimate = _resolve_chain(bridge_ip, set())
+        if ultimate is not None and ultimate != bridge_ip:
+            resolved[bridge_ip] = ultimate
+
+    if not resolved:
+        return stmts
+
+    # --- Phase 3: Walk IR statements and redirect gotos ---
+    def _walk(stmt_list: List[IRStmt]) -> None:
+        for stmt in stmt_list:
+            if stmt.op == "goto" and stmt.comment:
+                comment = stmt.comment.lstrip("@")
+                try:
+                    old_target = int(comment)
+                except (ValueError, TypeError):
+                    pass
+                else:
+                    if old_target in resolved:
+                        stmt.comment = f"@{resolved[old_target]}"
+            # Recurse into structured blocks
+            if stmt.blocks:
+                for blk in stmt.blocks:
+                    _walk(blk)
+
+    _walk(stmts)
+    return stmts
+
+
+def _is_pure_bridge_op(instr: Instruction) -> bool:
+    """Check if an instruction has no meaningful side effects for bridge detection.
+
+    Structurally harmless opcodes that can exist alongside an OJAlways
+    without disqualifying the block from being a pure bridge.
+    """
+    # OJAlways itself (op 58) is the goto — permit it
+    if instr.opcode == 58:
+        return True
+    # Debug/label-like opcodes: ORetVoid (92) at end, nop-like
+    if instr.opcode in (93,):  # OOverUnreachable — dead code marker
+        return True
+    # Narrowly permit side-effect-free register moves (OMov) when the
+    # dst register is never used — but for safety we treat anything
+    # other than OJAlways as potentially meaningful.
+    return False
+
+
 def _cleanup_goto_labels(stmts: List[IRStmt]) -> List[IRStmt]:
     """Remove provably no-op goto-to-next-label comment pairs.
 
@@ -4186,6 +4318,11 @@ class Decompiler:
                                        reg_names=reg_names,
                                        logger=self.logger)
         structured_stmts = structurer.cfg_to_structured(func_stmts)
+
+        # Step 5a: Resolve goto chains through pure bridge blocks
+        # (redirects goto @N where N is an unconditional jump bridge)
+        structured_stmts = _resolve_goto_chains(
+            structured_stmts, instructions, cfg)
 
         # Step 5b: Clean up provably no-op goto-to-next-label comment pairs
         # (purely presentational -- reduces comment noise without losing info)
