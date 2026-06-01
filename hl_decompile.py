@@ -330,6 +330,7 @@ class IRStmt:
     extra: Optional[Any] = None          # extra info (switch cases, catch var, etc.)
     comment: str = ""                    # optional annotation
     line: int = -1                       # source line number
+    index: int = -1                      # instruction index (for diagnostic / label matching)
 
     def __str__(self) -> str:
         if self.op == "assign":
@@ -1537,6 +1538,7 @@ class ExprBuilder:
             if stmt is not None:
                 if instr.source_line >= 0:
                     stmt.line = instr.source_line
+                stmt.index = instr.index
                 stmts.append(stmt)
             result[instr.index] = stmts
 
@@ -2814,17 +2816,33 @@ class ControlStructurer:
                 if merge_bid is not None:
                     # Provable merge exists -- structure if/else cleanly
                     if_res = IRStmt("if", src=condition, blocks=[[], []])
+                    merge_block = block_map.get(merge_bid)
+                    merge_first_idx = None
+                    if merge_block and merge_block.instructions:
+                        merge_first_idx = str(merge_block.instructions[0].index)
                     if succs:
                         then_stmts: List[IRStmt] = []
                         self._walk_block(succs[0], block_map, func_stmts,
                                          visited, then_stmts, loop_info,
                                          stop_at_merge=merge_bid)
+                        # B47: suppress terminal goto to proven common merge
+                        if (then_stmts and then_stmts[-1].op == "goto"
+                                and merge_first_idx is not None):
+                            g_target = (then_stmts[-1].comment or "").lstrip("@")
+                            if g_target == merge_first_idx:
+                                then_stmts.pop()
                         if_res.blocks[0] = then_stmts
                     if len(succs) > 1:
                         else_stmts: List[IRStmt] = []
                         self._walk_block(succs[1], block_map, func_stmts,
                                          visited, else_stmts, loop_info,
                                          stop_at_merge=merge_bid)
+                        # B47: suppress terminal goto to proven common merge
+                        if (else_stmts and else_stmts[-1].op == "goto"
+                                and merge_first_idx is not None):
+                            g_target = (else_stmts[-1].comment or "").lstrip("@")
+                            if g_target == merge_first_idx:
+                                else_stmts.pop()
                         if_res.blocks[1] = else_stmts
                     result.append(if_res)
                     # Walk merge only if it is not the outer stop (else-if chain)

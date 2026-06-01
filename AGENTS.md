@@ -23,6 +23,31 @@ Use this priority order when resolving conflicts:
 4. `README.md`, `CONTRIBUTING.md`, and `checklist.md`.
 5. This `AGENTS.md`.
 
+### 2.1 Docs-as-Knowledge-Base
+
+Before any behavior-changing work on the parser, disassembler, decompiler, CFG, IR, writer, or report pipeline, the agent must identify and read the relevant `docs/` files for the subsystem involved. The mapping is:
+
+| Subsystem | Required `docs/` files |
+|-----------|----------------------|
+| Parser header/pools/version | `header_format.md`, `varint_encoding.md`, `version_deltas.md` |
+| Opcode/disassembler | `opcodes.md`, `function_format.md` |
+| Type/name/field resolution | `type_system.md` |
+| ControlStructurer/decompiler | `decompilation_patterns.md`, `opcodes.md` |
+| Validation/reporting | `validation_matrix.md` + `MEMORY.md` current frontier |
+
+The mapping is a minimum floor -- read additional files when the task touches multiple subsystems (e.g., a decompiler change that also affects type resolution must read both `decompilation_patterns.md` and `type_system.md`).
+
+If a `docs/` file conflicts with code, treat it as an evidence problem:
+1. Inspect the actual code behavior (parser, tests, fixtures).
+2. Inspect reference evidence (compiled HLB fixtures, HashLink source, binary analysis).
+3. Determine which is correct.
+4. If the code is correct, update the stale `docs/` file.
+5. If the `docs/` spec was correct and the code is wrong, fix the code.
+6. If neither is clearly wrong (both are correct interpretations of different HL versions), update `docs/` to document the version split.
+7. In all cases, update `AGENTS.md` or `MEMORY.md` only after proving correct behavior -- do not update from speculation.
+
+Milestone reports for behavior work touching bytecode semantics, type semantics, opcode semantics, or control-flow reconstruction must list which `docs/` files were consulted and any discrepancies found. This audit trail is recorded in the MEMORY.md session entry.
+
 If this file conflicts with verified code or docs, update this file after confirming the correct behavior.
 
 Do not invent HashLink format details. If a bytecode layout is unknown, inspect existing implementation, docs, test fixtures, reference HashLink source, or real binary evidence before changing code.
@@ -342,14 +367,15 @@ When a synthetic helper changes, verify it still matches real compiler output. S
 
 Use this flow for changes that affect bytecode interpretation:
 
-1. Check existing docs and code for the exact structure.
-2. Locate the stream boundary and expected offset behavior.
-3. Add or update tests that reproduce the issue.
-4. Implement the smallest correct backend change.
-5. Expose through CLI if the feature is user-facing or scriptable.
-6. Update GUI only after backend and CLI behavior is stable.
-7. Update docs when a layout rule, pitfall, or architecture rule changes.
-8. Run relevant tests and report exact results.
+1. **Read relevant docs first.** Consult the subsystem mapping in Section 2.1 (Docs-as-Knowledge-Base) and read the corresponding `docs/` files before writing any code. Do not rely on memory or stale assumptions.
+2. Check existing code for the exact structure.
+3. Locate the stream boundary and expected offset behavior.
+4. Add or update tests that reproduce the issue.
+5. Implement the smallest correct backend change.
+6. Expose through CLI if the feature is user-facing or scriptable.
+7. Update GUI only after backend and CLI behavior is stable.
+8. Update docs when a layout rule, pitfall, or architecture rule changes.
+9. Run relevant tests and report exact results.
 
 Documentation maintenance:
 

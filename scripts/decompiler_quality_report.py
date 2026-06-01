@@ -570,6 +570,153 @@ def analyze_structured_flow(
     }
 
 
+def _walk_ir_frontier(
+    stmts: List['IRStmt'],
+    context: str,
+    counters: Dict[str, int],
+) -> None:
+    """Recursively walk IR statements counting structured constructs and
+    classifying goto/label comments by nesting context.
+
+    ``context`` is the current structured context stack encoded as a string:
+    ``""`` (top-level), ``"if"``, ``"while"``, ``"for"``, ``"switch"``, or
+    a composite like ``"if:while"`` (goto inside both an if and a while).
+
+    Modifies ``counters`` in place.
+    """
+    if context:
+        # Innermost context level determines goto/label classification
+        # (e.g. goto inside if inside while -> goto_inside_if)
+        primary_ctx = context.split(":")[-1]
+    else:
+        primary_ctx = ""
+
+    for stmt in stmts:
+        op = stmt.op
+        if op == "if":
+            counters["structured_if_count"] += 1
+            new_ctx = _push_context(context, "if")
+            if len(stmt.blocks) >= 1:
+                _walk_ir_frontier(stmt.blocks[0], new_ctx, counters)
+            if len(stmt.blocks) >= 2:
+                _walk_ir_frontier(stmt.blocks[1], new_ctx, counters)
+        elif op == "while":
+            counters["structured_while_count"] += 1
+            new_ctx = _push_context(context, "while")
+            if stmt.blocks:
+                _walk_ir_frontier(stmt.blocks[0], new_ctx, counters)
+        elif op == "for":
+            counters["structured_for_count"] += 1
+            new_ctx = _push_context(context, "for")
+            if stmt.blocks:
+                _walk_ir_frontier(stmt.blocks[0], new_ctx, counters)
+        elif op == "switch":
+            counters["structured_switch_count"] += 1
+            new_ctx = _push_context(context, "switch")
+            if stmt.blocks:
+                _walk_ir_frontier(stmt.blocks[0], new_ctx, counters)
+        elif op == "goto":
+            counters["goto_total"] += 1
+            # Classify by primary context
+            if primary_ctx == "if":
+                counters["goto_inside_if"] += 1
+            elif primary_ctx == "while":
+                counters["goto_inside_while"] += 1
+            elif primary_ctx == "for":
+                counters["goto_inside_for"] += 1
+            elif primary_ctx == "switch":
+                counters["goto_inside_switch"] += 1
+            else:
+                counters["goto_top_level"] += 1
+        elif op == "label":
+            counters["label_total"] += 1
+            if primary_ctx:
+                counters["label_inside_structured"] += 1
+            else:
+                counters["label_top_level"] += 1
+        else:
+            # Recurse into any blocks for other statement types
+            # (e.g. try/catch, user-defined blocks)
+            for block in stmt.blocks:
+                _walk_ir_frontier(block, context, counters)
+
+
+def _push_context(current: str, new: str) -> str:
+    """Push a context onto the colon-separated stack."""
+    if current:
+        return f"{current}:{new}"
+    return new
+
+
+def analyze_frontier_census(
+    result: DecompileResult,
+) -> Dict[str, Any]:
+    """Count structured constructs and classify goto/label comments by
+    nesting context using recursive IR traversal.
+
+    Unlike ``analyze_structured_flow`` which only inspects top-level IR
+    statements, this function walks recursively into all blocks to produce
+    a complete census of where goto/label comments actually live in the
+    IR tree.
+
+    Returns:
+        structured_if_count        -- total ``IRStmt(op="if")`` (recursive)
+        structured_while_count     -- total ``IRStmt(op="while")`` (recursive)
+        structured_for_count       -- total ``IRStmt(op="for")`` (recursive)
+        structured_switch_count    -- total ``IRStmt(op="switch")`` (recursive)
+        goto_total                 -- total ``IRStmt(op="goto")``
+        goto_inside_if             -- gotos inside at least one ``if`` block
+        goto_inside_while          -- gotos inside at least one ``while`` block
+        goto_inside_for            -- gotos inside at least one ``for`` block
+        goto_inside_switch         -- gotos inside at least one ``switch`` block
+        goto_top_level             -- gotos NOT inside any structured construct
+        label_total                -- total ``IRStmt(op="label")``
+        label_inside_structured    -- labels inside any structured construct
+        label_top_level            -- labels NOT inside any structured construct
+    """
+    counters: Dict[str, int] = {
+        "structured_if_count": 0,
+        "structured_while_count": 0,
+        "structured_for_count": 0,
+        "structured_switch_count": 0,
+        "goto_total": 0,
+        "goto_inside_if": 0,
+        "goto_inside_while": 0,
+        "goto_inside_for": 0,
+        "goto_inside_switch": 0,
+        "goto_top_level": 0,
+        "label_total": 0,
+        "label_inside_structured": 0,
+        "label_top_level": 0,
+    }
+
+    for ir_fn in result.functions.values():
+        _walk_ir_frontier(ir_fn.body, "", counters)
+
+    # Validate: goto_total == goto_inside_if + goto_inside_while +
+    # goto_inside_for + goto_inside_switch + goto_top_level
+    counted = (
+        counters["goto_inside_if"]
+        + counters["goto_inside_while"]
+        + counters["goto_inside_for"]
+        + counters["goto_inside_switch"]
+        + counters["goto_top_level"]
+    )
+    if counted != counters["goto_total"]:
+        counters["_goto_classification_total"] = counted
+        counters["_goto_classification_gap"] = counters["goto_total"] - counted
+
+    # Validate: label_total == label_inside_structured + label_top_level
+    label_counted = (
+        counters["label_inside_structured"] + counters["label_top_level"]
+    )
+    if label_counted != counters["label_total"]:
+        counters["_label_classification_total"] = label_counted
+        counters["_label_classification_gap"] = counters["label_total"] - label_counted
+
+    return counters
+
+
 def analyze_dynamic_attributions(
     result: DecompileResult,
     parser: HLParser,
@@ -1127,6 +1274,7 @@ def run_track_a() -> Dict[str, Any]:
         null_subcat_metrics = analyze_null_target_subcategories(result)
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
         flow_metrics = analyze_structured_flow(result)
+        census_metrics = analyze_frontier_census(result)
 
         file_metrics = {
             "function_level": func_metrics,
@@ -1139,6 +1287,7 @@ def run_track_a() -> Dict[str, Any]:
             "null_target_analysis": null_subcat_metrics,
             "fidelity": fidelity,
             "structured_flow": flow_metrics,
+            "frontier_census": census_metrics,
             "output_files": len(sources),
             "output_file_names": sorted(sources.keys()),
         }
@@ -1253,6 +1402,10 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
     # Structured flow metrics
     flow_metrics = analyze_structured_flow(result)
     inventory["structured_flow"] = flow_metrics
+
+    # Frontier census (recursive IR goto/label context classification)
+    census_metrics = analyze_frontier_census(result)
+    inventory["frontier_census"] = census_metrics
 
     # Dynamic attribution
     if result:
@@ -2823,6 +2976,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     null_target_actionable = 0
     actionable_dynamic_new = 0
     all_null_subcats_track_a: Dict[str, int] = defaultdict(int)
+    frontier_census_agg: Dict[str, int] = defaultdict(int)
 
     if track_a:
         # Overall aggregation
@@ -2850,6 +3004,9 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             sf = fd.get('structured_flow', {})
             total_if_all += sf.get('structured_if_count', 0)
             total_while_all += sf.get('structured_while_count', 0)
+            fc = fd.get('frontier_census', {})
+            for k, v in fc.items():
+                frontier_census_agg[k] += v
 
         # Aggregate call return subcategories for new actionable_dynamic formula
         all_cr_subcats: Dict[str, int] = defaultdict(int)
@@ -4363,6 +4520,73 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("| `out_of_scope` | Intentional design limitation or Tier 2+ concern |")
             md_lines.append("")
 
+            # ── Track B B46 ControlStructurer Frontier Census ─────────────
+            track_b_fc = track_b.get("frontier_census", {})
+            if track_b_fc and track_b_fc.get("goto_total", 0) > 0:
+                tfc = track_b_fc
+                tfc_goto_pct_inside = (
+                    tfc.get("goto_inside_if", 0)
+                    + tfc.get("goto_inside_while", 0)
+                    + tfc.get("goto_inside_for", 0)
+                    + tfc.get("goto_inside_switch", 0)
+                ) / max(tfc["goto_total"], 1) * 100
+                tfc_label_pct_inside = (
+                    tfc.get("label_inside_structured", 0)
+                    / max(tfc.get("label_total", 1), 1) * 100
+                )
+                md_lines.append("---")
+                md_lines.append("")
+                md_lines.append("### Track B -- B46 ControlStructurer Frontier Census")
+                md_lines.append("")
+                md_lines.append("Recursive IR traversal census (sampled scope).")
+                md_lines.append("")
+                md_lines.append("#### Structured Constructs (Recursive)")
+                md_lines.append("")
+                md_lines.append("| Construct | Count |")
+                md_lines.append("|-----------|-------|")
+                md_lines.append(f"| `if` | {tfc.get('structured_if_count', 0)} |")
+                md_lines.append(f"| `while` | {tfc.get('structured_while_count', 0)} |")
+                md_lines.append(f"| `for` | {tfc.get('structured_for_count', 0)} |")
+                md_lines.append(f"| `switch` | {tfc.get('structured_switch_count', 0)} |")
+                md_lines.append("")
+                md_lines.append("#### Goto Comment Context Breakdown")
+                md_lines.append("")
+                md_lines.append("| Context | Count | % of total |")
+                md_lines.append("|---------|-------|-----------|")
+                tfc_gt = max(tfc["goto_total"], 1)
+                md_lines.append(f"| Inside `if` body | {tfc.get('goto_inside_if', 0)} | "
+                    f"{100*tfc.get('goto_inside_if',0)/tfc_gt:.1f}% |")
+                md_lines.append(f"| Inside `while` body | {tfc.get('goto_inside_while', 0)} | "
+                    f"{100*tfc.get('goto_inside_while',0)/tfc_gt:.1f}% |")
+                md_lines.append(f"| Inside `for` body | {tfc.get('goto_inside_for', 0)} | "
+                    f"{100*tfc.get('goto_inside_for',0)/tfc_gt:.1f}% |")
+                md_lines.append(f"| Inside `switch` body | {tfc.get('goto_inside_switch', 0)} | "
+                    f"{100*tfc.get('goto_inside_switch',0)/tfc_gt:.1f}% |")
+                md_lines.append(f"| **Top-level** (no structured wrapper) | **{tfc.get('goto_top_level', 0)}** | "
+                    f"**{100*tfc.get('goto_top_level',0)/tfc_gt:.1f}%** |")
+                md_lines.append(f"| **Total goto comments** | **{tfc['goto_total']}** | 100% |")
+                md_lines.append("")
+                md_lines.append(f"> {tfc_goto_pct_inside:.1f}% of goto comments live inside "
+                    "already-structured control flow. The top-level gotos "
+                    f"({tfc.get('goto_top_level', 0)}) are the true ControlStructurer frontier.")
+                md_lines.append("")
+                md_lines.append("#### Label Comment Context Breakdown")
+                md_lines.append("")
+                tfc_nl = tfc.get("label_total", 0)
+                tfc_nli = tfc.get("label_inside_structured", 0)
+                tfc_nlt = tfc.get("label_top_level", 0)
+                md_lines.append("| Context | Count | % of total |")
+                md_lines.append("|---------|-------|-----------|")
+                md_lines.append(f"| Inside structured | {tfc_nli} | "
+                    f"{100*tfc_nli/max(tfc_nl,1):.1f}% |")
+                md_lines.append(f"| **Top-level** | **{tfc_nlt}** | "
+                    f"**{100*tfc_nlt/max(tfc_nl,1):.1f}%** |")
+                md_lines.append(f"| **Total label comments** | **{tfc_nl}** | 100% |")
+                md_lines.append("")
+                md_lines.append(f"> {tfc_label_pct_inside:.1f}% of label markers live inside "
+                    "structured regions.")
+                md_lines.append("")
+
     # ── Ranked Problems ─────────────────────────────────────────────────────
     if top_problems:
         md_lines.append("")
@@ -4391,12 +4615,79 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         md_lines.append("")
         md_lines.append("### Baseline Lock")
         md_lines.append("")
-        md_lines.append("This frontier is protected by the formula consistency test")
-        md_lines.append("(`TestActionableDynamicFormula.test_formula_consistency_on_track_a`)")
-        md_lines.append("in `tests/test_decompile.py`. Any change that reopens a closed")
-        md_lines.append("Dynamic/null/call-return bucket without direct bytecode evidence")
-        md_lines.append("must update the test or be rejected by CI.")
+        md_lines.append("This frontier is protected by the formula consistency test"
+            "(`TestActionableDynamicFormula.test_formula_consistency_on_track_a`)"
+            "in `tests/test_decompile.py`. Any change that reopens a closed"
+            "Dynamic/null/call-return bucket without direct bytecode evidence"
+            "must update the test or be rejected by CI.")
         md_lines.append("")
+
+        # ── B46 ControlStructurer Frontier Census ─────────────────────────
+        fc = dict(frontier_census_agg)
+        if fc and fc.get("goto_total", 0) > 0:
+            goto_pct_inside = (
+                fc.get("goto_inside_if", 0)
+                + fc.get("goto_inside_while", 0)
+                + fc.get("goto_inside_for", 0)
+                + fc.get("goto_inside_switch", 0)
+            ) / max(fc["goto_total"], 1) * 100
+            label_pct_inside = (
+                fc.get("label_inside_structured", 0)
+                / max(fc.get("label_total", 1), 1) * 100
+            )
+            md_lines.append("---")
+            md_lines.append("")
+            md_lines.append("## B46 ControlStructurer Frontier Census")
+            md_lines.append("")
+            md_lines.append("Recursive IR traversal census. Distinguishes goto/label comments "
+                "by nesting context, not source-text regex.")
+            md_lines.append("")
+            md_lines.append("### Structured Constructs (Recursive)")
+            md_lines.append("")
+            md_lines.append(f"| Construct | Count |")
+            md_lines.append(f"|-----------|-------|")
+            md_lines.append(f"| `if` | {fc.get('structured_if_count', 0)} |")
+            md_lines.append(f"| `while` | {fc.get('structured_while_count', 0)} |")
+            md_lines.append(f"| `for` | {fc.get('structured_for_count', 0)} |")
+            md_lines.append(f"| `switch` | {fc.get('structured_switch_count', 0)} |")
+            md_lines.append("")
+            md_lines.append("### Goto Comment Context Breakdown")
+            md_lines.append("")
+            md_lines.append(f"| Context | Count | % of total |")
+            md_lines.append(f"|---------|-------|-----------|")
+            md_lines.append(f"| Inside `if` body | {fc.get('goto_inside_if', 0)} | "
+                f"{100*fc.get('goto_inside_if',0)/max(fc['goto_total'],1):.1f}% |")
+            md_lines.append(f"| Inside `while` body | {fc.get('goto_inside_while', 0)} | "
+                f"{100*fc.get('goto_inside_while',0)/max(fc['goto_total'],1):.1f}% |")
+            md_lines.append(f"| Inside `for` body | {fc.get('goto_inside_for', 0)} | "
+                f"{100*fc.get('goto_inside_for',0)/max(fc['goto_total'],1):.1f}% |")
+            md_lines.append(f"| Inside `switch` body | {fc.get('goto_inside_switch', 0)} | "
+                f"{100*fc.get('goto_inside_switch',0)/max(fc['goto_total'],1):.1f}% |")
+            md_lines.append(f"| **Top-level** (no structured wrapper) | **{fc.get('goto_top_level', 0)}** | "
+                f"**{100*fc.get('goto_top_level',0)/max(fc['goto_total'],1):.1f}%** |")
+            md_lines.append(f"| **Total goto comments** | **{fc['goto_total']}** | 100% |")
+            md_lines.append("")
+            md_lines.append(f"> {goto_pct_inside:.1f}% of goto comments live inside already-structured "
+                "control flow. The top-level gotos are the true ControlStructurer frontier "
+                "that would benefit from future structuring work.")
+            md_lines.append("")
+            md_lines.append("### Label Comment Context Breakdown")
+            md_lines.append("")
+            nlabels = fc.get("label_total", 0)
+            nl_inside = fc.get("label_inside_structured", 0)
+            nl_top = fc.get("label_top_level", 0)
+            md_lines.append(f"| Context | Count | % of total |")
+            md_lines.append(f"|---------|-------|-----------|")
+            md_lines.append(f"| Inside structured | {nl_inside} | "
+                f"{100*nl_inside/max(nlabels,1):.1f}% |")
+            md_lines.append(f"| **Top-level** | **{nl_top}** | "
+                f"**{100*nl_top/max(nlabels,1):.1f}%** |")
+            md_lines.append(f"| **Total label comments** | **{nlabels}** | 100% |")
+            md_lines.append("")
+            md_lines.append(f"> {label_pct_inside:.1f}% of label markers live inside already-structured "
+                "regions. Top-level labels may correspond to targets of top-level gotos.")
+            md_lines.append("")
+
         md_lines.append("---")
         md_lines.append("")
         md_lines.append("## Ranked Problems")
@@ -4460,6 +4751,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             "formula_corrected": "null_target_actionable + call_return_actionable",
             "note": "Declared Dynamic/Void call returns are expected and excluded from actionable_dynamic. Declared K_DYN nulls are expected/non-actionable. True actionable frontier: 2 call-return cases.",
         },
+        "b46_frontier_census": dict(frontier_census_agg) if frontier_census_agg else None,
     }
     with open(report_json_path, "w", encoding="utf-8") as f:
         json.dump(json_data, f, indent=2, default=str)

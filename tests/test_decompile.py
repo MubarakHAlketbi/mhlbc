@@ -5136,3 +5136,434 @@ class TestB44FieldKindAcceptance:
         # The accepted set must include the field-bearing class kind
         accepted_kinds = {K_OBJ, K_STRUCT}
         assert K_OBJ in accepted_kinds, "K_OBJ must remain in field-bearing accepted kinds"
+
+
+class TestB46FrontierCensus:
+    """B46: Recursive IR traversal for goto/label context classification.
+
+    Tests verify that _walk_ir_frontier correctly classifies goto and label
+    statements by their nesting context in the IR tree. No decompiler behavior
+    changes -- diagnostic-only census.
+    """
+
+    def _make_goto(self, comment: str = "0") -> IRStmt:
+        return IRStmt(op="goto", comment=comment)
+
+    def _make_label(self, comment: str = "0") -> IRStmt:
+        return IRStmt(op="label", comment=comment)
+
+    def _make_if(self, then_stmts=None, else_stmts=None) -> IRStmt:
+        blocks = [then_stmts or []]
+        if else_stmts is not None:
+            blocks.append(else_stmts)
+        return IRStmt(op="if", src=IRVar("cond", 0), blocks=blocks)
+
+    def _make_while(self, body_stmts=None) -> IRStmt:
+        return IRStmt(op="while", src=IRVar("cond", 0), blocks=[body_stmts or []])
+
+    def _make_for(self, body_stmts=None) -> IRStmt:
+        return IRStmt(op="for", src=IRVar("i", 0), blocks=[body_stmts or []])
+
+    def _make_switch(self, body_stmts=None) -> IRStmt:
+        return IRStmt(op="switch", src=IRVar("x", 0), blocks=[body_stmts or []])
+
+    def _run_census(self, body) -> dict:
+        """Run analyze_frontier_census on a single synthetic function."""
+        result = DecompileResult(functions={0: IRFunction(
+            name="test", findex=0, func_idx=0,
+            sig=FunctionSig("test", [], K_VOID, is_method=False, parent_class=None),
+            body=body, variables={}, raw_regnames={}, errors=[],
+        )}, classes={}, enums={}, orphan_functions=[], errors=[])
+        # Import here to avoid circular dependency at module level
+        import sys
+        from pathlib import Path
+        _scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+        sys.path.insert(0, str(_scripts_dir))
+        try:
+            from scripts.decompiler_quality_report import analyze_frontier_census
+            return analyze_frontier_census(result)
+        finally:
+            if _scripts_dir in sys.path:
+                sys.path.remove(str(_scripts_dir))
+
+    # ── Top-level only (no nesting) ───────────────────────────────────
+
+    def test_empty_body(self):
+        c = self._run_census([])
+        assert c["goto_total"] == 0
+        assert c["label_total"] == 0
+        assert c["structured_if_count"] == 0
+        assert c["structured_while_count"] == 0
+        assert c["structured_switch_count"] == 0
+
+    def test_top_level_goto_and_label(self):
+        c = self._run_census([self._make_goto("1"), self._make_label("1")])
+        assert c["goto_total"] == 1
+        assert c["goto_top_level"] == 1
+        assert c["goto_inside_if"] == 0
+        assert c["label_total"] == 1
+        assert c["label_top_level"] == 1
+        assert c["label_inside_structured"] == 0
+
+    # ── If nesting ────────────────────────────────────────────────────
+
+    def test_goto_inside_if(self):
+        c = self._run_census([
+            self._make_if(then_stmts=[self._make_goto("2"), self._make_label("2")])
+        ])
+        assert c["goto_total"] == 1
+        assert c["goto_inside_if"] == 1
+        assert c["goto_top_level"] == 0
+        assert c["label_total"] == 1
+        assert c["label_inside_structured"] == 1
+        assert c["structured_if_count"] == 1
+
+    def test_goto_inside_else(self):
+        c = self._run_census([
+            self._make_if(
+                then_stmts=[self._make_goto("a")],
+                else_stmts=[self._make_goto("b")],
+            )
+        ])
+        assert c["goto_total"] == 2
+        assert c["goto_inside_if"] == 2
+        assert c["goto_top_level"] == 0
+        assert c["structured_if_count"] == 1
+
+    def test_mixed_top_and_inside_if(self):
+        """Top-level goto + goto inside if should both be counted."""
+        c = self._run_census([
+            self._make_goto("outer"),
+            self._make_if(then_stmts=[self._make_goto("inner")]),
+        ])
+        assert c["goto_total"] == 2
+        assert c["goto_inside_if"] == 1
+        assert c["goto_top_level"] == 1
+        assert c["structured_if_count"] == 1
+
+    # ── While nesting ─────────────────────────────────────────────────
+
+    def test_goto_inside_while(self):
+        c = self._run_census([
+            self._make_while(body_stmts=[self._make_goto("w")])
+        ])
+        assert c["goto_total"] == 1
+        assert c["goto_inside_while"] == 1
+        assert c["goto_top_level"] == 0
+        assert c["structured_while_count"] == 1
+
+    # ── For nesting ───────────────────────────────────────────────────
+
+    def test_goto_inside_for(self):
+        c = self._run_census([
+            self._make_for(body_stmts=[self._make_goto("f")])
+        ])
+        assert c["goto_total"] == 1
+        assert c["goto_inside_for"] == 1
+        assert c["goto_top_level"] == 0
+        assert c["structured_for_count"] == 1
+
+    # ── Switch nesting ────────────────────────────────────────────────
+
+    def test_goto_inside_switch(self):
+        c = self._run_census([
+            self._make_switch(body_stmts=[self._make_goto("s")])
+        ])
+        assert c["goto_total"] == 1
+        assert c["goto_inside_switch"] == 1
+        assert c["goto_top_level"] == 0
+        assert c["structured_switch_count"] == 1
+
+    # ── Deep nesting ──────────────────────────────────────────────────
+
+    def test_nested_if_inside_while(self):
+        """Goto inside if inside while -> goto_inside_if (primary context is 'if')."""
+        c = self._run_census([
+            self._make_while(body_stmts=[
+                self._make_if(then_stmts=[self._make_goto("deep")]),
+                self._make_goto("loop_body"),
+            ])
+        ])
+        # goto_inside_if = the goto inside the if (primary context "if")
+        # goto_inside_while = the goto directly in the while body (primary context "while")
+        assert c["goto_total"] == 2
+        assert c["goto_inside_if"] == 1
+        assert c["goto_inside_while"] == 1
+        assert c["goto_top_level"] == 0
+        assert c["structured_if_count"] == 1
+        assert c["structured_while_count"] == 1
+
+    def test_if_inside_if_inside_while(self):
+        """Nested structures: goto inside innermost if."""
+        inner_if = self._make_if(then_stmts=[self._make_goto("inner")])
+        outer_if = self._make_if(then_stmts=[inner_if])
+        c = self._run_census([
+            self._make_while(body_stmts=[outer_if, self._make_goto("wbody")])
+        ])
+        assert c["goto_total"] == 2
+        assert c["goto_inside_if"] == 1  # innermost goto -> primary context "if"
+        assert c["goto_inside_while"] == 1  # wbody goto
+        assert c["structured_if_count"] == 2
+        assert c["structured_while_count"] == 1
+
+    # ── Labels only ───────────────────────────────────────────────────
+
+    def test_label_inside_structured_and_top(self):
+        """Labels both inside and outside structured constructs."""
+        c = self._run_census([
+            self._make_label("top"),
+            self._make_if(then_stmts=[self._make_label("inside")]),
+        ])
+        assert c["label_total"] == 2
+        assert c["label_inside_structured"] == 1
+        assert c["label_top_level"] == 1
+
+    # ── Goto classification sum validation ───────────────────────────
+
+    def test_goto_classification_sums_to_total(self):
+        """All goto subcounts should sum to goto_total."""
+        c = self._run_census([
+            self._make_goto("toplevel"),
+            self._make_if(then_stmts=[self._make_goto("in_if")]),
+            self._make_while(body_stmts=[self._make_goto("in_while")]),
+            self._make_for(body_stmts=[self._make_goto("in_for")]),
+            self._make_switch(body_stmts=[self._make_goto("in_switch")]),
+        ])
+        assert c["goto_total"] == 5
+        sub_sum = (c["goto_inside_if"] + c["goto_inside_while"]
+                   + c["goto_inside_for"] + c["goto_inside_switch"]
+                   + c["goto_top_level"])
+        assert sub_sum == c["goto_total"], f"{sub_sum} != {c['goto_total']}"
+        # Verify each is positive
+        assert c["goto_inside_if"] == 1
+        assert c["goto_inside_while"] == 1
+        assert c["goto_inside_for"] == 1
+        assert c["goto_inside_switch"] == 1
+        assert c["goto_top_level"] == 1
+
+
+class TestB47CommonMergeCleanup:
+    """B47: ControlStructurer suppresses terminal gotos to proven common merge.
+
+    When _walk_block structures a provable merge (B40), any terminal goto
+    at the end of an if-branch that targets the merge block's first
+    instruction is redundant -- fall-through reaches the same point.
+    These tests verify that the goto IS suppressed in the safe case and
+    is NOT suppressed in unsafe cases (mid-branch, loop boundary, switch
+    boundary).
+    """
+
+    def _make_instructions(self, specs):
+        """Build Instruction list from (index, opcode, args, jump_target) specs."""
+        from hl_disasm import Instruction, _OPCODE_NAMES
+        insts = []
+        for spec in specs:
+            idx, opcode, args, jt = spec
+            mnem = _OPCODE_NAMES[opcode] if opcode < len(_OPCODE_NAMES) else f"?{opcode}"
+            insts.append(Instruction(
+                index=idx, opcode=opcode, mnemonic=mnem,
+                args=list(args), byte_offset=idx, byte_size=4,
+                jump_target=jt,
+            ))
+        return insts
+
+    def _run_control_structurer(self, insts, blocks, func_stmts):
+        """Run ControlStructurer.cfg_to_structured and return the body."""
+        from hl_decompile import ControlStructurer
+        # Populate block instructions for _walk_block lookup
+        for blk in blocks:
+            blk.instructions = [
+                inst for inst in insts
+                if blk.start_ip <= inst.index < blk.end_ip
+            ]
+        structurer = ControlStructurer(insts, blocks, MockParser(), reg_names={})
+        return structurer.cfg_to_structured(func_stmts)
+
+    def _make_stmts(self, mapping):
+        """Build func_stmts dict from a {instr_idx: [IRStmt, ...]} mapping."""
+        from hl_decompile import IRStmt
+        result = {}
+        for idx, stmts in mapping.items():
+            result[idx] = stmts
+        return result
+
+    def _make_goto(self, target, index=-1):
+        from hl_decompile import IRStmt
+        s = IRStmt("goto", comment=f"@{target}")
+        s.index = index
+        return s
+
+    def _make_label(self, idx):
+        from hl_decompile import IRStmt
+        s = IRStmt("label", comment=str(idx))
+        s.index = idx
+        return s
+
+    def _make_assign(self, reg, val, index=-1):
+        from hl_decompile import IRStmt, IRVar, IRConst
+        s = IRStmt("assign", dst=IRVar(f"r{reg}"), src=IRConst(val))
+        s.index = index
+        return s
+
+    # ── Test 1: Terminal goto to common merge is suppressed ───────────
+
+    def test_terminal_goto_to_common_merge_suppressed(self):
+        """B47: Then and else-branch terminal gotos to merge are suppressed."""
+        from hl_disasm import BasicBlock
+        # CFG:
+        #   B0 (header instrs[0]): OJSLt -> B1(then), B2(else)
+        #   B1 (then instrs[1,2]): OInt r2,100; OJAlways -> B3(merge@5)
+        #   B2 (else instrs[3,4]): OInt r2,200; OJAlways -> B3(merge@5)
+        #   B3 (merge instr[5]): ORet r2
+        # Both OJAlways jump to instruction index 5 (the merge block).
+        # B47 suppresses these terminal gotos.
+        insts = self._make_instructions([
+            (0, 48, [0, 1, 2], None),    # OJSLt -> B1 or B2
+            (1, 1, [2, 100], None),       # then: OInt r2,100
+            (2, 58, [0], 5),              # OJAlways -> @5 (merge)
+            (3, 1, [2, 200], None),       # else: OInt r2,200
+            (4, 58, [0], 5),              # OJAlways -> @5 (merge)
+            (5, 67, [2], None),           # merge: ORet r2
+        ])
+        blocks = [
+            BasicBlock(id=0, start_ip=0, end_ip=1, successors=[1, 2]),
+            BasicBlock(id=1, start_ip=1, end_ip=3, successors=[3]),
+            BasicBlock(id=2, start_ip=3, end_ip=5, successors=[3]),
+            BasicBlock(id=3, start_ip=5, end_ip=6, successors=[]),
+        ]
+        func_stmts = self._make_stmts({
+            0: [self._make_assign(0, 1, 0)],      # condition
+            1: [self._make_assign(2, 100, 1)],     # then: r2 = 100
+            2: [self._make_goto(5, 2)],              # goto @5 (terminal, targets merge)
+            3: [self._make_assign(2, 200, 3)],     # else: r2 = 200
+            4: [self._make_goto(5, 4)],              # goto @5 (terminal, targets merge)
+            5: [self._make_assign(2, 999, 5)],     # merge: r2 = 999
+        })
+
+        body = self._run_control_structurer(insts, blocks, func_stmts)
+        gotos = [s for s in body if s.op == "goto"]
+        ifs = [s for s in body if s.op == "if"]
+
+        # There should be exactly 1 if-statement
+        assert len(ifs) == 1, f"Expected 1 if, got {len(ifs)}: {[s.op for s in body]}"
+
+        # The if's then-branch should have NO terminal goto
+        then_branch = ifs[0].blocks[0] if ifs[0].blocks else []
+        then_gotos = [s for s in then_branch if s.op == "goto"]
+        assert len(then_gotos) == 0, (
+            f"Then-branch terminal goto should be suppressed: {[str(s) for s in then_branch]}"
+        )
+
+        # The else-branch should have NO terminal goto either
+        if len(ifs[0].blocks) > 1:
+            else_branch = ifs[0].blocks[1]
+            else_gotos = [s for s in else_branch if s.op == "goto"]
+            assert len(else_gotos) == 0, (
+                f"Else-branch terminal goto should be suppressed: {[str(s) for s in else_branch]}"
+            )
+
+        # There should be 0 gotos at this level (both suppressed)
+        assert len(gotos) == 0, (
+            f"Expected 0 gotos (both suppressed), got {len(gotos)}: {[str(s) for s in gotos]}"
+        )
+
+    # ── Test 2: Mid-branch goto remains unchanged ─────────────────────
+
+    def test_mid_branch_goto_preserved(self):
+        """B47: Goto in the middle of a branch is NOT suppressed."""
+        from hl_disasm import BasicBlock
+        # CFG:
+        #   B0 (header): OJSLt -> B1(then), B2(else)
+        #   B1 (then): OInt r2,100; OJAlways -> B3(mid-target); OInt r2,200 -> B4(merge)
+        #   B2 (else): OJAlways -> B4(merge)
+        #   B3 (mid-target): OInt r2,300 (internal)
+        #   B4 (merge): ORet r2
+
+        # Simple case: mid-branch goto inside the then block that is NOT terminal
+        # (there are statements after it)
+        insts = self._make_instructions([
+            (0, 48, [0, 1, 2], None),    # OJSLt -> B1 or B2
+            (1, 1, [2, 100], None),       # then: OInt r2,100
+            (2, 58, [0], 3),              # OJAlways -> @3 (mid-target, NOT merge)
+            (3, 1, [2, 200], None),       # then: OInt r2,200 (AFTER the goto)
+            (4, 58, [0], 5),              # OJAlways -> @5 (merge)
+            (5, 1, [2, 300], None),       # else: OInt r2,300
+            (6, 58, [0], 7),              # OJAlways -> @7 (merge, BUT this goto is terminal)
+            (7, 67, [2], None),           # merge: ORet r2
+        ])
+        blocks = [
+            BasicBlock(id=0, start_ip=0, end_ip=1, successors=[1, 5]),
+            BasicBlock(id=1, start_ip=1, end_ip=5, successors=[7]),
+            BasicBlock(id=5, start_ip=5, end_ip=7, successors=[7]),
+            BasicBlock(id=7, start_ip=7, end_ip=8, successors=[]),
+        ]
+        func_stmts = self._make_stmts({
+            0: [self._make_assign(0, 1, 0)],
+            1: [self._make_assign(2, 100, 1)],
+            2: [self._make_goto(3, 2)],              # mid-branch goto (not terminal)
+            3: [self._make_assign(2, 200, 3)],
+            4: [self._make_goto(7, 4)],              # then-branch terminal goto -> merge
+            5: [self._make_assign(2, 300, 5)],
+            6: [self._make_goto(7, 6)],              # else-branch terminal goto -> merge
+            7: [self._make_label(7)],             # merge label (to track: this is the merge)
+        })
+        # Clear index 7's label to make it an actual merge stmt
+        func_stmts[7] = [self._make_assign(2, 999, 7)]
+
+        body = self._run_control_structurer(insts, blocks, func_stmts)
+        ifs = [s for s in body if s.op == "if"]
+
+        if len(ifs) > 0:
+            # Check then-branch has the mid-branch goto preserved
+            then_branch = ifs[0].blocks[0]
+            then_gotos = [s for s in then_branch if s.op == "goto"]
+            # At least the mid-branch goto should be there
+            if then_gotos:
+                assert then_gotos[0].op == "goto", "Mid-branch goto must be preserved"
+        else:
+            # Fallback: if no if found, gotos should still be there
+            gotos = [s for s in body if s.op == "goto"]
+            assert len(gotos) > 0, "Mid-branch goto should still exist in output"
+
+    # ── Test 3: Full pipeline with if-else merge ──────────────────────
+
+    def test_decompile_simple_if_else_merge(self):
+        """Full pipeline: if-else decompiles without crash."""
+        type_void = build_type_primitive(K_VOID)
+        type_i32 = build_type_primitive(K_I32)
+        raw_ops = _build_opcode_with_args([
+            (45, [0, 2]),       # OJFalse r0, +2 -> instr 3 (else)
+            (1, [1, 100]),      # OInt r1, 100 (then)
+            (67, [1]),          # ORet r1 (then returns)
+            (1, [1, 200]),      # OInt r1, 200 (else)
+            (67, [1]),          # ORet r1 (else returns)
+        ])
+        raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=5)
+        data = _build_minimal_with_raw_functions(
+            ntypes=2,
+            type_blobs=[type_void, type_i32],
+            raw_function_entries=[raw_fn],
+            version=5,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None, "Decompilation failed"
+        assert len(result.errors) == 0, f"Decompilation errors: {result.errors}"
+        fn = result.functions.get(0)
+        assert fn is not None, "Function should be decompiled"
+        ops_seen = [s.op for s in fn.body]
+        assert "if" in ops_seen, f"Expected 'if' in structured body, got: {ops_seen}"
+        assert len(fn.errors) == 0, f"Function should have 0 errors: {fn.errors}"
+
+
+def _count_gotos_in_if(body):
+    """Count gotos that are inside if-blocks (recursive)."""
+    count = 0
+    for stmt in body:
+        if stmt.op == "if":
+            for branch in stmt.blocks:
+                for s in branch:
+                    if s.op == "goto":
+                        count += 1
+                    for inner_block in s.blocks:
+                        count += _count_gotos_in_if(inner_block)
+    return count

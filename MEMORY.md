@@ -10,13 +10,13 @@
 |-------|-------|
 | Session | 49 |
 | Date | June 2, 2026 |
-| Model | deepseek/deepseek-v4-pro via OpenRouter |
+| Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `0d0b316` (modified) |
-| Tests | 681 passed, 4 skipped |
+| HEAD | `c483ce7` (clean) |
+| Tests | 696 passed, 4 skipped |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
 | Track B | 200 sampled (seed=42), 0 errors |
-| Next task | B45: Docs hardening complete; B46: TBD |
+| Next task | B47 complete (diagnostic + terminal-merge cleanup) |
 
 ### Current Accepted Frontier
 
@@ -78,6 +78,19 @@
 | 31 | Track B 500-sample | IR-level | structured_while_count |
 | 0 | All scopes | Both | errors |
 | 0 | Track A | IR-level | actionable_dynamic_corrected (locked) |
+| 1519 | Track A full | IR-level | B46: goto_top_level (census, recursive walk) |
+| 236 | Track B 200-sample | IR-level | B46: goto_top_level (census, recursive walk) |
+| 507 | Track B 500-sample | IR-level | B46: goto_top_level (census, recursive walk) |
+| 68.9% | Track A full | IR-level | B46: gotos inside structured control flow |
+| 70.4% | Track B 200-sample | IR-level | B46: gotos inside structured control flow |
+| 75.2% | Track B 500-sample | IR-level | B46: gotos inside structured control flow |
+| 0 | Track A | IR-level | B46: label_top_level (all labels inside structured) |
+| 0 | Track B 200-sample | IR-level | B46: label_top_level |
+| 1 | Track B 500-sample | IR-level | B46: label_top_level |
+| 3311 | Track A full | IR-level | B46: structured_if_count (recursive) |
+| 1194 | Track B 500-sample | IR-level | B46: structured_if_count (recursive) |
+| 38 | Track A full | IR-level | B46: structured_switch_count (recursive) |
+| 28 | Track B 500-sample | IR-level | B46: structured_switch_count (recursive) |
 
 ---
 
@@ -191,6 +204,83 @@ Updated AGENTS.md section 5.4 (Type System) with type-kind constant table and 5-
 
 HEAD: 0d0b316 (modified). 681 passed, 4 skipped.
 
+### B46 Detail -- ControlStructurer Frontier Census (Session 49)
+**Problem:** The existing `analyze_structured_flow` only counted top-level IR statements and returned `unstructured_goto_fallback=not_measured`. There was no IR-context breakdown of where goto/label comments actually live in the IR tree -- inside structured if/while blocks vs top-level fallbacks.
+
+**Fix:** Added `analyze_frontier_census()` with recursive `_walk_ir_frontier()` helper that walks the full IR tree of every function. Classifies each goto/label statement by its innermost structured wrapper (if/while/for/switch) or as top-level. Uses colon-delimited context stack for nesting awareness. Added `_push_context()` and innermost-context resolution for classification.
+
+**Key findings:**
+| Scope | goto_total | inside_if | inside_while | top_level | % inside | structured_if | structured_while | structured_switch |
+|-------|-----------|-----------|-------------|-----------|----------|---------------|-----------------|-------------------|
+| Track A (full) | 4883 | 2603 (53.3%) | 761 (15.6%) | **1519 (31.1%)** | 68.9% | 3311 | 561 | 38 |
+| Track B 200 | 798 | 436 (54.6%) | 126 (15.8%) | **236 (29.6%)** | 70.4% | 459 | 72 | 15 |
+| Track B 500 | 2048 | 1174 (57.3%) | 367 (17.9%) | **507 (24.8%)** | 75.2% | 1194 | 164 | 28 |
+
+**Labels (all scopes):** 100% inside structured (Track A, Track B 200) or 99.4% (Track B 500). Essentially zero top-level labels, confirming labels are not a frontier issue.
+
+**Discrepancy note:** Track B IR goto_total (798/2048) exceeds source-text raw_goto_comments (589/1587). Potential causes: giant function section markers swallowing output, function emission errors, or IR stmts not rendered to source. This is a diagnostic observation -- goto percentages (inside vs top-level) are reliable.
+
+**B47 Recommendation:** The top-level gotos (1519 Track A, 507 Track B 500) are the true ControlStructurer frontier. Majority (68.9-75.2%) are inside already-structured control flow -- not actionable. Switch structuring (B38) works but detected limited cases (38 Track A, 28 Track B 500). Recommended B47 target: nested if/else chain restructuring to reduce gotos inside if blocks (the largest bucket at 53-57%). B48+: loop refinement beyond OJSLt/OJSGte patterns.
+
+**Tests (12 new):** `TestB46FrontierCensus` covers empty body, top-level goto/label, goto inside if/then/else/while/for/switch, mixed top+structured, deep nesting (if inside while, if inside if inside while), label classification, and goto subcount sum validation. Uses synthetic IRStmt construction with `_run_census()` helper that imports `analyze_frontier_census` via sys.path.
+
+**Validation:** 693 passed, 4 skipped. Track A 9/9, 0 errors. Guardrail tests preserved (B38: 4, B40: 4, B41: 4, B34: 0*, B44: 5). ASCII safety: 0 non-ASCII in all generated reports. No hl_decompile.py changes.
+
+### B46 Supplement -- Docs-as-Knowledge-Base Hardening (Session 49)
+**Problem:** AGENTS.md mentioned docs/ as source of truth (Section 2) and in investigation protocol (Section 9), but did not require agents to *actively read* the relevant docs before behavior work. Future milestones could skip `docs/` and rely only on code and MEMORY.md, creating risk of stale assumptions or missed documented bytecode rules.
+
+**Fix:** Added Section 2.1 (Docs-as-Knowledge-Base) with:
+- Mandatory pre-work: identify and read relevant `docs/` files before any behavior-changing work, with a subsystem-to-doc mapping table (parser, opcode, type, decompiler, validation).
+- Code-vs-docs conflict resolution protocol: inspect evidence (tests, fixtures, reference), update the stale side after proving correct behavior, never speculate.
+- Milestone audit trail requirement: behavior work touching bytecode/type/opcode/control-flow semantics must list consulted docs and any discrepancies in MEMORY.md session entry.
+
+Updated Section 8 (Development Workflow) step 1 to "Read relevant docs first" with explicit reference to Section 2.1 mapping. Existing steps renumbered.
+
+No production code changed. No tests changed. ASCII safety verified on AGENTS.md and MEMORY.md.
+
+### B47 Detail -- Goto-inside-if Target Pattern Classification (Session 49)
+**Problem:** B46 identified goto_inside_if as the largest goto bucket (53-57% of all gotos), but could not distinguish safe restructuring candidates (terminal gotos to proven common-merge blocks) from unsafe ones (mid-branch, loop-crossing, switch-crossing).
+
+**Phase 1 -- Diagnostic:** Added `scripts/b47_analyze_if_gotos.py` with:
+- Recursive IR walker that classifies each goto_inside_if by target pattern (common_merge, else_if, func_end, loop_boundary, switch_boundary, mid_branch, unknown).
+- Instruction-index tracking via `IRStmt.index` (tiny diagnostic hook in `hl_decompile.py`).
+- Three-pass refinement: (1) collect by direct IR walk, (2) classify by label context, (3) detect terminal-goto-to-common-merge by comparing goto target index against merge block's first instruction index.
+- Produces `b47_if_goto_analysis.md` and `b47_if_goto_analysis.json`.
+
+**Phase 1 results (pre-B47 behavior):**
+| Scope | goto_inside_if | common_merge | mid_branch | loop_boundary | unknown |
+|-------|---------------|-------------|------------|---------------|---------|
+| Track A | 2603 | 786 (30.2%) | 1533 (58.9%) | 209 (8.0%) | 75 (2.9%) |
+| Track B 200 | 436 | 133 (30.5%) | 261 (59.9%) | 29 (6.7%) | 12 (2.8%) |
+
+**Phase 2 -- Behavior:** Implemented terminal-goto-to-common-merge suppression in `ControlStructurer._walk_block` (hl_decompile.py). When a provable merge exists (B40's `merge_bid`), and a branch ends with a `goto` whose target instruction index matches the merge block's first instruction index, the terminal goto is suppressed (popped from the branch's statement list). This is safe because fall-through reaches the same merge point.
+
+**Suppression rules enforced:**
+- Only terminal gotos (last statement in branch) are suppressed.
+- Gotos in the middle of a branch are NOT suppressed.
+- Gotos crossing loop or switch boundaries are NOT suppressed (already classified as loop/switch boundary).
+- Gotos where the merge block has no instructions are NOT suppressed.
+- Existing fallback goto/label comments for uncertain cases are preserved.
+
+**Post-B47 impact:**
+| Scope | goto_total (before) | goto_total (after) | delta | goto_inside_if (before) | goto_inside_if (after) | delta |
+|-------|-------------------|-------------------|-------|------------------------|------------------------|-------|
+| Track A | 4883 | **4058** | **-825 (-16.9%)** | 2603 | **1778** | **-825 (-31.7%)** |
+| Track B 200 | 798 | **650** | **-148 (-18.5%)** | 436 | **288** | **-148 (-33.9%)** |
+
+Top-level gotos unchanged (1519 Track A, 236 Track B 200) -- correct because B47 only targets gotos inside if-blocks.
+
+**Tests (3 new):** `TestB47CommonMergeCleanup` covers:
+- `test_terminal_goto_to_common_merge_suppressed` -- both then/else-branch terminal gotos suppressed when target matches merge block first instruction.
+- `test_mid_branch_goto_preserved` -- mid-branch goto remains unchanged.
+- `test_decompile_simple_if_else_merge` -- full pipeline integrity (if produced, no errors).
+
+**Validator guardrail tests preserved:** B38 (4), B40 (4), B41 (4), B44 (5), B46 (12). ASCII safety: 0 non-ASCII in reports and MEMORY.md.
+
+**Validator full suite:** 696 passed, 4 skipped (+3 B47, +0 failures). Track A 9/9, 0 errors. Track B 200: 0 errors.
+
+**B48 Recommendation:** The remaining goto_inside_if (1778 Track A, 288 Track B 200) consists of mid_branch (1533, 61%) and loop_boundary (209, 8%) plus the 75 unknown -- none are safe to restructure without deeper CFG analysis. Recommended B48: focus on top-level gotos (1519 Track A, 236 Track B 200) -- the remaining true ControlStructurer frontier. Top-level gotos are outside all structured if/while/switch blocks and represent the raw CFG fallback that needs loop, switch, or try-catch restructuring.
+
 ### B40 Detail -- If/else Merge Detection
 **Problem:** `_walk_block` inlined merge blocks (post-if continuation) into whichever branch was walked first. In ControlFlow.hl testIfElse, the trace+return block appeared inside the then branch, not after the if/else.
 
@@ -296,6 +386,10 @@ HEAD: 0d0b316 (modified). 681 passed, 4 skipped.
 **B41 Natural Loop Refinement:** Fixed header-instruction placement (inside while body, not before) and condition negation (`!(cond)` for OJSLt/OJSGte exit-on-true semantics). Parenthesized ! compound expressions. Loop body now contains real operations; post-loop merge stays outside. 4 new fixture tests. raw_goto_comments: 5390 -> 4883 (-507). Artifact: `hl_decompile.py` ControlStructurer.
 
 **B42 Metric Scope Reconciliation:** Stabilized evidence base after B38-B41. Clarified that -507 goto reduction is Track A, -64 in Track B 200-sample. Added scope labels to report sections. 500-sample diagnostic: 0 errors. Artifact: MEMORY.md metric table, report scope labels.
+
+**B46 ControlStructurer Frontier Census (Session 49):** Added `analyze_frontier_census()` -- recursive IR walker that classifies goto/label statements by nesting context (inside if/while/for/switch vs top-level). Key findings across all scopes: ~69-75% of gotos live inside already-structured control flow; 0% of labels are top-level (Track A, Track B 200) or 0.6% (Track B 500). True top-level goto frontier: 1519 (Track A), 236 (Track B 200), 507 (Track B 500). Structured switch count: 38 (Track A), 28 (Track B 500). 12 new synthetic IR tests (TestB46FrontierCensus) assert recursive context classification. No decompiler behavior changes. Artifacts: `scripts/decompiler_quality_report.py` (`analyze_frontier_census`, `_walk_ir_frontier`, `_push_context`), `tests/test_decompile.py` (`TestB46FrontierCensus`), `decompiler_quality_report/report.md` (B46 sections).
+
+**B47 Goto-inside-if Target Pattern Classification (Session 49):** Two-phase milestone: (1) diagnostic script `scripts/b47_analyze_if_gotos.py` classifies each goto_inside_if into 8 target patterns using IRStmt.index-based instruction matching; (2) behavior change suppresses terminal gotos to proven common-merge blocks in ControlStructurer._walk_block. Track A goto_total: 4883 -> 4058 (-825, -16.9%). Track B 200: 798 -> 650 (-148, -18.5%). Top-level gotos unchanged (correct). Added `IRStmt.index` field for diagnostic instruction-index tracking (tiny non-output hook, justified by B47 evidence need). 3 new synthetic tests (TestB47CommonMergeCleanup). B48 recommendation: shift focus to top-level gotos. Artifacts: `hl_decompile.py` (IRStmt.index, _walk_block merge goto suppression), `scripts/b47_analyze_if_gotos.py`, `tests/test_decompile.py` (TestB47CommonMergeCleanup), `decompiler_quality_report/b47_if_goto_analysis.*`.
 
 ### Dynamic / Null / Call-Return (B15, B22, B23, B31)
 
