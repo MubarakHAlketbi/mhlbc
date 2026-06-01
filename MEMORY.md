@@ -1,15 +1,130 @@
 |     1|# Session Tracking
      2|
-     3|## Session 43 -- July 5, 2026
-- Start: New session initialized on Discord (OmniDecomp / Session 43).
+     3|## Session 44 -- July 6, 2026
+- Start: New session initialized on Discord (OmniDecomp / Session 44).
 - Model: deepseek/deepseek-v4-flash via OpenRouter.
-- Version: g6.0-43-g2496c07 (clean tree).
-- Project state: 632 passed, 4 skipped (Session 42 final state).
+- Version: g6.0-44-g2c20bd2 (clean tree).
+- Project state: 632 passed, 4 skipped (Session 43 final state).
 - Track A: 7/7, 0 errors, 0 unknown opcodes, zero frontier LOCKED (unchanged).
 - Track B: 200 sampled, 0 errors, 5,120 output files.
-- Previous session: Session 42 closed B24 artifact/path reconciliation + third-party robustness.
-- **B25 (this session): Track B frontier selection -- goto/label recommended as B26 target.**
-- **B26 (this session): Goto/label CFG pattern classification -- COMPLETE.**
+- Previous session: Session 43 completed B26 goto/label CFG pattern classification + B27 switch-case validation.
+- **B28: target_inside_structured_block source-visible validation -- COMPLETE**
+- **B26 88 vs B27 98 discrepancy -- EXPLAINED AND DOCUMENTED**
+
+### B26 88 vs B27 98 Switch-Case Discrepancy
+
+**Root cause:** B26 uses a priority-ordered classifier where `backward_loop_candidate` (checks #1/#2) has higher priority than `switch_case_or_break_candidate` (check #4: preceded_by_oswitch). When a goto target satisfies BOTH patterns (target block is a loop latch AND a successor of an OSwitch block), B26 assigns `backward_loop_candidate`.
+
+**10 cases affected (all in 2 functions):**
+- `charAt[4337]`: 5 gotos target a block that is both a loop latch AND a switch-case start
+- `toLowerCase[6619]`: 5 gotos target a block that is both a loop latch AND a switch-case start
+
+**No behavioral change needed.** B27's count (98) is more precise for switch-case analysis because its dedicated switch-goto classifier is not affected by multi-pattern priority ordering. B26's count (88) is conservative -- only gotos exclusively classified as switch-case, not also loop-related.
+
+### B28: target_inside_structured_block Source-Visible Validation
+
+**Task:** Build a source-visible validation and subpattern report for `target_inside_structured_block` -- the dominant raw goto pattern from B26 (658 IR-level cases).
+
+**Method:** Re-ran decompilation pipeline (seed=42, sample=200) with proper function-to-file mapping via ClassBuilder. Extracted per-function source bodies from generated Haxe output, delimited by `// func[N]` headers. Scanned each body for `// goto @@N` comments matching IR target_ips.
+
+**Results:**
+
+| Subpattern | IR Count | Source-Visible | Rate |
+|------------|----------|----------------|------|
+| after_if-then_block | 299 | 286 | 95.6% |
+| after_goto_block | 151 | 144 | 95.4% |
+| after_if-else_block | 142 | 135 | 95.1% |
+| after_while-header_block | 66 | 64 | 97.0% |
+| **Total** | **658** | **629** | **95.6%** |
+
+**Key findings:**
+1. 95.6% of `target_inside_structured_block` gotos survive `_cleanup_goto_labels()` and appear in generated source. Non-survivors are goto-to-next-label pairs (removed by cleanup) or functions in a ClassBuilder boundary case (parent class name is a "no RTTI" error message).
+2. **Safe candidates (421):** `after_if-then_block` (286) + `after_if-else_block` (135) -- all rated `safe_candidate`. Gotos that skip the rest of a structured block to land immediately after it. No labels, targets are merge points.
+3. **Needs control structurer change (208):** `after_goto_block` (144) + `after_while-header_block` (64) -- require ControlStructurer enhancement.
+4. **Zero label_exists cases:** None of the 658 target_inside_structured_block gotos have a matching label at their target. This means no labels exist to facilitate cleanup -- all restructuring must come from ControlStructurer improvement.
+5. **Concentration:** 4 functions account for 234 of 658 IR gotos (35.6%): drawLine[16043] (81), flush[20673] (78), apply[22059] (38), updateCurrentAmbient[44348] (36).
+
+**Safety rating summary:** safe_candidate=421, needs_control_structurer_change=208, blocked_loop_related=0, unknown=0.
+
+**Artifacts created:** `scripts/b28_analyze_structured_block.py` (new, report-only), `decompiler_quality_report/b28_target_structured_detail.json`, `decompiler_quality_report/b28_summary.md`.
+
+**No behavior code modified.** No parser, decompiler, writer, CLI, GUI, or test changes.
+
+### B29 Phase 1: After-If Safe Candidate Preflight -- COMPLETE
+**Recommendation: STOP AFTER PREFLIGHT. Phase 2 cleanup not safe.**
+
+**Goal:** Verify the 421 `safe_candidate` gotos from B28 (after_if-then_block=286, after_if-else_block=135) and determine if a narrow comment-suppression cleanup is feasible.
+
+**Method:** Two-stage analysis:
+1. Stricter rule verification (441 B26 candidates, 421 source-visible)
+2. IR position analysis to determine structural redundancy
+
+**Stage 1 results (441 B26 candidates):**
+- not_backward: 441/441
+- not_loop_related: 430/441 (11 failures -- target block predecessor is loop header)
+- not_switch_related: 441/441
+- is_merge_point: 441/441
+- no_label_needed: 441/441
+- context_safe: 439/441 (2 failures -- goto inside while loop body)
+- **Passed + source-visible: 410/421**
+
+**Stage 2 results (IR position analysis -- Critical Finding):**
+- last_in_then_before_else: **0** -- zero gotos at the end of then/else blocks
+- flat_before_if: 95 -- goto at flat IR level before an `if` statement (non-local flow doc)
+- inside_body_not_last: 297 -- goto inside a then/else block but not the last stmt (early exit)
+- other: 29
+
+**Conclusion:** Zero of the 421 safe_candidate gotos are structurally redundant. All document genuine non-local control flow. Comment suppression in the HaxeWriter is not safe without structural ControlStructurer enhancement.
+
+**Why zero?** After the ControlStructurer processes the IR, any goto that was at the end of a then-block (just before `} else {`) was already absorbed into the structured if/else form. The remaining after_if-* gotos are genuine forward jumps from non-final positions inside blocks or from outside the if structure entirely.
+
+**Alternative (future B30+):**
+1. ControlStructurer enhancement: when a then-block starts with goto-to-merge-point, split the then-block and move unreachable trailing code after else.
+2. Dead-code elimination: remove unreachable stmts after unconditional gotos inside blocks.
+
+**Artifacts created:** `scripts/b29_preflight.py`, `scripts/b29_ir_position_analysis.py`, `scripts/b29_report.py` (report-only), `decompiler_quality_report/b29_preflight_detail.json`, `decompiler_quality_report/b29_ir_position_detail.json`, `decompiler_quality_report/b29_preflight_summary.md`.
+
+**No behavior code modified.** No parser, decompiler, writer, CLI, GUI, or test changes.
+
+**Validation (B29):**
+- B28 421 safe_candidate count confirmed: YES (286 + 135 = 421 source-visible)
+- B26 88 vs B27 98 discrepancy preserved: YES (in B28 section)
+- ASCII-safety: PASS on all artifacts
+- No behavior code changed (git diff: only MEMORY.md)
+
+**Validation (B28):**
+- B26/B27 discrepancy explained: priority ordering of multi-pattern classifier (backward_loop beats switch_case)
+- B28 source-visible count verified per-function against IR count
+- ASCII-safety: PASS on JSON and summary markdown
+- No behavior code changed (git diff only shows MEMORY.md)
+
+### Data Durability Note (B26-B29)
+
+**Tracked reproduction scripts** (under `scripts/`):
+- `scripts/b26_analyze_goto_patterns.py` -- B26 goto pattern classification
+- `scripts/b27_analyze_switch_cases.py` -- B27 switch-case validation
+- `scripts/b28_analyze_structured_block.py` -- B28 source-visible validation
+- `scripts/b29_preflight.py` -- B29 Phase 1 stricter rule verification
+- `scripts/b29_ir_position_analysis.py` -- B29 IR position analysis
+- `scripts/b29_report.py` -- B29 comprehensive preflight report
+
+**Gitignored generated artifacts** (under `decompiler_quality_report/`):
+- `b26_goto_label_detail.json`, `b26_summary.md` -- B26 output
+- `b27_switch_case_analysis.json` -- B27 output
+- `b28_target_structured_detail.json`, `b28_summary.md` -- B28 output
+- `b29_preflight_detail.json`, `b29_ir_position_detail.json`, `b29_preflight_summary.md` -- B29 output
+
+All scripts are tracked in git and can regenerate their respective artifacts by running:
+```bash
+python3 scripts/b26_analyze_goto_patterns.py   # ~80s
+python3 scripts/b27_analyze_switch_cases.py    # ~80s
+python3 scripts/b28_analyze_structured_block.py # ~80s
+python3 scripts/b29_preflight.py               # ~80s
+python3 scripts/b29_ir_position_analysis.py    # ~80s
+python3 scripts/b29_report.py                  # <1s (aggregates prior outputs)
+```
+
+Each script reads the Farever binary from `workspace/Farever/hlboot.dat` and writes to `decompiler_quality_report/`. The JSON artifacts are gitignored because they are large (100KB-500KB) and fully regenerable from the scripts.
 
 ### B26 Summary
 
