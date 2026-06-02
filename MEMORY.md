@@ -12,7 +12,7 @@
 | Date | **June 2, 2026** |
 | Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `e87223b` (clean -- B51 diagnostic complete) |
+| HEAD | `6539e91` (pushed -- B51 diagnostic complete) |
 | Tests | **730 passed, 4 skipped** |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
 | Track B | 200/500 sampled (seed=42), 0 errors |
