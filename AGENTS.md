@@ -550,3 +550,164 @@ Before asking Sato for binary/Ghidra evidence, use available local tooling first
 Sato is the last resort for manual visual inspection only, when headless tools cannot provide the necessary evidence or when interpretation requires human judgment. If headless Ghidra scripts/plugins are needed, search for existing local scripts first before escalating.
 
 This applies to all investigation work: the HL parser and type pool should be queried before reaching for Ghidra, because field names, type kinds, and inheritance chains are often directly available from the parsed bytecode.
+
+## 18. Mandatory Milestone Report Checklist
+
+Every B## final report to Sato must include all applicable items below. Omitting items without explanation causes review churn and risks accepting misleading deltas.
+
+### 18.1 Status and Scope
+
+- Milestone ID and title.
+- Complete/incomplete status.
+- Diagnostic-only or behavior-changing.
+- Exact behavior changed, if any.
+- Explicit confirmation of what was NOT touched:
+  - ControlStructurer behavior
+  - goto cleanup
+  - HaxeWriter
+  - parser/disassembler
+  - field/type recovery
+  - loop/backedge work
+  - report-only plumbing
+- Exact scope limitation (e.g., "Track A only", "Track A + Track B 200", "Farever full binary").
+- Explicit exclusions (buckets, subsystems, or analysis types intentionally excluded).
+- Whether the milestone is general-purpose or risks being benchmark-specific (e.g., "works on Track A fixtures but may not generalize to Track B").
+
+### 18.2 Files Changed and Generated Artifacts
+
+- Every changed source file.
+- Every changed test file.
+- Every changed doc/memory file.
+- Every generated canonical artifact (under `decompiler_quality_report/`).
+- Any scratch or `/tmp` artifacts must be clearly labeled as non-canonical.
+- `decompiler_quality_report/report.md` and `report.json` status (regenerated or unchanged).
+- Standalone artifact status for extra scopes (e.g., Track B sample=500).
+
+### 18.3 Validation
+
+Every final report must include:
+
+- Exact pytest command (e.g., `cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q`).
+- Exact pytest result (e.g., `746 passed, 4 skipped`).
+- Track A fixture count and error count.
+- Track B sample=200 error count.
+- Track B sample=500 error count when the milestone touches frontier or report metrics.
+- Guardrail count in the format N/N.
+- Guardrail milestone list (e.g., B34, B38, B40, B41, B44, B46, B47, B48, B49, B50, B51, B52).
+- ASCII safety result.
+- Exact paths included in ASCII safety checks.
+- If any validation step is intentionally skipped, explain why.
+
+### 18.4 Metric Scope Labeling
+
+Every metric table must label each of the following:
+
+- Track A vs Track B.
+- Track B sample size and seed.
+- Full binary vs sample, if used.
+- IR-level metric vs source-visible metric.
+- Pre-change vs post-change.
+- Which accepted baseline the delta is measured against.
+- Whether counts are direct deltas or recomputed classifier counts.
+- Whether classifier definitions changed since the baseline (if so, state the change).
+
+### 18.5 Required Frontier Metrics for Control-Flow Milestones
+
+For any ControlStructurer, goto, label, cleanup, or frontier milestone, report these where applicable:
+
+- source-visible raw goto comments
+- source-visible raw label comments
+- IR goto total
+- IR label total
+- goto_inside_if
+- goto_inside_while
+- goto_top_level
+- label_inside_structured
+- label_top_level
+- structured_if count
+- structured_while count
+- structured_switch count
+- error count
+- unknown opcode count if available
+- actionable_dynamic_corrected / zero-frontier status if available
+
+### 18.6 Required B48-Style Top-Level Bucket Table
+
+For any milestone that changes or analyzes top-level gotos, include a before/after table with ALL emitted buckets, including zero-count buckets:
+
+- forward_to_next_label
+- forward_to_common_merge
+- return_region_jump
+- backward_jump
+- to_loop_target
+- to_switch_target
+- to_if_target
+- unreachable_or_dead_block
+- label_target_missing
+- unknown
+
+The table must include:
+
+- pre-change count
+- post-change count
+- delta
+- explanation of which bucket changed and why
+- statement whether classifier definitions are unchanged from the baseline
+
+### 18.7 Required Cross-Tab for Behavior-Changing Cleanup Milestones
+
+If a milestone removes, suppresses, collapses, or restructures gotos or labels, the final report must include a cross-tab proving what changed.
+
+The cross-tab must show for each original classifier bucket:
+
+- pre-change count
+- removed/changed count
+- remaining count
+- removed percentage
+- excluded bucket removed count (expected 0)
+- explanation of safety guards
+
+For B51/B52-style forward-to-common-merge work, this means explicitly showing:
+
+- fallthrough_target
+- jump_chain
+- multi_pred_merge
+- other top-level gotos (to_if_target, return_region_jump, etc.)
+- excluded buckets (loop, switch, try, backward_jump, etc.)
+
+### 18.8 Source-Visible vs IR Delta Requirement
+
+Do not say "source-visible" when only IR counters were measured, unless the mapping is explicitly proven.
+
+If one IR goto maps to one HaxeWriter goto comment, state that proof. Otherwise report IR delta and source-visible delta separately, with each labeled by measurement method.
+
+### 18.9 Full-Binary Numbers
+
+Full-binary metrics are optional unless explicitly requested.
+
+If included, they must be clearly labeled as optional or non-acceptance metrics unless they are part of the requested validation scope.
+
+Do not mix full-binary numbers with Track B sample=200 or sample=500 acceptance metrics without clearly separating them.
+
+### 18.10 Conclusions and Next Recommendation
+
+Every report must include:
+
+- Evidence-backed conclusion.
+- What is solved.
+- What remains unsolved.
+- What is explicitly NOT solved.
+- Safest next milestone recommendation.
+- Whether the next milestone should be diagnostic or behavior.
+- Explicit exclusions for the next milestone.
+
+### 18.11 Wording Discipline
+
+Reports must not overclaim. Examples:
+
+- Do not say "no forward goto is needed" if only one bucket was analyzed. Say instead: "within the B48 forward_to_common_merge bucket, zero single_pred_target cases were found."
+- Do not call a CFG-level bucket "removed" if only a narrower syntactic subset was removed. State the subset explicitly.
+- Do not compare metrics across changed classifier definitions without saying so.
+- Do not claim a metric was "unchanged" if the underlying measurement method changed.
+
+When in doubt, prefer the more qualified claim.

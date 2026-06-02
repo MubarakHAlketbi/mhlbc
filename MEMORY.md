@@ -8,15 +8,16 @@
 
 | Field | Value |
 |-------|-------|
-| Session | **52** |
+| Session | **53** |
 | Date | **June 2, 2026** |
 | Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `3c5da08` (Session 51 close -- MEMORY.md HEAD update) |
-| Tests | **730 passed, 4 skipped** |
+| HEAD | `049b07a` (Session 53 close) |
+| Tests | **746 passed, 4 skipped** |
+| Guardrails | **86/86** (B34, B38, B40, B41, B44, B46, B47, B48, B49, B50, B51, B52) |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
 | Track B | 200/500 sampled (seed=42), 0 errors |
-| Next task | Evaluate B52: narrow behavior milestone targeting fallthrough_target suppression + jump_chain collapse |
+| Next task | Awaiting Sato instruction. B53 + process-hardening complete. B54 candidate: to_if_target diagnostic. |
 
 ### Current Accepted Frontier
 
@@ -248,6 +249,148 @@ HEAD: e87223b (clean). 730 passed, 4 skipped (+8). Track A: 9/9, 0 errors. Track
 ### Session 52 -- June 2, 2026 (deepseek-v4-flash)
 **Session 52 bootstrap.** No new B-milestone. Previous B51 concluded fallthrough_target + jump_chain are provably safe for suppression (Recommended B52). HEAD moved to 3c5da08 (Session 51 close -- MEMORY.md HEAD update to 6539e91). Tests: 730 passed, 4 skipped (unchanged). Track A 9/9 locked. Track B 0 errors. State: same as Session 51 close. Awaiting instructions.
 
+### Session 52 (actual) -- June 2, 2026 (deepseek-v4-flash)
+**B52: Forward-merge goto suppression -- COMPLETE (behavior milestone).**
+Added `_cleanup_forward_merge_gotos()` in hl_decompile.py (Step 5c). Conservative syntactic subset of B51-proven fallthrough_target/jump_chain cleanup. Removes top-level `goto @N` only when target is forward and ALL statements between goto and label are linear (no if/while/for/switch/try/label/goto).
+- Added IRFunction.b52_removed_forward_merge + b52_pre_body for cross-tab analysis
+- Tests: 16 new synthetic+fixture tests (TestB52ForwardMergeCleanup, 86/86 guardrails)
+- Report: table-based B52 cross-tab with B51 bucket to B52 removal mapping per scope
+- Artifacts: `scripts/b52_cross_tab.py`, `decompiler_quality_report/b52_cross_tab.json`
+- **Track A**: 2 fallthrough_target removed (100% of structurally-identifiable cases). 0 jump_chain removed (structural guard excludes bridge gotos). 0 multi_pred_merge, 0 excluded buckets. IR gotos: 1519 -> 1517.
+- **Track B 200**: 8 fallthrough_target removed (100%). IR gotos: 236 -> 228.
+- **Track B 500**: 16 fallthrough_target removed (100%). IR gotos: 507 -> 491.
+- **Full Farever binary**: ~1512 fallthrough_target removed (optional note, not acceptance metric).
+- **Scope clarified**: B52 is NOT full fallthrough_target/jump_chain cleanup. Most B51 CFG-level cases remain (142 Track A, ~27 Track B 200, ~70 Track B 500 fallthrough_target not structurally identifiable at IR level without CFG)
+- Excluded classes preserved: multi_pred_merge (confirmed 0 via cross-tab), jump_chain (0 via cross-tab), to_if_target, return_region_jump, forward_to_next_label, backward_jump, loop/switch/try boundary
+HEAD: 3c5da08 (dirty). 746 passed, 4 skipped (+16). Track A 9/9, 0 errors. Track B 200/500: 0 errors. Guardrails: 86/86. ASCII safety confirmed per path.
+
+### B53 -- June 2, 2026 (deepseek-v4-flash)
+**B53: Post-B52 Frontier Refresh/Rebaseline -- COMPLETE (diagnostic-only).**
+Full frontier census across Track A, Track B 200, Track B 500 using `scripts/b53_frontier_rebaseline.py`. No behavior changes.
+- Added `scripts/b53_frontier_rebaseline.py` -- standalone diagnostic
+- Generated 6 standalone artifacts: JSON + MD per scope (Track A, B200, B500)
+- Regenerated `decompiler_quality_report/report.md` and `report.json`
+- Post-B52 baseline established with deltas from B46/B48/B51/B52
+- **Crucial reconciliation: B52 uniformly removed `forward_to_next_label` (B48 classification), NOT `forward_to_common_merge`.** The B52 cross-tab used a different, simpler structural classifier that labeled these as `fallthrough_target`. B48's `forward_to_common_merge` (270 Track A) is **unchanged** by B52.
+
+**Post-B52 all-ten-category baseline (Track A IR, 3014 funcs, 0 errors):**
+| Category | Count | % | Note |
+|----------|-------|---|------|
+| to_if_target | 1190 | 78.4% | Target inside if block |
+| forward_to_common_merge | 270 | 17.8% | Forward to top-level label (unchanged by B52) |
+| return_region_jump | 54 | 3.6% | Target in return/throw region |
+| backward_jump | 2 | 0.1% | IR-position artifacts (B50 confirmed) |
+| unreachable_or_dead_block | 1 | 0.1% | Dead code |
+| forward_to_next_label | 0 | 0.0% | **All 2 removed by B52** |
+| to_loop_target | 0 | 0.0% | -- |
+| to_switch_target | 0 | 0.0% | -- |
+| label_target_missing | 0 | 0.0% | -- |
+| unknown | 0 | 0.0% | -- |
+| **Total** | **1517** | 100% | 1519 pre-B52 - 2 removed |
+
+**Post-B52 all-ten-category baseline (Track B 200 IR, 200 funcs, 0 errors):**
+| Category | Count | % |
+|----------|-------|---|
+| to_if_target | 96 | 42.1% |
+| forward_to_common_merge | 51 | 22.4% |
+| backward_jump | 73 | 32.0% |
+| return_region_jump | 5 | 2.2% |
+| unreachable_or_dead_block | 2 | 0.9% |
+| to_loop_target | 1 | 0.4% |
+| forward_to_next_label | 0 | 0.0% |
+| to_switch_target | 0 | 0.0% |
+| label_target_missing | 0 | 0.0% |
+| unknown | 0 | 0.0% |
+| **Total** | **228** | 100% |
+
+**Post-B52 all-ten-category baseline (Track B 500 IR, 500 funcs, 0 errors):**
+| Category | Count | % |
+|----------|-------|---|
+| to_if_target | 247 | 50.3% |
+| forward_to_common_merge | 119 | 24.2% |
+| backward_jump | 104 | 21.2% |
+| return_region_jump | 12 | 2.4% |
+| unreachable_or_dead_block | 4 | 0.8% |
+| to_loop_target | 4 | 0.8% |
+| label_target_missing | 1 | 0.2% |
+| forward_to_next_label | 0 | 0.0% |
+| to_switch_target | 0 | 0.0% |
+| unknown | 0 | 0.0% |
+| **Total** | **491** | 100% |
+
+**B51 forward_to_common_merge sub-bucket split (unchanged by B52):**
+- Track A (270): fallthrough_target 144 (53.3%), jump_chain 54 (20.0%), multi_pred_merge 72 (26.7%)
+- Track B 200 (51): fallthrough_target 35 (68.6%), jump_chain 7 (13.7%), multi_pred_merge 9 (17.6%)
+- Track B 500 (119): fallthrough_target 86 (72.3%), jump_chain 10 (8.4%), multi_pred_merge 23 (19.3%)
+
+**Metric reconciliation: B52 cross-tab vs B48 classifier**
+- B52's cross-tab uses a structural "no branching between goto and target" check, NOT B48's label-context-based classification.
+- The cross-tab classified 2 pre-B52 Track A gotos as `fallthrough_target` (no branching, target at top level).
+- B48 classified these as `forward_to_next_label` (goto to immediately-next statement) -- checked BEFORE forward_to_common_merge.
+- After B52 removed these 2, post-B53 shows `forward_to_next_label=0`, `forward_to_common_merge=270` (unchanged).
+- Same pattern for Track B 200 (8 removed), Track B 500 (16 removed).
+- **The B52 acceptance note "2 fallthrough_target removed" is correct in cross-tab terms but incorrect for B48 classification.** The 2 removals were from `forward_to_next_label` (B48).
+
+**Delta tables (scope-labeled):**
+
+Track A (IR metrics, 9 fixtures, 3014 funcs):
+| Metric | B46 (pre-B47) | B47 (post-common-merge) | B52 (post-forward-merge) | B53 (post-B52 baseline) |
+|--------|:------------:|:----------------------:|:------------------------:|:-----------------------:|
+| goto_total | 4883 | 4058 | 4056 | 4056 |
+| goto_inside_if | 2603 | 1778 | 1778 | 1778 |
+| goto_inside_while | 761 | 761 | 761 | 761 |
+| goto_top_level | 1519 | 1519 | 1517 | 1517 |
+| source raw_goto | 4883 | 4058 | 4056 | 4056 |
+| source raw_label | 561 | 561 | 561 | 561 |
+| structured_if | 3311 | 3311 | 3311 | 3311 |
+| structured_switch | 38 | 38 | 38 | 38 |
+| B48 forward_to_common_merge | 270 | 270 | 270 | 270 |
+| B52 removed | - | - | 2 | 2 |
+
+Track B 200 (IR metrics, 200 funcs, seed=42):
+| Metric | B46 (pre-B47) | B47 (post-common-merge) | B52 (post-forward-merge) | B53 (post-B52 baseline) |
+|--------|:------------:|:----------------------:|:------------------------:|:-----------------------:|
+| goto_total | 798 | 650 | 642 | 642 |
+| goto_inside_if | 436 | 288 | 288 | 288 |
+| goto_inside_while | 126 | 126 | 126 | 126 |
+| goto_top_level | 236 | 236 | 228 | 228 |
+| structured_if | 459 | 459 | 459 | 459 |
+| structured_switch | 15 | 15 | 15 | 15 |
+| B48 forward_to_common_merge | 51 | 51 | 51 | 51 |
+| B52 removed | - | - | 8 | 8 |
+
+Track B 500 (IR metrics, 500 funcs, seed=42):
+| Metric | B46 (pre-B47) | post-B47+post-B52 | B53 (post-B52 baseline) |
+|--------|:------------:|:-----------------:|:-----------------------:|
+| goto_total | 2048 | 1577 | 1577 |
+| goto_inside_if | 1174 | 719 | 719 |
+| goto_inside_while | 367 | 367 | 367 |
+| goto_top_level | 507 | 491 | 491 |
+| structured_if | 1194 | 1194 | 1194 |
+| structured_switch | 28 | 28 | 28 |
+| B48 forward_to_common_merge | 119 | 119 | 119 |
+| B52 removed | - | 16 | 16 |
+*Note: B47 Track B 500 data not collected separately. The "post-B47+post-B52" column includes B47's if-merge suppression (471 goto reduction) plus B52's top-level removal (16). B52 alone caused goto_total 1593->1577.*
+
+**Dominant remaining frontier buckets (Track A, top-level gotos = 1517):**
+- to_if_target: 1190 (78.4%) -- gotos crossing into structured if blocks. **Largest remaining bucket.**
+- forward_to_common_merge: 270 (17.8%) -- unchanged from B48/B51. Sub-buckets: fallthrough_target(144)+jump_chain(54)+multi_pred_merge(72).
+- return_region_jump: 54 (3.6%) -- target near return/throw.
+- backward_jump: 2 (0.1%) -- confirmed IR-position artifacts (B50).
+- unreachable: 1 (0.1%) -- dead code.
+
+**B54 recommendation: to_if_target diagnostic milestone (diagnostic-only).**
+- `to_if_target` (1190, 78.4%) is the dominant remaining bucket.
+- B48 classified these as gotos from top-level into structured if blocks, but no deeper analysis was done.
+- Before any behavior work, a B52-style diagnostic is needed to answer: how many are provable merge skips vs genuine cross-boundary jumps?
+- Excluded: forward_to_common_merge (needs CFG evidence, not syntactic), return_region_jump (3%), backward_jump (B50 closed), loop/switch/try boundary work, field/type recovery, HaxeWriter changes.
+
+Artifacts: `scripts/b53_frontier_rebaseline.py`, `decompiler_quality_report/b53_frontier_rebaseline_track_a.*`, `b53_frontier_rebaseline_track_b_sample_200.*`, `b53_frontier_rebaseline_track_b_sample_500.*`, updated `decompiler_quality_report/report.*`, MEMORY.md.
+HEAD: 3c5da08 (dirty). 746 passed, 4 skipped (unchanged). Track A 9/9, 0 errors. Track B 200/500: 0 errors. Guardrails: 86/86. ASCII safety: all 12 checked artifacts 0 non-ASCII.
+
+**Process hardening (same session):** Added AGENTS.md Section 18 (Mandatory Milestone Report Checklist) -- 11 subsections covering status/scope, file artifacts, validation, metric labeling, frontier metrics, top-level bucket tables, cross-tab tables, source-vs-IR deltas, full-binary numbers, conclusions, and wording discipline. Documentation-only. No behavior changes. Updated MEMORY.md HEAD and this note.
+HEAD: 049b07a (merged). Tests unchanged (746 passed, 4 skipped). ASCII safety: AGENTS.md + MEMORY.md 0 non-ASCII.
+
 ### B46 Detail -- ControlStructurer Frontier Census (Session 49)
 **Problem:** The existing `analyze_structured_flow` only counted top-level IR statements and returned `unstructured_goto_fallback=not_measured`. There was no IR-context breakdown of where goto/label comments actually live in the IR tree -- inside structured if/while blocks vs top-level fallbacks.
 
@@ -444,6 +587,16 @@ Top-level gotos unchanged (1519 Track A, 236 Track B 200) -- correct because B47
 **B51 Forward-to-Common-Merge CFG Merge Evidence Analysis (Session 51):** Diagnostic-only. No behavior changes. Diagnostic script `scripts/b51_analyze_forward_to_common_merge.py` classifies every B48 `forward_to_common_merge` top-level goto by CFG-level merge evidence. 8 buckets: two_way_merge, multi_pred_merge, fallthrough_target, jump_chain, single_pred_target, target_not_in_cfg, incomplete_evidence, unknown. Integrated into quality report pipeline. **Scopes:** Track A (270), Track B sample=200 (51), Track B sample=500 (119). **Key findings:** Zero two_way_merge (B40/B47 captures clean if/else merges). Zero single_pred_target (within forward_to_common_merge bucket). Zero incomplete/unknown (100% CFG coverage). **B51 does NOT classify other top-level buckets:** to_if_target, return_region_jump, non-immediate forward_to_next_label, backward_jump (B50). Recommendation: fallthrough_target + jump_chain provably safe for suppression; multi_pred_merge needs individual review. B52 recommendation: narrow behavior milestone targeting fallthrough_target suppression + jump_chain collapse. Artifacts: `scripts/b51_analyze_forward_to_common_merge.py`, `decompiler_quality_report/b51_forward_merge_analysis_*.*`, `tests/test_decompile.py` (TestB51ForwardMergeClassification, 8 tests). Validation: 730 passed, 4 skipped. Track A 9/9, Track B 200/500: 0 errors. ASCII safety: all artifacts 0 non-ASCII.
 **Scope note:** `decompiler_quality_report/report.md` includes Track B sample=200 B51 data (default pipeline sample). Track B sample=500 B51 data is in separate canonical standalone artifacts (`b51_forward_merge_analysis_track_b_sample_500.*`). Same scope design as B48/B50.
 
+**B52 Forward-Merge Goto Suppression (Session 52):** Behavior milestone. Added `_cleanup_forward_merge_gotos()` as Step 5c in `hl_decompile.py`. Conservative syntactic subset of B51-proven fallthrough_target/jump_chain cleanup. Only removes top-level `goto @N` when target label is forward and ALL statements between goto and label are linear (no if/while/for/switch/try/label/goto). 
+- B51-to-B52 cross-tab analysis per scope in `scripts/b52_cross_tab.py` and `decompiler_quality_report/b52_cross_tab.json`
+- **Cross-tab results**: 100% of structurally-identifiable fallthrough_target removed across all scopes. 0 jump_chain removed (structural guard excludes bridge gotos). 0 multi_pred_merge removed (structural guard excludes branching gap). 0 excluded buckets removed.
+- **Track A**: 2 removed (IR 1519 -> 1517). Source-text: -2 raw goto comments.
+- **Track B 200**: 8 removed (IR 236 -> 228). Source-text: -8 raw goto comments.
+- **Track B 500**: 16 removed (IR 507 -> 491). Source-text: -16 raw goto comments.
+- Full Farever binary: ~1512 removed (optional note, outside acceptance scope).
+- Guardrails: 86/86 (B34=4, B38=4, B40=4, B41=4, B44=5, B46=12, B47=3, B48=13, B49=2, B50=11, B51=8, B52=16).
+- Artifacts: `hl_decompile.py` (_cleanup_forward_merge_gotos, IRFunction.b52_removed_forward_merge, IRFunction.b52_pre_body), `tests/test_decompile.py` (TestB52ForwardMergeCleanup, 16 tests), `scripts/b52_cross_tab.py`, `decompiler_quality_report/b52_cross_tab.json`, `decompiler_quality_report/report.md` (B52 section), `MEMORY.md` (Session 52 entry).
+
 ### Dynamic / Null / Call-Return (B15, B22, B23, B31)
 
 **B15 Dynamic Type References:** Cross-referenced 204 attributions against all buckets. 0 unique. Rollup metric only.
@@ -502,7 +655,7 @@ Subcategory summary: 15 virtual_unsupported, 8 fun_or_method_type, 4 declared_dy
 
 ### Appendix C: Regeneration Commands
 
-**Scope note:** `report.md` generated by `decompiler_quality_report.py` includes Track A (all fixtures) + Track B at the `--sample` value passed (default 200). Track B sample=500 B51 data lives in separate standalone artifacts (`b51_forward_merge_analysis_track_b_sample_500.*`) generated by the B51 standalone script. This is the same pattern as B48 and B50 — the main report uses one sample size, standalone artifacts provide other scopes.
+**Scope note:** `report.md` generated by `decompiler_quality_report.py` includes Track A (all fixtures) + Track B at the `--sample` value passed (default 200). Track B sample=500 B51 data lives in separate standalone artifacts (`b51_forward_merge_analysis_track_b_sample_500.*`) generated by the B51 standalone script. This is the same pattern as B48 and B50 -- the main report uses one sample size, standalone artifacts provide other scopes.
 
 ```bash
 # Quality report (Track B, 200 sampled funcs, seed=42)
@@ -547,3 +700,5 @@ uv run python3 scripts/b36_analyze_field_names.py       # ~80s
 | `b48_analyze_top_level_gotos.py` | B48 | Top-level goto target pattern classification (7 evidence-backed buckets, Track A/B) |
 || `b50_analyze_backward_jumps.py` | B50 | Backward-jump / loop frontier analysis (10-bucket instruction/CFG classifier) |
 | `b51_analyze_forward_to_common_merge.py` | B51 | Forward-to-common-merge CFG merge evidence analysis (8-bucket merge classifier) |
+| `b52_cross_tab.py` | B52 | B51-to-B52 cross-tab per scope: which B51 buckets B52 removed from |
+| `b53_frontier_rebaseline.py` | B53 | Post-B52 frontier refresh: all-ten-category B48 baseline with deltas, reconciliation |

@@ -18,6 +18,7 @@ Headless: no PyQt6 dependency. Used by both cli.py and app.py.
 """
 
 import re
+import copy
 from dataclasses import dataclass, field
 from typing import (List, Optional, Dict, Tuple, Set, Any, Union)
 
@@ -373,6 +374,8 @@ class IRFunction:
     field_resolve_diags: List[Any] = field(default_factory=list)  # FieldResolveRecord list
     nops: int = 0
     nregs: int = 0
+    b52_removed_forward_merge: int = 0  # gotos removed by B52 forward-merge cleanup
+    b52_pre_body: List[IRStmt] = field(default_factory=list)  # pre-B52 body copy for diagnostic cross-tab
 
 
 @dataclass
@@ -2521,6 +2524,88 @@ def _cleanup_goto_labels(stmts: List[IRStmt]) -> List[IRStmt]:
     return stmts
 
 
+def _cleanup_forward_merge_gotos(stmts: List[IRStmt]) -> List[IRStmt]:
+    """B52: Suppress top-level forward-merge gotos (fallthrough_target + jump_chain).
+
+    For each top-level ``goto @N`` where the target label ``@N`` is at a later
+    position and all statements between goto and target are linear (no branching
+    statements), the goto is structurally redundant and can be removed.
+
+    This handles two B51-proven forward_to_common_merge sub-classes:
+
+    1. **fallthrough_target**: The skipped region naturally falls through to the
+       target without intervening branches.  The goto only serves as a shortcut
+       that the decompiler's CFG/structurer did not absorb.
+
+    2. **jump_chain**: After ``_resolve_goto_chains()`` redirects a goto past
+       CFG-level bridge blocks, the remaining goto may still target a forward
+       label with linear code in between.  This same check handles those cases.
+
+    Safety guard:
+    - Only applies to top-level body statements (not inside structured blocks).
+    - Requires NO branching statements (if/while/for/switch/try/trap/label/goto)
+      between the goto and its target.
+    - Requires the target position to be strictly after the goto (forward jump).
+    - Removes only the goto, never the target label (other gotos may target it).
+    - If any uncertainty exists, the goto is preserved.
+
+    Recurse into structured if/while blocks so that inside-block forward merges
+    that are B48-classified as inside-structured gotos (not B48 top-level scope)
+    are NOT affected -- B52 only handles the top-level case.  Recurrence into
+    blocks is for structural block containment only; no B52 suppression happens
+    inside blocks (no sub-check at this time, future B## may add it).
+
+    Returns the same *stmts* list, mutated.
+    """
+    if not stmts:
+        return stmts
+
+    # Build index of statement positions by instruction index
+    index_positions: Dict[str, int] = {}
+    for i, stmt in enumerate(stmts):
+        if stmt.index is not None and stmt.index >= 0:
+            index_positions[str(stmt.index)] = i
+
+    # Collect positions to remove in a first pass (safe in-order iteration)
+    to_remove: List[int] = []
+
+    for i, stmt in enumerate(stmts):
+        if stmt.op != "goto":
+            continue
+        target = (stmt.comment or "").lstrip("@")
+        if not target:
+            continue
+
+        tgt_pos = index_positions.get(target)
+        # Target must exist and be strictly forward in body order
+        if tgt_pos is None or tgt_pos <= i:
+            continue
+
+        # Verify that all statements between goto and target are linear
+        # (no branching constructs, no jump targets, no additional jumps).
+        safe = True
+        for k in range(i + 1, tgt_pos):
+            s = stmts[k]
+            if s.op in ("if", "while", "for", "switch", "try", "trap",
+                        "label", "goto"):
+                safe = False
+                break
+            # If a statement has blocks it's a structured construct we want
+            # to avoid skipping over (comment/nop blocks are fine)
+            if s.blocks and s.op not in ("comment", "nop"):
+                safe = False
+                break
+
+        if safe:
+            to_remove.append(i)
+
+    # Remove in reverse order to preserve indices
+    for pos in sorted(to_remove, reverse=True):
+        del stmts[pos]
+
+    return stmts
+
+
 class ControlStructurer:
     """Transform flat CFG basic blocks into structured control flow.
 
@@ -4638,6 +4723,17 @@ class Decompiler:
         # (purely presentational -- reduces comment noise without losing info)
         structured_stmts = _cleanup_goto_labels(structured_stmts)
 
+        # Step 5c: B52 -- Suppress forward-merge gotos (fallthrough_target + jump_chain)
+        # Only suppresses top-level gotos where the target label is forward and
+        # all statements between goto and target are linear (no branching).
+        # These are the B51-proven fallthrough_target and post-chain-redirect
+        # jump_chain classes, safe for suppression.
+        _b52_gotos_before = sum(1 for s in structured_stmts if s.op == "goto")
+        _b52_pre_body = [copy.deepcopy(s) for s in structured_stmts]  # diagnostic: pre-B52 body for cross-tab
+        structured_stmts = _cleanup_forward_merge_gotos(structured_stmts)
+        _b52_gotos_after = sum(1 for s in structured_stmts if s.op == "goto")
+        _b52_removed = max(0, _b52_gotos_before - _b52_gotos_after)
+
         # Step 6: Register type evidence + variable declarations
         reg_type_evidence = build_register_type_evidence(
             instructions, reg_types, sig, self.parser,
@@ -4700,6 +4796,8 @@ class Decompiler:
             field_resolve_diags=expr_builder._field_diags,
             nops=func.nops,
             nregs=nregs,
+            b52_removed_forward_merge=_b52_removed,
+            b52_pre_body=_b52_pre_body,
         )
 
         return ir_fn
