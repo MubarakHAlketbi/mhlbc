@@ -8,15 +8,15 @@
 
 | Field | Value |
 |-------|-------|
-| Session | 49 |
-| Date | June 2, 2026 |
+| Session | **50** |
+| Date | **June 2, 2026** |
 | Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `c483ce7` (clean) |
-| Tests | 696 passed, 4 skipped |
+| HEAD | `966cbce` (clean -- B49/B50 complete) |
+| Tests | **722 passed, 4 skipped** |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
-| Track B | 200 sampled (seed=42), 0 errors |
-| Next task | B47 complete (diagnostic + terminal-merge cleanup) |
+| Track B | 200/500 sampled (seed=42), 0 errors |
+| Next task | Diagnose `forward_to_common_merge` (B51) |
 
 ### Current Accepted Frontier
 
@@ -201,8 +201,35 @@ B35: After-goto-block diagnostic deep-dive (150 cases, 100% structurally require
 B43 audit found that all HL class types use K_OBJ=11 (not K_METHOD=20), and `_resolve_field_from_type` already accepts K_OBJ=11. B43's "smoking gun" was a measurement error caused by audit script using wrong constant values (K_OBJ=7, K_METHOD=11 from HashLink reference numbering instead of K_OBJ=11, K_METHOD=20 from hl_decompile.py). No code changes needed in hl_decompile.py. Added 5 guardrail tests (TestB44FieldKindAcceptance) documenting constant values and proving K_OBJ field resolution works. Field frontier returns to paused/diagnostic_only status. Track B metrics unchanged: unresolved_field=50, goto=589, label=65, errors=0.
 **B45: Docs hardening for B43/B44 constant-reconciliation -- COMPLETE.**
 Updated AGENTS.md section 5.4 (Type System) with type-kind constant table and 5-step change checklist. Added pitfall in section 12 about audit-script constant imports. Added type-kind change checklist in section 8 (Development Workflow). Updated MEMORY.md with B45 session log and corrected B43 evidence catalog entry. No behavior changes, no field frontier reopening.
+**B46: ControlStructurer Frontier Census -- COMPLETE.** Added `analyze_frontier_census()` with recursive IR walker. Track A: 4883 gotos, 1519 top-level (31.1%), 0 top-level labels. 12 new synthetic IR tests.
+**B47: Goto-inside-if Target Pattern Classification -- COMPLETE.** Terminal-goto-to-common-merge suppression in ControlStructurer._walk_block. Track A gotos: 4883 -> 4058 (-825, -16.9%). Track B 200: 798 -> 650 (-148, -18.5%). 3 new tests.
+HEAD: 966cbce (clean). 696 passed, 4 skipped.
 
-HEAD: 0d0b316 (modified). 681 passed, 4 skipped.
+### Session 50 -- June 2, 2026 (deepseek-v4-flash)
+**B48: Top-Level Goto Target Pattern Classification -- COMPLETE.**
+Diagnostic script `scripts/b48_analyze_top_level_gotos.py` classifies every top-level goto by where its target lives. Integrated into quality report pipeline (run_track_a, run_track_b, write_report). 13 synthetic IR tests (TestB48TopLevelGotoClassification). JSON and MD artifacts in `decompiler_quality_report/b48_top_level_goto_analysis_*`.
+**Key findings:**
+- Track A 1519 top-level gotos: to_if_target 1190 (78.3%), forward_to_common_merge 270 (17.8%), return_region_jump 54 (3.6%), forward_to_next_label 2 (0.1%), backward_jump 2 (0.1%), unreachable 1 (0.1%)
+- Track B 200: to_if_target 96 (40.7%), backward_jump 73 (30.9%), forward_to_common_merge 51 (21.6%), forward_to_next_label 8 (3.4%), return_region_jump 5 (2.1%), unreachable 2 (0.8%), to_loop_target 1 (0.4%)
+- Track B 500: to_if_target 247 (48.7%), forward_to_common_merge 119 (23.5%), backward_jump 104 (20.5%), forward_to_next_label 16 (3.2%), return_region_jump 12 (2.4%), to_loop_target 4 (0.8%), unreachable 4 (0.8%), label_target_missing 1 (0.2%)
+**B49 recommendation:** `forward_to_next_label` (8-16 Track B, 2 Track A) is a narrow proven-safe class -- goto targets immediately next instruction, structurally redundant. Can be suppressed in ControlStructurer without risk. `forward_to_common_merge` (51-119 Track B, 270 Track A) needs CFG-level evidence per case before any behavior work. `backward_jump` (73-104 Track B) dominates the real-world frontier and requires loop-structuring analysis.
+HEAD: 966cbce (dirty). 709 passed, 4 skipped (+13 B48 tests).
+
+**B49: Forward-to-next-label Suppression Validation -- COMPLETE.**
+Confirmed that `_cleanup_goto_labels()` (added B35) already implements the B49 `forward_to_next_label` suppression correctly. The function checks for `goto @N` immediately followed by `label N` (adjacent in the IR statement list) and removes the no-op goto. Added 2 new focused tests:
+- `test_backward_goto_not_suppressed`: Backward goto (label before goto) is NOT suppressed.
+- `test_label_remains_if_used_by_other_goto`: Label is preserved when a forward-to-next-label goto is removed but a backward goto still targets the same label.
+B48 analysis confirms 2 `forward_to_next_label` cases in Track A (func 3 main @20, func 32 testSwitch @9) -- these target non-label next statements, so they are NOT in B49 scope. Track B 200 has 8 cases, Track B 500 has 16 -- same reason.
+**B50 recommendation:** Do not expand next-label suppression. Diagnose the `backward_jump` loop frontier and decide whether general back-edge loop structuring is safe, or whether `forward_to_common_merge` needs a CFG-proof milestone first.
+Artifacts: `tests/test_decompile.py` (2 new tests in TestGotoNullcheckCleanup).
+Validation: 711 passed, 4 skipped (+2). Track A: 9/9, 0 errors. Track B 200: 0 errors. Track B 500: 0 errors. ASCII safety: tests and reports 0 non-ASCII. No decompiler behavior changes (_cleanup_goto_labels unchanged).
+
+**B50: Backward-Jump / Loop Frontier Analysis -- COMPLETE.**
+Diagnostic-only analysis of all top-level B48 `backward_jump` gotos using instruction/CFG evidence. 10-bucket classifier (`scripts/b50_analyze_backward_jumps.py`). Integrated into quality report pipeline with B50 section.
+**Key finding: 100% IR-position artifacts.** All B48 backward_jump cases (Track A: 2, Track B 200: 73, Track B 500: 104) are forward in the bytecode instruction stream but backward in the IR body statement list. **Zero true bytecode backward jumps exist** across all sampled functions. B41 loop detection effectively captures real loop back-edges.
+**B51 recommendation:** Do not pursue backward-jump restructuring. The next behavior target should be `forward_to_common_merge` (Track A: 270, Track B 200: 51, Track B 500: 119), which represents genuine forward jumps past merge points that the if-structurer did not capture. Each case needs CFG-level merge evidence before suppression.
+Artifacts: `scripts/b50_analyze_backward_jumps.py`, `decompiler_quality_report/b50_backward_jump_analysis_*.*`. 11 new tests (TestB50BackwardJumpClassification).
+Validation: 722 passed, 4 skipped (+11). Track A: 9/9, 0 errors. Track B 200: 0 errors. Track B 500: 0 errors. ASCII safety: all reports/tests 0 non-ASCII.
 
 ### B46 Detail -- ControlStructurer Frontier Census (Session 49)
 **Problem:** The existing `analyze_structured_flow` only counted top-level IR statements and returned `unstructured_goto_fallback=not_measured`. There was no IR-context breakdown of where goto/label comments actually live in the IR tree -- inside structured if/while blocks vs top-level fallbacks.
@@ -391,6 +418,12 @@ Top-level gotos unchanged (1519 Track A, 236 Track B 200) -- correct because B47
 
 **B47 Goto-inside-if Target Pattern Classification (Session 49):** Two-phase milestone: (1) diagnostic script `scripts/b47_analyze_if_gotos.py` classifies each goto_inside_if into 8 target patterns using IRStmt.index-based instruction matching; (2) behavior change suppresses terminal gotos to proven common-merge blocks in ControlStructurer._walk_block. Track A goto_total: 4883 -> 4058 (-825, -16.9%). Track B 200: 798 -> 650 (-148, -18.5%). Top-level gotos unchanged (correct). Added `IRStmt.index` field for diagnostic instruction-index tracking (tiny non-output hook, justified by B47 evidence need). 3 new synthetic tests (TestB47CommonMergeCleanup). B48 recommendation: shift focus to top-level gotos. Artifacts: `hl_decompile.py` (IRStmt.index, _walk_block merge goto suppression), `scripts/b47_analyze_if_gotos.py`, `tests/test_decompile.py` (TestB47CommonMergeCleanup), `decompiler_quality_report/b47_if_goto_analysis.*`.
 
+**B48 Top-Level Goto Target Classification (Session 50):** Standalone diagnostic script `scripts/b48_analyze_top_level_gotos.py` classifies every top-level goto into evidence-backed categories. 13 synthetic IR tests (TestB48TopLevelGotoClassification). Integrated into quality report pipeline (run_track_a, run_track_b, write_report with B48 section). Artifacts: `scripts/b48_analyze_top_level_gotos.py`, `tests/test_decompile.py` (TestB48TopLevelGotoClassification), `decompiler_quality_report/b48_top_level_goto_analysis_*.*`, `decompiler_quality_report/report.md` (B48 section). Key finding: `forward_to_next_label` (2-16 cases) is a narrow proven-safe class for B49 suppression; `backward_jump` (73-104 Track B) is the dominant real-world frontier. No behavior changes implemented.
+
+**B49 Forward-to-next-label Validation (Session 50):** Confirmed `_cleanup_goto_labels()` (B35) correctly implements `forward_to_next_label` suppression: removes `goto @N` when immediately followed by `label N`. Added 2 tests for backward-goto preservation and multi-goto label preservation. No behavior changes to `_cleanup_goto_labels` required -- it already handles the narrow scope. The 2 Track A / 8 Track B 200 / 16 Track B 500 `forward_to_next_label` cases from B48 analysis target non-label next statements (e.g., assign after goto), not label statements, so they are outside B49 scope. B50 recommendation: diagnose `backward_jump` loop frontier. Artifacts: `tests/test_decompile.py` (2 tests). Validation: 711 passed, 4 skipped. Track A 9/9, Track B 200/500: 0 errors.
+
+**B50 Backward-Jump / Loop Frontier Analysis (Session 50):** Standalone diagnostic script `scripts/b50_analyze_backward_jumps.py` analyzes every B48 top-level `backward_jump` case using instruction/CFG evidence. 10-bucket classifier (ir_position_artifact, simple_while_backedge_candidate, do_while_or_post_test_candidate, continue_to_header_candidate, multi_latch_loop, nested_loop_boundary, switch_inside_loop_boundary, try_catch_or_trap_boundary, irreducible_backedge, missing_or_ambiguous_header). Integrated into quality report pipeline. **Key finding: 100% IR-position artifacts.** All B48 backward_jump cases (Track A: 2, Track B 200: 73, Track B 500: 104) are forward in the bytecode instruction stream with target after source instruction index -- they appear "backward" only because the target label appears earlier in the IR body statement list. Zero true bytecode backward jumps exist. B41 loop detection effectively captures real loop back-edges. B51 recommendation: shift to `forward_to_common_merge` (Track A: 270, Track B 200: 51, Track B 500: 119). Artifacts: `scripts/b50_analyze_backward_jumps.py`, `decompiler_quality_report/b50_backward_jump_analysis_*.*`, `tests/test_decompile.py` (TestB50BackwardJumpClassification, 11 tests). Validation: 722 passed, 4 skipped. Track A 9/9, Track B 200/500: 0 errors.
+
 ### Dynamic / Null / Call-Return (B15, B22, B23, B31)
 
 **B15 Dynamic Type References:** Cross-referenced 204 attributions against all buckets. 0 unique. Rollup metric only.
@@ -481,3 +514,6 @@ uv run python3 scripts/b36_analyze_field_names.py       # ~80s
 | `b35_analyze_after_goto_block.py` | B35 | After-goto-block diagnostic deep-dive |
 | `b36_analyze_field_names.py` | B36 | Field-name frontier preflight with type-pool check |
 | `b43_field_layout_audit.py` | B43 | Deep field-layout audit: K_METHOD discovery, proto/binding range analysis |
+| `b47_analyze_if_gotos.py` | B47 | Goto-inside-if target pattern classification and common-merge detection |
+| `b48_analyze_top_level_gotos.py` | B48 | Top-level goto target pattern classification (7 evidence-backed buckets, Track A/B) |
+| `b50_analyze_backward_jumps.py` | B50 | Backward-jump / loop frontier analysis (10-bucket instruction/CFG classifier) |

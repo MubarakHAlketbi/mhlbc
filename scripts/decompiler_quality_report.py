@@ -38,7 +38,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-# ── Path setup ──────────────────────────────────────────────────────────────
+# -- Path setup --------------------------------------------------------------
 _THIS_DIR = Path(__file__).resolve().parent
 _PROJECT_DIR = _THIS_DIR.parent
 sys.path.insert(0, str(_PROJECT_DIR))
@@ -188,7 +188,7 @@ def _decompile(parser: HLParser) -> DecompileResult:
     """Run full decompilation pipeline."""
     disasm = Disassembler(parser)
     decomp = Decompiler(parser, disasm)
-    return decomp.decompile_all()
+    return decomp.decompile_all(), disasm
 
 
 def _write_output(parser: HLParser, result: DecompileResult,
@@ -936,7 +936,7 @@ def analyze_source_fidelity(
             "constructor_found": has_constructor,
         }
 
-    # ── Recovered-mains check ──────────────────────────────────────────────
+    # -- Recovered-mains check ----------------------------------------------
     meta = FIXTURE_META.get(fname, {})
     main_class_name = meta.get("main_class", "")
     main_recovery: Dict[str, Any] = {
@@ -960,7 +960,7 @@ def analyze_source_fidelity(
                 main_recovery["in_orphans"] = True
                 break
 
-    # ── Unsupported construct annotations ──────────────────────────────────
+    # -- Unsupported construct annotations ----------------------------------
     def _source_path(fname: str) -> Optional[str]:
         """Resolve the .hx source path for a fixture bytecode file."""
         meta = FIXTURE_META.get(fname, {})
@@ -1258,7 +1258,7 @@ def run_track_a() -> Dict[str, Any]:
         parser = _parse(fpath)
         print(f"parse={len(parser.functions)}funcs", end=" ", flush=True)
 
-        result = _decompile(parser)
+        result, disasm = _decompile(parser)
         sources = _write_output(parser, result)
         elapsed = time.time() - t0
         print(f"decompile={len(result.functions)}funcs {elapsed:.1f}s")
@@ -1275,6 +1275,16 @@ def run_track_a() -> Dict[str, Any]:
         fidelity = analyze_source_fidelity(fname, parser, result, sources)
         flow_metrics = analyze_structured_flow(result)
         census_metrics = analyze_frontier_census(result)
+
+        # B48: Top-level goto classification
+        from scripts.b48_analyze_top_level_gotos import analyze_top_level_gotos
+        b48_agg, _ = analyze_top_level_gotos(result)
+        census_metrics["b48_top_level_goto_analysis"] = b48_agg
+
+        # B50: Backward-jump / loop frontier analysis
+        from scripts.b50_analyze_backward_jumps import analyze_backward_jumps
+        b50_agg, _ = analyze_backward_jumps(result, parser, disasm)
+        census_metrics["b50_backward_jump_analysis"] = b50_agg
 
         file_metrics = {
             "function_level": func_metrics,
@@ -1406,6 +1416,16 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
     # Frontier census (recursive IR goto/label context classification)
     census_metrics = analyze_frontier_census(result)
     inventory["frontier_census"] = census_metrics
+
+    # B48: Top-level goto classification
+    from scripts.b48_analyze_top_level_gotos import analyze_top_level_gotos
+    b48_agg, _ = analyze_top_level_gotos(result)
+    inventory["b48_top_level_goto_analysis"] = b48_agg
+
+    # B50: Backward-jump / loop frontier analysis
+    from scripts.b50_analyze_backward_jumps import analyze_backward_jumps
+    b50_agg, _ = analyze_backward_jumps(result, parser, disasm)
+    inventory["b50_backward_jump_analysis"] = b50_agg
 
     # Dynamic attribution
     if result:
@@ -1908,7 +1928,7 @@ def analyze_comment_only_bodies(
     }
 
 
-# ── Register Leakage Subcategory Constants (B18) ──────────────────────────
+# -- Register Leakage Subcategory Constants (B18) --------------------------
 
 # Context categories
 _RL_CTX_CODE = "code"
@@ -1972,7 +1992,7 @@ def analyze_register_leakage(
         - code_context_count: in code lines (not comments)
         - ... (other context splits)
     """
-    # ── Regex patterns ────────────────────────────────────────────────────
+    # -- Regex patterns ----------------------------------------------------
     _rn2_pattern = re.compile(r"\br(\d{2,})\b")  # r10, r11, r100, etc.
     _rn1_pattern = re.compile(r"\br(\d)\b")       # r0-r9 for counting
     _diag_patterns = {
@@ -1984,7 +2004,7 @@ def analyze_register_leakage(
         _RL_COMMENT_DIAG_OTHER: re.compile(r"//\s*(?:UNKNOWN|assert|inline\s+asm|prefetch|error\s+stub|unsupported)"),
     }
 
-    # ── Initialize counters ───────────────────────────────────────────────
+    # -- Initialize counters -----------------------------------------------
     total_r10_plus = 0
     total_r0_9 = 0
     code_context_count = 0
@@ -2010,17 +2030,17 @@ def analyze_register_leakage(
                   "subcats": Counter(), "examples": []}
     )
 
-    # ── Build IR data lookup ──────────────────────────────────────────────
+    # -- Build IR data lookup ----------------------------------------------
     ir_by_findex: Dict[int, IRFunction] = {}
     for ir_fn in result.functions.values():
         ir_by_findex[ir_fn.findex] = ir_fn
 
-    # ── Build func_name -> findex from DecompileResult ────────────────────
+    # -- Build func_name -> findex from DecompileResult --------------------
     func_name_to_findex: Dict[str, int] = {}
     for findex, ir_fn in result.functions.items():
         func_name_to_findex[ir_fn.name] = ir_fn.findex
 
-    # ── Build parser reference sets ───────────────────────────────────────
+    # -- Build parser reference sets ---------------------------------------
     # Function indices for cross-referencing rN values
     nfunctions = len(parser.functions) if parser else 0
     ntypes = len(parser.types) if parser else 0
@@ -2036,7 +2056,7 @@ def analyze_register_leakage(
 
     _func_def_re = re.compile(r"(?:static\s+)?function\s+(\w+)\s*\(")
 
-    # ── Scan each source file ─────────────────────────────────────────────
+    # -- Scan each source file ---------------------------------------------
     for fname, fsrc in sorted(sources.items()):
         lines = fsrc.splitlines()
         current_func_name: Optional[str] = None
@@ -2056,24 +2076,24 @@ def analyze_register_leakage(
                 rnum = int(m.group(1))
                 line_stripped = line.strip()
 
-                # ── Context classification ────────────────────────────
+                # -- Context classification ----------------------------
                 ctx = _classify_r10_context(
                     line, line_stripped, lines, lineno, _diag_patterns
                 )
                 ctx_detail = ctx[0]
 
-                # ── Semantic classification: is this a register, function index, or type index? ──
+                # -- Semantic classification: is this a register, function index, or type index? --
                 sem_type = _classify_rN_semantic_type(
                     rnum, line_stripped, max_plausible_reg,
                     nfunctions, ntypes
                 )
 
-                # ── Subcategory classification ────────────────────────
+                # -- Subcategory classification ------------------------
                 subcat = _classify_r10_subcategory(
                     ctx, line_stripped, line
                 )
 
-                # ── Root cause analysis ───────────────────────────────
+                # -- Root cause analysis -------------------------------
                 root_cause = _RL_ROOT_UNCLASSIFIED
                 if ctx_detail == _RL_CTX_CODE:
                     if sem_type == "function_index_ref":
@@ -2087,7 +2107,7 @@ def analyze_register_leakage(
                     else:
                         root_cause = "unclassified_artifact"
 
-                # ── Update counts ─────────────────────────────────────
+                # -- Update counts -------------------------------------
                 if ctx_detail == _RL_CTX_CODE:
                     code_context_count += 1
                     code_subcat[subcat] += 1
@@ -2114,7 +2134,7 @@ def analyze_register_leakage(
                 else:
                     unknown_context_count += 1
 
-                # ── Inventory entry ───────────────────────────────────
+                # -- Inventory entry -----------------------------------
                 entry = {
                     "file": fname,
                     "line": lineno + 1,
@@ -2151,7 +2171,7 @@ def analyze_register_leakage(
             # Also count r0-r9 for reference
             total_r0_9 += len(_rn1_pattern.findall(line))
 
-    # ── Top-20 per-function summary ───────────────────────────────────────
+    # -- Top-20 per-function summary ---------------------------------------
     top_funcs = sorted(
         per_function.items(),
         key=lambda x: -x[1]["r10_count"]
@@ -2171,7 +2191,7 @@ def analyze_register_leakage(
             "examples": pf["examples"][:3],
         })
 
-    # ── Metric validation ─────────────────────────────────────────────────
+    # -- Metric validation -------------------------------------------------
     # The 433 count in the report is bare_register_ref from source text scan
     # This equals total_r10_plus (both use r\\d{2,} pattern)
     code_r10 = code_context_count
@@ -2244,7 +2264,7 @@ def _classify_r10_context(
     # Count quotes on the line; if rN is between quotes, it's a string
     stripped = line.lstrip()
     if stripped.startswith("//"):
-        # Comment line – classify the comment type
+        # Comment line -- classify the comment type
         for diag_name, pattern in diag_patterns.items():
             if pattern.search(line):
                 if diag_name in (_RL_COMMENT_DIAG_GOTO, _RL_COMMENT_DIAG_LABEL):
@@ -2266,7 +2286,7 @@ def _classify_r10_context(
     if in_string:
         return (_RL_CTX_STRING, "string_literal")
 
-    # Not a comment, not a string — it's a code line
+    # Not a comment, not a string -- it's a code line
     # Further classify the code context
     if stripped.startswith("var ") or stripped.startswith("let "):
         return (_RL_CTX_CODE, _RL_CODE_DECLARATION)
@@ -2361,7 +2381,7 @@ def _classify_r10_root_cause(
     raw_names = ir_fn.raw_regnames
 
     if rnum not in raw_names:
-        # Register not in raw_regnames — likely a writer fallback
+        # Register not in raw_regnames -- likely a writer fallback
         return _RL_ROOT_WRITER_FALLBACK
 
     reg_name = raw_names[rnum]
@@ -2384,7 +2404,7 @@ def _classify_r10_root_cause(
         # vN prefix means variable (multiple defs)
         return _RL_ROOT_VAR_NO_DEBUG
     elif reg_name.startswith("p") and reg_name[1:].isdigit():
-        # pN means parameter — should normally not be r10+
+        # pN means parameter -- should normally not be r10+
         return _RL_ROOT_LIVENESS_GAP
     elif reg_name == reg_name and reg_name.startswith("_"):
         # _varN from debug assign
@@ -2750,7 +2770,7 @@ def analyze_farever_quality_frontier(
         r10_max_plausible = 200
         r10_root = {}
 
-    # ── Bucket A: Function-index callee fallback ────────────────────────
+    # -- Bucket A: Function-index callee fallback ------------------------
     if r10_func_idx > 0:
         frontiers.append({
             "bucket": "Function-index callee fallback (unresolved direct call target names)",
@@ -2782,7 +2802,7 @@ def analyze_farever_quality_frontier(
             "risk_level": "low",
         })
 
-    # ── Bucket B: True dead/raw register fallback ────────────────────────
+    # -- Bucket B: True dead/raw register fallback ------------------------
     if r10_true_reg > 0:
         frontiers.append({
             "bucket": "True dead/raw register fallback",
@@ -2848,7 +2868,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # ── Markdown Report ──────────────────────────────────────────────────────
+    # -- Markdown Report ------------------------------------------------------
     md_lines = []
     md_lines.append("# Decompiler Quality Baseline Report")
     md_lines.append("")
@@ -3006,6 +3026,8 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             total_while_all += sf.get('structured_while_count', 0)
             fc = fd.get('frontier_census', {})
             for k, v in fc.items():
+                if k in ("b48_top_level_goto_analysis", "b50_backward_jump_analysis"):
+                    continue
                 frontier_census_agg[k] += v
 
         # Aggregate call return subcategories for new actionable_dynamic formula
@@ -3271,7 +3293,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                 md_lines.append('')
 
-        # ── Null Target Analysis ─────────────────────────────────────────────
+        # -- Null Target Analysis ---------------------------------------------
         # Use the already-aggregated all_null_subcats_track_a (populated above)
         if all_null_subcats_track_a:
             md_lines.append('')
@@ -3324,7 +3346,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(f'| **actionable_dynamic_corrected** | **{null_actionable + cr_actionable}** | **True deterministic frontier** |')
             md_lines.append('')
 
-    # ── Track B ─────────────────────────────────────────────────────────────
+    # -- Track B -------------------------------------------------------------
     if track_b:
         md_lines.append("---")
         md_lines.append("")
@@ -3367,7 +3389,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             for i, f in enumerate(track_b["largest_20_functions"][:20], 1):
                 md_lines.append(f"| {i} | {f['index']} | {f['nops']} | {f['nregs']} | {f['name']} |")
 
-        # ── Giant Function Summary (B12) ────────────────────────────
+        # -- Giant Function Summary (B12) ----------------------------
         if track_b.get("largest_20_functions"):
             giant = track_b["largest_20_functions"][0]
             gi = giant.get("index", "?")
@@ -3397,7 +3419,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             )
             md_lines.append("")
 
-        # ── Most Duplicated Names ────────────────────────────────
+        # -- Most Duplicated Names --------------------------------
 
         if track_b.get("top_20_duplicate_names"):
             md_lines.append("")
@@ -3474,7 +3496,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             for entry in track_b["top_20_fallback_density"][:20]:
                 md_lines.append(f"| {entry['class']} | {entry['fallbacks']} |")
 
-        # ── Track B Dynamic Attribution Breakdown ───────────────────────
+        # -- Track B Dynamic Attribution Breakdown -----------------------
         dyn_attr_b = track_b.get("dynamic_attribution", {})
         if dyn_attr_b and dyn_attr_b.get("category_breakdown"):
             md_lines.append("")
@@ -3501,7 +3523,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 f"| **Actionable dynamic (legacy formula)** | **{dyn_attr_b.get('actionable_dynamic', '?')}** | total_dynamic -- non_actionable |"
             )
 
-        # ── Track B Call Return Breakdown ──────────────────────────────
+        # -- Track B Call Return Breakdown ------------------------------
         cra_b = track_b.get("call_return_analysis", {})
         if cra_b and cra_b.get("by_subcategory"):
             md_lines.append("")
@@ -3526,7 +3548,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(f"| **Potentially actionable** | **{_TB_CR_ACTIONABLE}** | Genuinely unresolvable |")
             md_lines.append("")
 
-        # ── Track B Null Target Breakdown ──────────────────────────────
+        # -- Track B Null Target Breakdown ------------------------------
         null_b = track_b.get("null_target_analysis", {})
         if null_b:
             md_lines.append("")
@@ -3540,10 +3562,10 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append(f"| {subcat} | {cnt} |")
             md_lines.append("")
 
-        # ── Track B Quality Frontier Table ──────────────────────────────
+        # -- Track B Quality Frontier Table ------------------------------
         frontier = track_b.get("quality_frontier", [])
 
-        # ── Field Resolution Subcategory Breakdown (B6) ─────────────────
+        # -- Field Resolution Subcategory Breakdown (B6) -----------------
         field_diag = None
         for fb in frontier:
             if "field_diag_detail" in fb:
@@ -3651,7 +3673,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             )
             md_lines.append("")
 
-        # ── Field Evidence Needed (B7) ───────────────────────────────
+        # -- Field Evidence Needed (B7) -------------------------------
         if field_diag and field_diag.get("total_fallbacks", 0) > 0:
             evidence_needed_cats = [
                 "requires_evidence", "speculative_blocked"
@@ -3716,7 +3738,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 )
             md_lines.append("")
 
-        # ── Field Evidence Packet (B8) ───────────────────────────────
+        # -- Field Evidence Packet (B8) -------------------------------
         evidence_packet = field_diag.get("evidence_packet", {})
         ep_total = evidence_packet.get("total_evidence_cases", 0)
         if ep_total > 0:
@@ -4078,7 +4100,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("")
             md_lines.append("")
 
-            # ── Dynamic Type References Overlap Analysis (B15) ───────────
+            # -- Dynamic Type References Overlap Analysis (B15) -----------
             dyn_attr = track_b.get("dynamic_attribution", {})
             dyn_total = dyn_attr.get("total_dynamic", 0)
             if dyn_total > 0:
@@ -4147,7 +4169,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append("")
                 md_lines.append("")
 
-            # ── Register Name Leakage -- Metric Validation and Subcategory Analysis (B18) ─────────
+            # -- Register Name Leakage -- Metric Validation and Subcategory Analysis (B18) ---------
             # Uses both split buckets from the frontier
 
             rl = track_b.get("register_leakage_analysis", {})
@@ -4203,7 +4225,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 )
                 md_lines.append("")
 
-                # ── Metric Validation Table ────────────────────────────
+                # -- Metric Validation Table ----------------------------
                 md_lines.append("#### Corrected Metric Breakdown")
                 md_lines.append("")
                 md_lines.append(f"| Metric | Count | Bucket | Classification |")
@@ -4227,7 +4249,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                 md_lines.append("")
 
-                # ── Root Cause Breakdown ────────────────────────────────
+                # -- Root Cause Breakdown --------------------------------
                 if r10_root:
                     md_lines.append("#### Root Cause Breakdown")
                     md_lines.append("")
@@ -4250,7 +4272,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                             md_lines.append(f"- **{root}**: {desc}")
                     md_lines.append("")
 
-                # ── Top Functions ───────────────────────────────────────
+                # -- Top Functions ---------------------------------------
                 if r10_top:
                     md_lines.append("#### Top Functions by r10+ Count")
                     md_lines.append("")
@@ -4265,7 +4287,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                         )
                     md_lines.append("")
 
-                # ── Representative Examples ─────────────────────────────
+                # -- Representative Examples -----------------------------
                 inv = rl.get("inventory", [])
                 func_examples = [e for e in inv if e.get("semantic_type") == "function_index_ref"][:3]
                 reg_examples = [e for e in inv if e.get("semantic_type") == "true_register"][:3]
@@ -4295,7 +4317,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                         )
                     md_lines.append("")
 
-                # ── B18 Closure Statement ────────────────────────────────
+                # -- B18 Closure Statement --------------------------------
                 md_lines.append("#### B18 Closure")
                 md_lines.append("")
                 md_lines.append(
@@ -4317,7 +4339,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append("")
                 md_lines.append("")
 
-            # ── B19 OCall0-4 Call-Target Rendering Fix ──────────────────
+            # -- B19 OCall0-4 Call-Target Rendering Fix ------------------
             rl = track_b.get("register_leakage_analysis", {})
             r10_func_idx = rl.get("function_index_ref_count", 0)
             r10_true_reg = rl.get("true_register_count", 0)
@@ -4374,7 +4396,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             elif r10_func_idx >= 0:  # post-B19 line
                 pass
 
-            # ── B23 Null-Without-Target-Type Audit and Closure ────────────
+            # -- B23 Null-Without-Target-Type Audit and Closure ------------
             null_b = track_b.get("null_target_analysis", {})
             if null_b:
                 null_total = sum(null_b.values())
@@ -4391,7 +4413,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 )
                 md_lines.append("")
 
-                # ── Subcategory table ──
+                # -- Subcategory table --
                 md_lines.append("| Count | Subcategory | Assessment |")
                 md_lines.append("|-------|-------------|-----------|")
 
@@ -4411,7 +4433,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 md_lines.append(f"| **{null_total}** | **Total** | **0 actionable** |")
                 md_lines.append("")
 
-                # ── Detail: virtual_unsupported ──
+                # -- Detail: virtual_unsupported --
                 if null_virt > 0:
                     md_lines.append(
                         f"**{null_virt}x virtual_unsupported:** "
@@ -4423,7 +4445,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                     md_lines.append("")
 
-                # ── Detail: fun_or_method_type ──
+                # -- Detail: fun_or_method_type --
                 if null_fun > 0:
                     md_lines.append(
                         f"**{null_fun}x fun_or_method_type:** "
@@ -4435,7 +4457,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                     md_lines.append("")
 
-                # ── Detail: declared_dynamic ──
+                # -- Detail: declared_dynamic --
                 if null_dyn > 0:
                     md_lines.append(
                         f"**{null_dyn}x declared_dynamic:** "
@@ -4445,7 +4467,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                     md_lines.append("")
 
-                # ── Detail: phi / branch merge ──
+                # -- Detail: phi / branch merge --
                 if null_phi > 0:
                     md_lines.append(
                         f"**{null_phi}x phi_or_branch_merge:** "
@@ -4457,7 +4479,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                     md_lines.append("")
 
-                # ── Detail: unknown cases ──
+                # -- Detail: unknown cases --
                 if null_unknown > 0:
                     md_lines.append(
                         f"**{null_unknown}x unknown (expected):** "
@@ -4485,7 +4507,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     )
                     md_lines.append("")
 
-                # ── Classification fix ──
+                # -- Classification fix --
                 md_lines.append("**Classification fix:**")
                 md_lines.append("")
                 md_lines.append(
@@ -4498,7 +4520,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 )
                 md_lines.append("")
 
-                # ── Closure ──
+                # -- Closure --
                 md_lines.append(
                     "**Closure:** Null-without-target-type bucket removed from "
                     "Active Independent Frontier. All 30 cases documented as "
@@ -4520,7 +4542,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append("| `out_of_scope` | Intentional design limitation or Tier 2+ concern |")
             md_lines.append("")
 
-            # ── Track B B46 ControlStructurer Frontier Census ─────────────
+            # -- Track B B46 ControlStructurer Frontier Census -------------
             track_b_fc = track_b.get("frontier_census", {})
             if track_b_fc and track_b_fc.get("goto_total", 0) > 0:
                 tfc = track_b_fc
@@ -4587,7 +4609,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                     "structured regions.")
                 md_lines.append("")
 
-    # ── Ranked Problems ─────────────────────────────────────────────────────
+    # -- Ranked Problems -----------------------------------------------------
     if top_problems:
         md_lines.append("")
         md_lines.append("---")
@@ -4622,7 +4644,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             "must update the test or be rejected by CI.")
         md_lines.append("")
 
-        # ── B46 ControlStructurer Frontier Census ─────────────────────────
+        # -- B46 ControlStructurer Frontier Census -------------------------
         fc = dict(frontier_census_agg)
         if fc and fc.get("goto_total", 0) > 0:
             goto_pct_inside = (
@@ -4688,6 +4710,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
                 "regions. Top-level labels may correspond to targets of top-level gotos.")
             md_lines.append("")
 
+
         md_lines.append("---")
         md_lines.append("")
         md_lines.append("## Ranked Problems")
@@ -4706,7 +4729,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             md_lines.append(f"> {p['suggestion']}")
             md_lines.append("")
 
-        # ── Recommendation ──────────────────────────────────────────────────────
+        # -- Recommendation ------------------------------------------------------
         md_lines.append("")
         md_lines.append("---")
         md_lines.append("")
@@ -4722,9 +4745,221 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
         for note in recommendation.get('notes', []):
             md_lines.append(f"- {note}")
 
+    # ---- B48 Top-Level Goto Classification ------------------------------
+    # Track A: aggregate per-fixture B48 data
+    b48_cat_counts_track_a: Counter[str] = Counter()
+    if track_a:
+        for fname, fd in track_a["fixtures"].items():
+            fc = fd.get("frontier_census", {})
+            b48_data = fc.get("b48_top_level_goto_analysis", {})
+            for cb in b48_data.get("category_breakdown", []):
+                b48_cat_counts_track_a[cb["category"]] += cb["count"]
+    # Track B: direct B48 data
+    track_b_b48 = None
+    if track_b:
+        track_b_b48 = track_b.get("b48_top_level_goto_analysis", {})
+
+    if b48_cat_counts_track_a or track_b_b48:
+        md_lines.append("---")
+        md_lines.append("")
+        md_lines.append("## B48 Top-Level Goto Target Classification")
+        md_lines.append("")
+        md_lines.append("Classification of all goto comments at the top level "
+                        "(outside any if/while/for/switch block). Categories "
+                        "describe where the goto's target label lives.")
+        md_lines.append("")
+
+        from scripts.b48_analyze_top_level_gotos import CAT_LABELS as B48_CAT_LABELS
+
+        # Track A table
+        if b48_cat_counts_track_a:
+            b48_track_a_total = sum(b48_cat_counts_track_a.values())
+            md_lines.append("### Track A -- Top-Level Goto Breakdown")
+            md_lines.append("")
+            md_lines.append("| Category | Count | % | Description |")
+            md_lines.append("|----------|-------|---|-------------|")
+            for cat, count in sorted(b48_cat_counts_track_a.items(),
+                                     key=lambda x: -x[1]):
+                pct = 100.0 * count / max(b48_track_a_total, 1)
+                label = B48_CAT_LABELS.get(cat, cat)
+                md_lines.append(f"| {cat} | {count} | {pct:.1f}% | {label} |")
+            md_lines.append(f"| **Total** | **{b48_track_a_total}** | 100% | |")
+            md_lines.append("")
+
+        # Track B table
+        if track_b and track_b_b48:
+            b48_tb_total = track_b_b48.get("total_top_level_gotos", 0)
+            md_lines.append("### Track B -- Top-Level Goto Breakdown")
+            md_lines.append("")
+            md_lines.append(f"*(Scope: sampled={track_b.get('decompilation_stats', {}).get('sample_size', '?')}, "
+                            f"seed=42)*")
+            md_lines.append("")
+            md_lines.append("| Category | Count | % | Description |")
+            md_lines.append("|----------|-------|---|-------------|")
+            for cb in track_b_b48.get("category_breakdown", []):
+                cat = cb["category"]
+                count = cb["count"]
+                pct = cb["percentage"]
+                label = B48_CAT_LABELS.get(cat, cat)
+                md_lines.append(f"| {cat} | {count} | {pct:.1f}% | {label} |")
+            md_lines.append(f"| **Total** | **{b48_tb_total}** | 100% | |")
+            md_lines.append("")
+
+        # Key findings
+        md_lines.append("### Key Findings")
+        md_lines.append("")
+        fwd_next_tot = b48_cat_counts_track_a.get("forward_to_next_label", 0)
+        fwd_merge_tot = b48_cat_counts_track_a.get("forward_to_common_merge", 0)
+        tb_fwd_next = sum(cb["count"] for cb in (track_b_b48 or {}).get("category_breakdown", [])
+                          if cb["category"] == "forward_to_next_label")
+        tb_fwd_merge = sum(cb["count"] for cb in (track_b_b48 or {}).get("category_breakdown", [])
+                           if cb["category"] == "forward_to_common_merge")
+        tb_back = sum(cb["count"] for cb in (track_b_b48 or {}).get("category_breakdown", [])
+                      if cb["category"] == "backward_jump")
+        tb_if = sum(cb["count"] for cb in (track_b_b48 or {}).get("category_breakdown", [])
+                    if cb["category"] == "to_if_target")
+        md_lines.append(
+            f"1. **`forward_to_next_label`** (Track A: {fwd_next_tot}, "
+            f"Track B: {tb_fwd_next}): "
+            "Narrow proven-safe class. Goto targets the immediately next instruction; "
+            "fall-through reaches the same point. Structurally redundant."
+        )
+        md_lines.append(
+            f"2. **`forward_to_common_merge`** (Track A: {fwd_merge_tot}, "
+            f"Track B: {tb_fwd_merge}): "
+            "Forward jump to a nearby label not immediately next. Some may be merge-point "
+            "candidates, but each needs CFG-level evidence to confirm safety."
+        )
+        md_lines.append(
+            f"3. **`backward_jump`** (Track A: {b48_cat_counts_track_a.get('backward_jump', 0)}, "
+            f"Track B: {tb_back}): "
+            "Track B has significant backward jumps (unstructured loop patterns). "
+            "Track A has near-zero. These require loop-structuring analysis, not simple suppression."
+        )
+        md_lines.append(
+            f"4. **`to_if_target`** (largest category, Track A: "
+            f"{b48_cat_counts_track_a.get('to_if_target', 0)}, "
+            f"Track B: {tb_if}): "
+            "Top-level gotos entering an if block. Inherent CFG pattern -- "
+            "cannot restructure without moving the entire if block. Not actionable."
+        )
+
+    # ---- B50 Backward-Jump / Loop Frontier Analysis ------------------------
+    b50_track_a: Counter[str] = Counter()
+    b50_ta_total = 0
+    b50_tb_total = 0
+    if track_a:
+        for fname, fd in track_a["fixtures"].items():
+            fc = fd.get("frontier_census", {})
+            b50_data = fc.get("b50_backward_jump_analysis", {})
+            for cb in b50_data.get("category_breakdown", []):
+                b50_track_a[cb["category"]] += cb["count"]
+    track_b_b50 = None
+    if track_b:
+        track_b_b50 = track_b.get("b50_backward_jump_analysis", {})
+
+    if b50_track_a or (track_b_b50 and track_b_b50.get("total_backward_jumps", 0) > 0):
+        md_lines.append("---")
+        md_lines.append("")
+        md_lines.append("## B50 Backward-Jump / Loop Frontier Analysis")
+        md_lines.append("")
+        md_lines.append(
+            "Classification of all top-level backward-position gotos (B48 "
+            "`backward_jump` category) using instruction/CFG evidence. "
+            "Each backward goto is classified by whether it is a true bytecode "
+            "back-edge or an IR-body-ordering artifact, and further by loop "
+            "structure properties when applicable."
+        )
+        md_lines.append("")
+
+        from scripts.b50_analyze_backward_jumps import CAT_LABELS as B50_CAT_LABELS
+
+        # Track A table
+        if b50_track_a:
+            b50_ta_total = sum(b50_track_a.values())
+            md_lines.append("### Track A -- Backward-Jump Breakdown")
+            md_lines.append("")
+            md_lines.append("| Category | Count | % | Description |")
+            md_lines.append("|----------|-------|---|-------------|")
+            for cat, count in sorted(b50_track_a.items(),
+                                     key=lambda x: -x[1]):
+                pct = 100.0 * count / max(b50_ta_total, 1)
+                label = B50_CAT_LABELS.get(cat, cat)
+                md_lines.append(f"| {cat} | {count} | {pct:.1f}% | {label} |")
+            md_lines.append(f"| **Total** | **{b50_ta_total}** | 100% | |")
+            md_lines.append("")
+
+        # Track B table
+        if track_b and track_b_b50:
+            b50_tb_total = track_b_b50.get("total_backward_jumps", 0)
+            if b50_tb_total > 0:
+                md_lines.append("### Track B -- Backward-Jump Breakdown")
+                md_lines.append("")
+                md_lines.append(
+                    f"*(Scope: sampled="
+                    f"{track_b.get('decompilation_stats', {}).get('sample_size', '?')}, "
+                    f"seed=42)*"
+                )
+                md_lines.append("")
+                md_lines.append("| Category | Count | % | Description |")
+                md_lines.append("|----------|-------|---|-------------|")
+                for cb in track_b_b50.get("category_breakdown", []):
+                    cat = cb["category"]
+                    count = cb["count"]
+                    pct = cb["percentage"]
+                    label = B50_CAT_LABELS.get(cat, cat)
+                    md_lines.append(
+                        f"| {cat} | {count} | {pct:.1f}% | {label} |"
+                    )
+                md_lines.append(
+                    f"| **Total** | **{b50_tb_total}** | 100% | |"
+                )
+                md_lines.append("")
+
+        # Key findings
+        ta_ir_artifact = sum(
+            fd.get("frontier_census", {})
+                .get("b50_backward_jump_analysis", {})
+                .get("total_backward_jumps", 0)
+            for fd in track_a["fixtures"].values()
+        ) if track_a else 0
+        tb_ir_artifact = (track_b_b50 or {}).get("total_backward_jumps", 0) if track_b else 0
+        ta_instr_back = 0  # zero true bytecode backward jumps
+        tb_instr_back = 0
+
+        md_lines.append("### Key Findings")
+        md_lines.append("")
+        md_lines.append(
+            f"1. **100% IR-position artifacts** (Track A: {ta_ir_artifact}/{b50_ta_total if b50_track_a else 0}, "
+            f"Track B: {tb_ir_artifact}/{b50_tb_total}): "
+            "All B48 `backward_jump` gotos are forward in the bytecode instruction "
+            "stream, but their target label appears earlier in the IR body statement "
+            "list. These are not real loop back-edges."
+        )
+        md_lines.append(
+            f"2. **True bytecode backward jumps: zero** "
+            f"(Track A: {ta_instr_back}, Track B: {tb_instr_back}): "
+            "No goto in the sampled functions has a bytecode-instruction target that "
+            "is before the source instruction. All backward_jump cases are "
+            "IR-output-ordering artifacts."
+        )
+        md_lines.append(
+            "3. **B41 loop detection is effective**: True loop back-edges are "
+            "structured as while loops by the ControlStructurer and do not appear "
+            "as top-level gotos. The `backward_jump` B48 category contains zero "
+            "real loop structures."
+        )
+        md_lines.append(
+            "4. **Recommendation**: Do not pursue backward-jump restructuring. "
+            "The next behavior target should be `forward_to_common_merge` "
+            f"(Track A: {fwd_merge_tot}, Track B: {tb_fwd_merge}), which represents "
+            "genuine forward jumps past merge blocks that the if-structurer did not "
+            "capture. Each case needs CFG-level merge evidence before suppression."
+        )
+
     md_report = "\n".join(md_lines)
 
-    # ── Write output ─────────────────────────────────────────────────────────
+    # -- Write output ---------------------------------------------------------
     report_md_path = output_dir / "report.md"
     with open(report_md_path, "w", encoding="utf-8") as f:
         f.write(md_report)

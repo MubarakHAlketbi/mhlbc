@@ -20,7 +20,7 @@ Use this priority order when resolving conflicts:
 1. Current user instruction.
 2. Existing code.
 3. `docs/` specifications.
-4. `README.md`, `CONTRIBUTING.md`, and `checklist.md`.
+4. `README.md` and `CONTRIBUTING.md`.
 5. This `AGENTS.md`.
 
 ### 2.1 Docs-as-Knowledge-Base
@@ -63,7 +63,7 @@ Preserve the project layering:
 | CLI | `cli.py` | Scriptable entry point for parser and analysis features. |
 | GUI | `app.py`, `hl_worker.py` | UI rendering only; heavy parsing runs through worker thread. |
 | Tests | `tests/` | Unit, integration, regression, and fixture-backed validation. |
-| Docs | `docs/`, `README.md`, `CONTRIBUTING.md`, `checklist.md` | Specs, roadmap, process, and known issues. |
+| Docs | `docs/`, `README.md`, `CONTRIBUTING.md` | Specs, roadmap, process, and known issues. |
 
 Required architecture rules:
 
@@ -82,10 +82,9 @@ Agents must use the following authority order:
 
 1. Direct owner instruction in the current task.
 2. `MEMORY.md` for current session context and recent decisions.
-3. `checklist.md` for active work items and pending priorities.
-4. `README.md` for project roadmap, gates, tiers, and public direction.
-5. `CONTRIBUTING.md` for engineering workflow, tests, architecture rules, and release rules.
-6. `docs/` for bytecode format details and technical specifications.
+3. `README.md` for project roadmap, gates, tiers, and public direction.
+4. `CONTRIBUTING.md` for engineering workflow, tests, architecture rules, and release rules.
+5. `docs/` for bytecode format details and technical specifications.
 
 `AGENTS.md` is a standing operating guide. It must not freeze the roadmap, override active instructions, or prohibit work that the owner explicitly requests.
 

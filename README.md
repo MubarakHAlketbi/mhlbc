@@ -6,7 +6,7 @@ The immediate motivation is **Farever**, an abandoned Haxe/Heaps game whose sour
 
 Current active scope: parse, inspect, disassemble, and decompile standard HashLink bytecode (v3/v4/v5) into Haxe-like pseudocode.
 
-Long-term vision: bytecode manipulation, asset workflows, engine binding analysis, and a full modding SDK. These tiers are frozen until Gate 6 validation is complete (see `checklist.md`).
+Long-term vision: bytecode manipulation, asset workflows, engine binding analysis, and a full modding SDK. These tiers are frozen until Gate 6 validation is complete.
 
 ---
 
@@ -266,7 +266,7 @@ mhlbc/
   - Function body alignment (OSwitch fix) verified — all 497 tests pass
   - **(LLM-enhanced readability is explicitly out of scope — see footnote)**
 
-### Tiers 2–5 (Frozen per process rule — see `checklist.md §G.6`)
+### Tiers 2–5 (Frozen per process rule)
 
 These tiers are **not started** and will not be worked on until Gate 6 validation is complete per [docs/validation_matrix.md](docs/validation_matrix.md).
 

@@ -113,7 +113,7 @@ def _parse_bytecode(data: bytes) -> HLParser:
 
 
 def _disasm_and_decompile(data: bytes) -> DecompileResult:
-    """Full pipeline: parse → disassemble → decompile."""
+    """Full pipeline: parse -> disassemble -> decompile."""
     parser = _parse_bytecode(data)
     disasm = Disassembler(parser)
     disasm.disassemble_all()
@@ -282,7 +282,7 @@ class TestIRDataStructures:
 
 class TestRegisterLiveness:
     def test_simple_def(self):
-        """OInt r1, @5 → r1 defined at instr 0."""
+        """OInt r1, @5 -> r1 defined at instr 0."""
         instrs = [
             Instruction(0, 1, "OInt", [1, 5], 0, 3),  # OInt r1, @5
             Instruction(1, 66, "OLabel", [], 3, 1),    # OLabel (no-op)
@@ -293,7 +293,7 @@ class TestRegisterLiveness:
         assert defs[0] == []  # r0 not defined
 
     def test_use_tracking(self):
-        """OMov r2, r1 → r1 used (source), r2 defined (dst)."""
+        """OMov r2, r1 -> r1 used (source), r2 defined (dst)."""
         instrs = [
             Instruction(0, 1, "OInt", [1, 5], 0, 3),
             Instruction(1, 0, "OMov", [2, 1], 3, 2),
@@ -305,7 +305,7 @@ class TestRegisterLiveness:
         assert defs.get(2) == [1]
 
     def test_arith_write(self):
-        """OAdd r3, r1, r2 → writes to r3, reads r1, r2."""
+        """OAdd r3, r1, r2 -> writes to r3, reads r1, r2."""
         instrs = [
             Instruction(0, 1, "OInt", [1, 5], 0, 3),
             Instruction(1, 1, "OInt", [2, 3], 3, 3),
@@ -316,7 +316,7 @@ class TestRegisterLiveness:
         assert defs[3] == [2]
 
     def test_call_writes_dst(self):
-        """OCall0 r3, r1 → writes to r3, reads r1 (fun_reg)."""
+        """OCall0 r3, r1 -> writes to r3, reads r1 (fun_reg)."""
         instrs = [
             Instruction(0, 24, "OCall0", [3, 1], 0, 2),
         ]
@@ -325,7 +325,7 @@ class TestRegisterLiveness:
         assert defs[3] == [0]
 
     def test_field_read(self):
-        """OField r2, r1, 0 → writes to r2, reads r1."""
+        """OField r2, r1, 0 -> writes to r2, reads r1."""
         instrs = [
             Instruction(0, 38, "OField", [2, 1, 0], 0, 3),
         ]
@@ -333,7 +333,7 @@ class TestRegisterLiveness:
         assert defs.get(2) == [0]
 
     def test_oret_src_use(self):
-        """ORet r3 → r3 captured as a source register (use)."""
+        """ORet r3 -> r3 captured as a source register (use)."""
         instrs = [
             Instruction(0, 67, "ORet", [3], 0, 1),
         ]
@@ -342,7 +342,7 @@ class TestRegisterLiveness:
         assert uses[3] == [0]
 
     def test_othrow_src_use(self):
-        """OThrow r2 → r2 captured as a source register (use)."""
+        """OThrow r2 -> r2 captured as a source register (use)."""
         instrs = [
             Instruction(0, 68, "OThrow", [2], 0, 1),
         ]
@@ -351,7 +351,7 @@ class TestRegisterLiveness:
         assert uses[2] == [0]
 
     def test_orethrow_src_use(self):
-        """ORethrow r1 → r1 captured as a source register (use)."""
+        """ORethrow r1 -> r1 captured as a source register (use)."""
         instrs = [
             Instruction(0, 69, "ORethrow", [1], 0, 1),
         ]
@@ -359,7 +359,7 @@ class TestRegisterLiveness:
         assert 1 in uses, "ORethrow arg should be a use"
         assert uses[1] == [0]
 
-    # ── B17 Liveness Fix Tests ──────────────────────────────────────
+    # -- B17 Liveness Fix Tests --------------------------------------
 
     def test_ocall0_findex_not_src_register(self):
         """OCall0 args[1] is a function index, NOT a source register."""
@@ -374,7 +374,7 @@ class TestRegisterLiveness:
 
     def test_ocall1_findex_not_src_register(self):
         """OCall1 args[1] is a function index, only args[2] is a source register."""
-        # OCall1 r0, 5, r3 — findex=5, a0=r3 (source)
+        # OCall1 r0, 5, r3 -- findex=5, a0=r3 (source)
         instrs = [
             Instruction(0, 25, "OCall1", [0, 5, 3], 0, 3),
         ]
@@ -384,7 +384,7 @@ class TestRegisterLiveness:
 
     def test_ocall_method_method_index_not_src_register(self):
         """OCallMethod args[1] is a method index, NOT a source register."""
-        # OCallMethod r0, 42, 2, r3, r4 — method_index=42, argc=2, extra[0]=r3, extra[1]=r4
+        # OCallMethod r0, 42, 2, r3, r4 -- method_index=42, argc=2, extra[0]=r3, extra[1]=r4
         instrs = [
             Instruction(0, 30, "OCallMethod", [0, 42, 2, 3, 4], 0, 5),
         ]
@@ -395,7 +395,7 @@ class TestRegisterLiveness:
 
     def test_omakeenum_src_and_dst_tracked(self):
         """OMakeEnum args[2] is count, source regs and dst properly tracked."""
-        # OMakeEnum r0, 1, 2, r3, r4 — ctor_idx=1, count=2, args=r3, r4
+        # OMakeEnum r0, 1, 2, r3, r4 -- ctor_idx=1, count=2, args=r3, r4
         instrs = [
             Instruction(0, 90, "OMakeEnum", [0, 1, 2, 3, 4], 0, 5),
         ]
@@ -435,7 +435,7 @@ class TestVariableMapper:
         assert names[0] == "this"
         assert names[1] == "p0"
         assert names[2] == "p1"
-        # reg 3 is a local (not a param) — use lifetime naming
+        # reg 3 is a local (not a param) -- use lifetime naming
         assert names[3] == "t3"
 
     def test_sig_static_no_this(self):
@@ -471,7 +471,7 @@ class TestVariableMapper:
         uses = {0: [2]}
         names = mapper.map(defs, uses)
         # No 'this' because has_this=False, but param name "this" conflicts
-        # with nothing — pass through
+        # with nothing -- pass through
         assert names[0] == "this"  # param named "this" from sig
         # reg 1 is local temp
         assert names[1] == "t1"
@@ -542,7 +542,7 @@ class TestSignatureAwareRegisterNaming:
         result = _disasm_and_decompile(data)
         assert len(result.functions) > 0
         ir_fn = list(result.functions.values())[0]
-        # Static, has_this=False, 1 param → reg0 = "p0", no "this", no "ret"
+        # Static, has_this=False, 1 param -> reg0 = "p0", no "this", no "ret"
         sig = ir_fn.sig
         assert not sig.has_this, "static func should not have this"
         assert len(sig.params) == 1, f"expected 1 param, got {len(sig.params)}"
@@ -555,7 +555,7 @@ class TestSignatureAwareRegisterNaming:
     def test_method_has_this_and_params(self):
         """Method with has_this=True: reg0='this', reg1+=param names."""
         i32_type = build_type_primitive(K_I32)
-        # K_METHOD type: 2 params (I32, I32) → first is 'this' receiver (type I32),
+        # K_METHOD type: 2 params (I32, I32) -> first is 'this' receiver (type I32),
         # visible params = 1 (the second I32)
         method_type = self._make_kmethod_type([1, 1], 0)
         # Function with K_METHOD type (index 1)
@@ -594,7 +594,7 @@ class TestSignatureAwareRegisterNaming:
             fields=[], protos=[], bindings=[],
         )
         # FUN type where first arg (obj type at idx 2) signals constructor:
-        # args=[2, 1] → first arg=Obj type, second=I32 param
+        # args=[2, 1] -> first arg=Obj type, second=I32 param
         fun_type = self._make_kfun_type([2, 1], 0)
         # Function with FUN type (index 3), return Void
         ops = [(67, [])]  # ORet
@@ -615,7 +615,7 @@ class TestSignatureAwareRegisterNaming:
         assert len(result.functions) > 0
         ir_fn = list(result.functions.values())[0]
         sig = ir_fn.sig
-        # Constructor — has_this=True, name="new"
+        # Constructor -- has_this=True, name="new"
         assert sig.has_this, "constructor should have this"
         assert sig.name == "new", f"constructor should be named 'new', got '{sig.name}'"
         r0 = ir_fn.raw_regnames.get(0, "")
@@ -657,7 +657,7 @@ class TestSignatureAwareRegisterNaming:
         # Build a function with nregs=4 but only 2 regs are alive
         i32_type = build_type_primitive(K_I32)
         fun_type = self._make_kfun_type([], 0)
-        # OInt r0=42, ORet r0 — regs 1,2,3 are dead
+        # OInt r0=42, ORet r0 -- regs 1,2,3 are dead
         ops = [
             (1, [0, 0]),   # OInt r0, @0 (int pool index 0)
             (67, [0]),     # ORet r0
@@ -679,7 +679,7 @@ class TestSignatureAwareRegisterNaming:
         ir_fn = list(result.functions.values())[0]
         emitted = writer = HaxeWriter(TypeResolver(p := _parse_bytecode(data)), p)
         src = emitted.write_function(ir_fn)
-        # Check output — dead regs should not appear as variables or in body
+        # Check output -- dead regs should not appear as variables or in body
         assert "var r1" not in src, f"dead reg r1 should not be declared: {src}"
         assert "var r2" not in src, f"dead reg r2 should not be declared: {src}"
         assert "var r3" not in src, f"dead reg r3 should not be declared: {src}"
@@ -692,7 +692,7 @@ class TestSignatureAwareRegisterNaming:
         # Function with nregs=2 but instructions reference reg 5
         i32_type = build_type_primitive(K_I32)
         fun_type = self._make_kfun_type([1], 0)  # 1 param (I32) -> Void
-        # OInt r5=42, ORet r5 — reg 5 is alive, beyond nregs=2
+        # OInt r5=42, ORet r5 -- reg 5 is alive, beyond nregs=2
         ops = [
             (1, [5, 0]),   # OInt r5=42 (int pool @0)
             (67, [5]),     # ORet r5
@@ -714,7 +714,7 @@ class TestSignatureAwareRegisterNaming:
         ir_fn = list(result.functions.values())[0]
         # Reg 5 has 1 def and 1 use (OInt writes r5, ORet reads r5)
         r5_name = ir_fn.raw_regnames.get(5, "?")
-        # Single-def → t5 (lifetime naming)
+        # Single-def -> t5 (lifetime naming)
         assert r5_name.startswith("t") or r5_name.startswith("v"), f"reg 5 should be mapped name, got '{r5_name}'"
         assert r5_name != "r5", f"reg 5 should not be raw 'r5': {r5_name}"
         # Verify reg 0 (param) is correctly named from sig
@@ -752,7 +752,7 @@ class TestRegisterTypePropagation:
         """OInt register produces 'Int' type in declaration."""
         i32_type = build_type_primitive(K_I32)
         fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)  # ()->Void
-        # OInt r0 @0, ORet — reg_types[0] might be garbage
+        # OInt r0 @0, ORet -- reg_types[0] might be garbage
         ops = [(1, [0, 0]), (67, [])]
         func_entry = self._build_func_body(
             reg_types=[138],  # garbage type in header
@@ -816,7 +816,7 @@ class TestRegisterTypePropagation:
         """Register with garbage reg_type but no evidence gets Dynamic."""
         i32_type = build_type_primitive(K_I32)
         fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
-        # OInt r0, ORet — only r0 gets evidence
+        # OInt r0, ORet -- only r0 gets evidence
         ops = [(1, [0, 0]), (67, [0])]
         func_entry = self._build_func_body(
             reg_types=[K_I32, 999],  # reg 1 has garbage type 999
@@ -831,7 +831,7 @@ class TestRegisterTypePropagation:
         ir_fn = list(result.functions.values())[0]
         # r0 = Int (from OInt), r1 = fallback to reg_types[1] = 999
         # 999 is invalid, should not appear in variables
-        # (evidence only has r0, r1 has no evidence but is dead — no defs, no uses)
+        # (evidence only has r0, r1 has no evidence but is dead -- no defs, no uses)
         assert "r1" not in ir_fn.raw_regnames, "r1 should not appear (dead)"
 
     def test_used_only_register_named_u_not_p(self):
@@ -840,7 +840,7 @@ class TestRegisterTypePropagation:
         fun_type = bytes([K_FUN, 0]) + encode_varint(K_VOID)
         fun_type2 = bytes([K_FUN, 1]) + encode_varint(0) + encode_varint(K_VOID)
         # OInt r0=42, OCall1 dst=r0, findex=r0(=0), a0=r1 (r1 is used-only, no def)
-        # OCall1 format: dst, findex/type_idx, a0 — a0 is a real register
+        # OCall1 format: dst, findex/type_idx, a0 -- a0 is a real register
         ops = [(1, [0, 0]), (25, [0, 0, 1])]
         func_entry = self._build_func_body(
             reg_types=[K_I32, K_DYN], type_idx=2, findex=0, nregs=2, ops=ops,
@@ -888,7 +888,7 @@ class TestDynamicAttribution:
         primitives = [build_type_primitive(i) for i in range(10)]  # 0-9 primitives
         fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # ()->Void
         type_blobs = primitives + [fun_type]  # type 10 = fun
-        # OJTrue r0, 0 — jump reads r0 but doesn't write, r0 gets reg_type K_DYN (no instruction evidence)
+        # OJTrue r0, 0 -- jump reads r0 but doesn't write, r0 gets reg_type K_DYN (no instruction evidence)
         ops = [(44, [0, 0]), (67, [])]
         func_entry = self._build_func_body(
             reg_types=[K_DYN],  # reg 0 type = type[9] = K_DYN
@@ -1097,7 +1097,7 @@ class TestDynamicAttribution:
             reg_types=[K_I32], type_idx=2, findex=0, nregs=1, ops=[(67, [0])],
         )
         # Caller: r0=param, r1 not used, r2=OCall1 dst
-        # OCall1: dst=r2, findex=0, arg=r0 — should resolve t2 to Bool
+        # OCall1: dst=r2, findex=0, arg=r0 -- should resolve t2 to Bool
         caller_entry = self._build_func_body(
             reg_types=[K_I32, 0, K_DYN], type_idx=2, findex=1, nregs=3,
             ops=[(25, [2, 0, 0]), (67, [])],
@@ -1154,7 +1154,7 @@ class TestDynamicAttribution:
         i32_type = build_type_primitive(K_I32)
         fun_type = bytes([K_FUN, 0]) + encode_varint(0)  # () -> I32
         type_blobs = [i32_type, fun_type]
-        # OCall1: dst=r2, findex=999 (OOB) — should not crash, call_result stays Dynamic
+        # OCall1: dst=r2, findex=999 (OOB) -- should not crash, call_result stays Dynamic
         entry = self._build_func_body(
             reg_types=[0, 0, 9], type_idx=1, findex=0, nregs=3,
             ops=[(25, [2, 999]), (67, [])],
@@ -1184,7 +1184,7 @@ class TestDynamicAttribution:
             reg_types=[K_I32], type_idx=2, findex=0, nregs=1, ops=[(67, [0])],
         )
         # Caller: calls func[0], then ORet with the result
-        # OCall1 dst=r2, ORet r2 — ORet sets sig.ret_type but call resolution should win
+        # OCall1 dst=r2, ORet r2 -- ORet sets sig.ret_type but call resolution should win
         caller_entry = self._build_func_body(
             reg_types=[K_I32, 0, K_DYN], type_idx=0, findex=1, nregs=3,
             ops=[(25, [2, 0, 0]), (67, [2])],
@@ -1498,7 +1498,7 @@ class TestDynamicAttribution:
         callee_entry = self._build_func_body(
             reg_types=[], type_idx=2, findex=0, nregs=0, ops=[(67, [0])],
         )
-        # r1 declared as Int (3), but callee returns Bool — Bool wins
+        # r1 declared as Int (3), but callee returns Bool -- Bool wins
         # OCall1: dst=r1, findex=0, arg=<unused>
         caller_entry = self._build_func_body(
             reg_types=[0, 0], type_idx=2, findex=1, nregs=2,
@@ -1517,9 +1517,9 @@ class TestDynamicAttribution:
         assert resolved == 'Bool', \
             f'Callee return Bool should win over declared Int, got {resolved}'
 
-    # ─────────────────────────────────────────────
+    # ---------------------------------------------
     # Call return unresolved classification tests
-    # ─────────────────────────────────────────────
+    # ---------------------------------------------
 
     def _get_classification(self, data: bytes, var_name: str) -> str:
         """Helper: decompile and return the call_return unresolved_category for a variable."""
@@ -1743,7 +1743,7 @@ class TestExprBuilder:
         return parser
 
     def test_omov(self):
-        """OMov r2, r1 → r2 = r1"""
+        """OMov r2, r1 -> r2 = r1"""
         instr = Instruction(0, 0, "OMov", [2, 1], 0, 2)
         parser = self._make_parser_with_func()
         reg_names = {1: "r1", 2: "r2"}
@@ -1757,7 +1757,7 @@ class TestExprBuilder:
         assert stmt.src.name == "r1"
 
     def test_oint(self):
-        """OInt r1, @0 → r1 = <int_pool_value>"""
+        """OInt r1, @0 -> r1 = <int_pool_value>"""
         instr = Instruction(0, 1, "OInt", [1, 0], 0, 3)
         parser = self._make_parser_with_func()
         # Add an int to the pool
@@ -1772,7 +1772,7 @@ class TestExprBuilder:
         assert stmt.src.value == 42
 
     def test_oadd(self):
-        """OAdd r3, r1, r2 → r3 = r1 + r2"""
+        """OAdd r3, r1, r2 -> r3 = r1 + r2"""
         instr = Instruction(0, 7, "OAdd", [3, 1, 2], 0, 3)
         reg_names = {1: "a", 2: "b", 3: "c"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1785,7 +1785,7 @@ class TestExprBuilder:
         assert str(stmt.src) == "a + b"
 
     def test_oret(self):
-        """ORet r1 → return r1"""
+        """ORet r1 -> return r1"""
         instr = Instruction(0, 67, "ORet", [1], 0, 1)
         reg_names = {1: "result"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1796,7 +1796,7 @@ class TestExprBuilder:
         assert stmt.src.name == "result"
 
     def test_oalloc(self):
-        """ONew r1 → r1 = new ?()"""
+        """ONew r1 -> r1 = new ?()"""
         instr = Instruction(0, 82, "ONew", [1], 0, 1)
         reg_names = {1: "obj"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1807,7 +1807,7 @@ class TestExprBuilder:
         assert stmt.src.op == "new"
 
     def test_ofield(self):
-        """OField r2, r1, 0 → r2 = obj.f0"""
+        """OField r2, r1, 0 -> r2 = obj.f0"""
         instr = Instruction(0, 38, "OField", [2, 1, 0], 0, 3)
         reg_names = {1: "obj", 2: "val"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1817,7 +1817,7 @@ class TestExprBuilder:
         assert stmt.src.op == "field_get"
 
     def test_onop(self):
-        """ONop → None (no statement)"""
+        """ONop -> None (no statement)"""
         instr = Instruction(0, 98, "ONop", [], 0, 1)
         reg_names = {}
         builder = ExprBuilder(None, None, reg_names)
@@ -1825,7 +1825,7 @@ class TestExprBuilder:
         assert stmt is None
 
     def test_ocall_method(self):
-        """OCallMethod args=[3, 1, 1, 2] → dst=r3, method_index=1, receiver=r2, no extra args."""
+        """OCallMethod args=[3, 1, 1, 2] -> dst=r3, method_index=1, receiver=r2, no extra args."""
         instr = Instruction(0, 30, "OCallMethod", [3, 1, 1, 2], 0, 4)
         reg_names = {1: "this", 2: "arg", 3: "ret"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1838,7 +1838,7 @@ class TestExprBuilder:
         assert str(stmt.src) == "arg.meth[1]()", f"Unexpected OCallMethod rendering: {stmt.src}"
 
     def test_bool_op(self):
-        """OBool r1, 1 → r1 = true"""
+        """OBool r1, 1 -> r1 = true"""
         instr = Instruction(0, 3, "OBool", [1, 1], 0, 2)
         reg_names = {1: "flag"}
         builder = ExprBuilder(None, None, reg_names)
@@ -1871,9 +1871,9 @@ class TestExprBuilderInstructionMapping:
     def test_onop_does_not_shift_following_statement(self):
         """C.4.1: ONop (None-returning) does not shift following statement."""
         instructions = [
-            self._make_test_instr(0, 98),        # ONop → None
-            self._make_assign_instr(1, 0, 42),    # OInt → assign
-            Instruction(2, 67, "ORet", [], 0, -1),  # ORet → return
+            self._make_test_instr(0, 98),        # ONop -> None
+            self._make_assign_instr(1, 0, 42),    # OInt -> assign
+            Instruction(2, 67, "ORet", [], 0, -1),  # ORet -> return
         ]
         parser = self._make_parser_with_2_funcs()
         reg_names = {0: "r0"}
@@ -1893,9 +1893,9 @@ class TestExprBuilderInstructionMapping:
         """C.4.2: label/goto statements remain attached to correct instruction index."""
         # Build: OLabel (op 66, 0 args), OInt (assign), ORet (return)
         instructions = [
-            Instruction(0, 66, "OLabel", [0], 1, -1),  # OLabel → label stmt
-            self._make_assign_instr(1, 0, 99),           # OInt → assign
-            Instruction(2, 67, "ORet", [], 0, -1),        # ORet → return
+            Instruction(0, 66, "OLabel", [0], 1, -1),  # OLabel -> label stmt
+            self._make_assign_instr(1, 0, 99),           # OInt -> assign
+            Instruction(2, 67, "ORet", [], 0, -1),        # ORet -> return
         ]
         parser = self._make_parser_with_2_funcs()
         reg_names = {0: "r0"}
@@ -2286,9 +2286,9 @@ class TestFullPipeline:
         # Let's build manually with proper args
 
         # Actually, build_opcode_sequence uses dummy zeros
-        # OInt args: dst, pool_idx → 0, 0
-        # OAdd args: dst, a, b → 0, 0, 0
-        # ORet args: src → 0
+        # OInt args: dst, pool_idx -> 0, 0
+        # OAdd args: dst, a, b -> 0, 0, 0
+        # ORet args: src -> 0
         data = _build_minimal_with_types(
             ntypes=1,
             type_blobs=[type_i32],
@@ -2506,7 +2506,7 @@ class TestMalformedIRRecovery:
         from hl_decompile import IRExpr
         expr = IRExpr(op="call", args=[])   # needs >= 1 arg, padded by __post_init__
         result = str(expr)
-        # Padded with '?', so should produce "?()" — doesn't crash
+        # Padded with '?', so should produce "?()" -- doesn't crash
         assert isinstance(result, str)
         assert len(result) > 0
 
@@ -2569,7 +2569,7 @@ class TestMalformedIRRecovery:
 
 
 # ============================================================================
-# Phase D — Control-Flow Structuring Truth
+# Phase D -- Control-Flow Structuring Truth
 # ============================================================================
 
 class TestControlFlowStructuring:
@@ -2577,13 +2577,13 @@ class TestControlFlowStructuring:
 
     def test_if_else_output_from_pipeline(self):
         """D.4.1: Decompiler emits 'if' statements for conditional jumps."""
-        # Build a function with: OJTrue r0 → else_target, ORet, else: ORet
+        # Build a function with: OJTrue r0 -> else_target, ORet, else: ORet
         # 3 types: VOID (ret), I32 (cond), I32 (else_label marker)
         type_void = build_type_primitive(K_VOID)
         type_i32 = build_type_primitive(K_I32)
         # Opcodes giving a conditional jump:
-        #   OTrue r0, r1 (op 20, 2 args — sets r0 from boolean r1)
-        #   OJTrue r0, offset +2 (op 44, 2 args — jump if true)
+        #   OTrue r0, r1 (op 20, 2 args -- sets r0 from boolean r1)
+        #   OJTrue r0, offset +2 (op 44, 2 args -- jump if true)
         #   ORet (op 67, 0 args)
         ops = build_opcode_sequence([20, 0, 1, 44, 0, 2, 67])
         data = _build_minimal_with_types(
@@ -2604,19 +2604,19 @@ class TestControlFlowStructuring:
     def test_while_loop_output(self):
         """D.5.1: Decompiler emits 'while' for simple natural loops."""
         # Build a function with a real while loop pattern:
-        #   header: OJTrue r0, +1 → body entry (instr 2)
-        #           OJAlways +3 → exit (instr 5)
+        #   header: OJTrue r0, +1 -> body entry (instr 2)
+        #           OJAlways +3 -> exit (instr 5)
         #   body:   OLabel (instr 2), OInt r1,42 (instr 3)
-        #           OJAlways -5 → header (instr 0)  [back-edge]
+        #           OJAlways -5 -> header (instr 0)  [back-edge]
         #   exit:   ORet (instr 5)
         type_void = build_type_primitive(K_VOID)
         type_i32 = build_type_primitive(K_I32)
         raw_ops = _build_opcode_with_args([
-            (44, [0, 1]),   # OJTrue r0, +1 → instr 2 (body)
-            (58, [3]),      # OJAlways +3 → instr 5 (exit)
+            (44, [0, 1]),   # OJTrue r0, +1 -> instr 2 (body)
+            (58, [3]),      # OJAlways +3 -> instr 5 (exit)
             (66, []),       # OLabel (body start)
             (1, [1, 42]),   # OAdd r1, 42 (body statement, nargs=2)
-            (58, [-5]),     # OJAlways -5 → instr 0 (header, back-edge)
+            (58, [-5]),     # OJAlways -5 -> instr 0 (header, back-edge)
             (67, []),       # ORet
         ])
         raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
@@ -2638,11 +2638,11 @@ class TestControlFlowStructuring:
         type_void = build_type_primitive(K_VOID)
         type_i32 = build_type_primitive(K_I32)
         raw_ops = _build_opcode_with_args([
-            (44, [0, 1]),   # OJTrue r0, +1 → body
-            (58, [3]),      # OJAlways +3 → exit
+            (44, [0, 1]),   # OJTrue r0, +1 -> body
+            (58, [3]),      # OJAlways +3 -> exit
             (66, []),       # OLabel (body start)
             (1, [1, 42]),   # OAdd r1, 42 (body, nargs=2)
-            (58, [-5]),     # OJAlways -5 → header (back-edge)
+            (58, [-5]),     # OJAlways -5 -> header (back-edge)
             (67, []),       # ORet
         ])
         raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
@@ -2672,11 +2672,11 @@ class TestControlFlowStructuring:
         type_void = build_type_primitive(K_VOID)
         type_i32 = build_type_primitive(K_I32)
         raw_ops = _build_opcode_with_args([
-            (44, [0, 1]),   # OJTrue r0, +1 → body
-            (58, [3]),      # OJAlways +3 → exit
+            (44, [0, 1]),   # OJTrue r0, +1 -> body
+            (58, [3]),      # OJAlways +3 -> exit
             (66, []),       # OLabel (body start)
             (1, [1, 42]),   # OAdd r1, 42
-            (58, [-5]),     # OJAlways -5 → header (back-edge)
+            (58, [-5]),     # OJAlways -5 -> header (back-edge)
             (67, []),       # ORet
         ])
         raw_fn = _build_function_entry_raw(0, 0, [K_I32, K_I32], raw_ops, nops=6)
@@ -2717,7 +2717,7 @@ class TestControlFlowStructuring:
         assert isinstance(fn.body, list)
 
 
-# ── B38 Switch Structuring Tests ──────────────────────────────────────
+# -- B38 Switch Structuring Tests --------------------------------------
 
 def _build_oswitch_opcodes(reg, ncases, case_offsets, default_offset,
                             before_ops, after_ops):
@@ -2736,7 +2736,7 @@ def _build_oswitch_opcodes(reg, ncases, case_offsets, default_offset,
         for a in args[:max(0, nargs)]:
             data += encode_varint(a)
 
-    # OSwitch (op 70): vararg — p1, p2, then case offsets + default
+    # OSwitch (op 70): vararg -- p1, p2, then case offsets + default
     data += bytes([70])
     data += encode_varint(reg)
     data += encode_varint(ncases)
@@ -3029,7 +3029,7 @@ class TestB40IfMergeDetection:
         return blocks
 
     def test_find_if_merge_simple_two_way(self):
-        """Simple if/else with common merge — merge detected."""
+        """Simple if/else with common merge -- merge detected."""
         from hl_disasm import _OPCODE_NAMES, BasicBlock
         from hl_decompile import ControlStructurer
 
@@ -3039,11 +3039,11 @@ class TestB40IfMergeDetection:
         #   B2 (else): OJAlways -> B3(merge)
         #   B3 (merge)
         insts = self._make_instructions([
-            (0, 48, [0, 1, 2], None),    # OJSLt  → B1 or B2
+            (0, 48, [0, 1, 2], None),    # OJSLt  -> B1 or B2
             (1, 1, [2, 100], None),       # then: OInt
-            (2, 58, [0], 3),              # OJAlways → @3
+            (2, 58, [0], 3),              # OJAlways -> @3
             (3, 1, [2, 200], None),       # else: OInt
-            (4, 58, [0], 3),              # OJAlways → @3
+            (4, 58, [0], 3),              # OJAlways -> @3
             (5, 67, [2], None),           # merge: ORet
         ])
 
@@ -3060,14 +3060,14 @@ class TestB40IfMergeDetection:
         assert merge == 3, f"Expected merge block 3, got {merge}"
 
     def test_find_if_merge_no_common(self):
-        """If/else where one branch returns — no merge, returns None."""
+        """If/else where one branch returns -- no merge, returns None."""
         from hl_disasm import BasicBlock
         from hl_decompile import ControlStructurer
 
         # CFG:
         #   B0 (header): OJSLt -> B1(then), B2(else)
-        #   B1 (then): ORet → NO successors
-        #   B2 (else): ORet → NO successors
+        #   B1 (then): ORet -> NO successors
+        #   B2 (else): ORet -> NO successors
         insts = self._make_instructions([
             (0, 48, [0, 1, 2], None),    # OJSLt
             (1, 67, [2], None),           # then: ORet (no merge!)
@@ -3086,7 +3086,7 @@ class TestB40IfMergeDetection:
         assert merge is None, f"Expected no merge, got {merge}"
 
     def test_find_if_merge_one_branch_returns(self):
-        """If/else where only one branch returns — no merge."""
+        """If/else where only one branch returns -- no merge."""
         from hl_disasm import BasicBlock
         from hl_decompile import ControlStructurer
 
@@ -3115,7 +3115,7 @@ class TestB40IfMergeDetection:
         assert merge is None, f"Expected no merge (branch returns), got {merge}"
 
     def test_if_else_controlflow_fixture_merge_after(self):
-        """ControlFlow.hl testIfElse — merge block placed after if/else, not inside."""
+        """ControlFlow.hl testIfElse -- merge block placed after if/else, not inside."""
         import io, os
         from hl_parser import HLParser
         from hl_disasm import Disassembler
@@ -3159,7 +3159,7 @@ class TestB40IfMergeDetection:
             then_block = outer_if.blocks[0]
             then_has_return = any(s.op == "return" for s in then_block)
             assert not then_has_return, (
-                "Then branch should NOT contain merge (return) — "
+                "Then branch should NOT contain merge (return) -- "
                 "merge must be outside if/else"
             )
 
@@ -4398,6 +4398,47 @@ class TestGotoNullcheckCleanup:
         assert inner[1].op == "return", \
             f'Second inner should be return, got {inner[1].op}'
 
+    def test_backward_goto_not_suppressed(self):
+        """Backward goto (label before goto) must NOT be suppressed."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            IRStmt("label", comment="10"),
+            IRStmt("assign", dst="r0", src="r1"),
+            IRStmt("goto", comment="@10"),  # backward jump
+        ]
+        result = _cleanup_goto_labels(body)
+        assert len(result) == 3, \
+            f'Expected 3 stmts (no change), got {len(result)}'
+        assert result[0].op == "label", \
+            f'First stmt should be label, got {result[0].op}'
+        assert result[2].op == "goto", \
+            f'Third stmt should be goto (not suppressed), got {result[2].op}'
+
+    def test_label_remains_if_used_by_other_goto(self):
+        """Label must remain if another goto still targets it after
+        forward-to-next-label goto is suppressed."""
+        from hl_decompile import _cleanup_goto_labels, IRStmt
+
+        body = [
+            # forward_to_next_label goto -- will be suppressed
+            IRStmt("goto", comment="@10"),
+            IRStmt("label", comment="10"),
+            IRStmt("assign", dst="r0", src="r1"),
+            # backward jump -- still needs label @10
+            IRStmt("goto", comment="@10"),
+        ]
+        result = _cleanup_goto_labels(body)
+        # Goto removed (position 0), label preserved (position 0 after removal)
+        assert len(result) == 3, \
+            f'Expected 3 stmts (forward goto removed, label preserved), got {len(result)}'
+        assert result[0].op == "label", \
+            f'First stmt should be label (preserved), got {result[0].op}'
+        assert result[0].comment == "10", \
+            f'Label comment should be "10", got {result[0].comment!r}'
+        assert result[2].op == "goto", \
+            f'Third stmt should be backward goto, got {result[2].op}'
+
     def test_onullcheck_structured_via_pipeline(self):
         """ONullCheck emits structured if-null-throw, not comment."""
         from hl_decompile import IRStmt
@@ -4529,7 +4570,7 @@ class TestIdentifierSanitization:
 
 
 class TestGotoChainResolution:
-    """B34: _resolve_goto_chains — resolve goto through pure OJAlways bridge blocks."""
+    """B34: _resolve_goto_chains -- resolve goto through pure OJAlways bridge blocks."""
 
     def _bridge_test(self, target_ip: int, bridge_target: int,
                      instructions) -> list:
@@ -4656,7 +4697,7 @@ class TestGotoChainResolution:
         from hl_disasm import Instruction, BasicBlock
         from hl_decompile import _resolve_goto_chains, IRStmt, IRConst
 
-        # instr[1] is OInt (not OJAlways) — has side effects
+        # instr[1] is OInt (not OJAlways) -- has side effects
         instructions = [
             Instruction(index=0, opcode=58, mnemonic="OJAlways", args=[1],
                         byte_offset=0, byte_size=2, jump_target=1),
@@ -4716,7 +4757,7 @@ class TestGotoChainResolution:
 
 
 class TestB19OCallRendering:
-    """B19: OCall0-4 _build_call fix — args[1] is a function index, not a register."""
+    """B19: OCall0-4 _build_call fix -- args[1] is a function index, not a register."""
 
     def test_ocall0_emits_fun_bracket_not_rprefix(self):
         """OCall0 with function index emits fun[{idx}], not r{idx}."""
@@ -4783,7 +4824,7 @@ class TestB19OCallRendering:
     def test_existing_b17_liveness_tests_still_pass(self):
         """Sanity: OCall0-4 _get_src_regs unchanged by B19 (only _build_call changed)."""
         from hl_decompile import RegisterLiveness, Instruction
-        # OCall0 with args[1]=999 — 999 is NOT a source register
+        # OCall0 with args[1]=999 -- 999 is NOT a source register
         instrs = [Instruction(0, 24, "OCall0", [0, 999], 0, 2)]
         uses = RegisterLiveness.compute_uses(instrs, nregs=5)
         assert 999 not in uses, "B17: OCall0 args[1] should not be a source register"
@@ -4797,7 +4838,7 @@ class TestB19OCallRendering:
 
 
 class TestB20OCallMethodRendering:
-    """B20: OCallMethod _build_method_call fix — args[1] is method_index, not receiver register."""
+    """B20: OCallMethod _build_method_call fix -- args[1] is method_index, not receiver register."""
 
     def test_ocall_method_renders_meth_bracket_not_raw_r(self):
         """OCallMethod with method_index > nregs produces meth[idx], not r{idx} in output."""
@@ -4823,7 +4864,7 @@ class TestB20OCallMethodRendering:
         builder = ExprBuilder(p, None, reg_names)
         stmt = builder._instr_to_stmt(instr, None)
         stmt_str = str(stmt)
-        # Must NOT contain r125 — method_index 125 should not appear as raw register
+        # Must NOT contain r125 -- method_index 125 should not appear as raw register
         assert "r125" not in stmt_str, f"OCallMethod should not emit r125 for method_index: {stmt_str}"
         # Must contain meth[125] as method name fallback
         assert "meth[125]" in stmt_str, f"OCallMethod should use meth[125] fallback: {stmt_str}"
@@ -4883,7 +4924,7 @@ class TestB20OCallMethodRendering:
         builder = ExprBuilder(p, None, reg_names)
         stmt = builder._instr_to_stmt(instr, None)
         stmt_str = str(stmt)
-        # Must NOT contain r0( — should be fun[0]( not r0(
+        # Must NOT contain r0( -- should be fun[0]( not r0(
         assert "r0(" not in stmt_str, f"OOB: OCall1 should emit fun[0], not r0: {stmt_str}"
         assert "fun[0]" in stmt_str or not ("r" in stmt_str and "(" in stmt_str), \
             f"OOB: fun[0] expected: {stmt_str}"
@@ -5186,7 +5227,7 @@ class TestB46FrontierCensus:
             if _scripts_dir in sys.path:
                 sys.path.remove(str(_scripts_dir))
 
-    # ── Top-level only (no nesting) ───────────────────────────────────
+    # -- Top-level only (no nesting) -----------------------------------
 
     def test_empty_body(self):
         c = self._run_census([])
@@ -5205,7 +5246,7 @@ class TestB46FrontierCensus:
         assert c["label_top_level"] == 1
         assert c["label_inside_structured"] == 0
 
-    # ── If nesting ────────────────────────────────────────────────────
+    # -- If nesting ----------------------------------------------------
 
     def test_goto_inside_if(self):
         c = self._run_census([
@@ -5241,7 +5282,7 @@ class TestB46FrontierCensus:
         assert c["goto_top_level"] == 1
         assert c["structured_if_count"] == 1
 
-    # ── While nesting ─────────────────────────────────────────────────
+    # -- While nesting -------------------------------------------------
 
     def test_goto_inside_while(self):
         c = self._run_census([
@@ -5252,7 +5293,7 @@ class TestB46FrontierCensus:
         assert c["goto_top_level"] == 0
         assert c["structured_while_count"] == 1
 
-    # ── For nesting ───────────────────────────────────────────────────
+    # -- For nesting ---------------------------------------------------
 
     def test_goto_inside_for(self):
         c = self._run_census([
@@ -5263,7 +5304,7 @@ class TestB46FrontierCensus:
         assert c["goto_top_level"] == 0
         assert c["structured_for_count"] == 1
 
-    # ── Switch nesting ────────────────────────────────────────────────
+    # -- Switch nesting ------------------------------------------------
 
     def test_goto_inside_switch(self):
         c = self._run_census([
@@ -5274,7 +5315,7 @@ class TestB46FrontierCensus:
         assert c["goto_top_level"] == 0
         assert c["structured_switch_count"] == 1
 
-    # ── Deep nesting ──────────────────────────────────────────────────
+    # -- Deep nesting --------------------------------------------------
 
     def test_nested_if_inside_while(self):
         """Goto inside if inside while -> goto_inside_if (primary context is 'if')."""
@@ -5306,7 +5347,7 @@ class TestB46FrontierCensus:
         assert c["structured_if_count"] == 2
         assert c["structured_while_count"] == 1
 
-    # ── Labels only ───────────────────────────────────────────────────
+    # -- Labels only ---------------------------------------------------
 
     def test_label_inside_structured_and_top(self):
         """Labels both inside and outside structured constructs."""
@@ -5318,7 +5359,7 @@ class TestB46FrontierCensus:
         assert c["label_inside_structured"] == 1
         assert c["label_top_level"] == 1
 
-    # ── Goto classification sum validation ───────────────────────────
+    # -- Goto classification sum validation ---------------------------
 
     def test_goto_classification_sums_to_total(self):
         """All goto subcounts should sum to goto_total."""
@@ -5405,7 +5446,7 @@ class TestB47CommonMergeCleanup:
         s.index = index
         return s
 
-    # ── Test 1: Terminal goto to common merge is suppressed ───────────
+    # -- Test 1: Terminal goto to common merge is suppressed -----------
 
     def test_terminal_goto_to_common_merge_suppressed(self):
         """B47: Then and else-branch terminal gotos to merge are suppressed."""
@@ -5467,7 +5508,7 @@ class TestB47CommonMergeCleanup:
             f"Expected 0 gotos (both suppressed), got {len(gotos)}: {[str(s) for s in gotos]}"
         )
 
-    # ── Test 2: Mid-branch goto remains unchanged ─────────────────────
+    # -- Test 2: Mid-branch goto remains unchanged ---------------------
 
     def test_mid_branch_goto_preserved(self):
         """B47: Goto in the middle of a branch is NOT suppressed."""
@@ -5525,7 +5566,7 @@ class TestB47CommonMergeCleanup:
             gotos = [s for s in body if s.op == "goto"]
             assert len(gotos) > 0, "Mid-branch goto should still exist in output"
 
-    # ── Test 3: Full pipeline with if-else merge ──────────────────────
+    # -- Test 3: Full pipeline with if-else merge ----------------------
 
     def test_decompile_simple_if_else_merge(self):
         """Full pipeline: if-else decompiles without crash."""
@@ -5567,3 +5608,433 @@ def _count_gotos_in_if(body):
                     for inner_block in s.blocks:
                         count += _count_gotos_in_if(inner_block)
     return count
+
+
+class TestB48TopLevelGotoClassification:
+    """B48: Top-level goto target pattern classification.
+
+    Tests verify that the B48 classifier correctly categorizes top-level
+    gotos by where their target label lives. These are synthetic IR tests
+    -- no decompiler behavior changes.
+    """
+
+    def _make_goto(self, comment="0"):
+        return IRStmt(op="goto", comment=comment)
+
+    def _ms(self, op: str = "assign", index: int = -1, comment: str = "",
+             blocks=None):
+        """Make an IRStmt with given op, index, and optional blocks."""
+        return IRStmt(op=op, index=index, comment=comment,
+                      blocks=blocks or [])
+
+    def _run_b48(self, body) -> list:
+        """Run B48 analysis on a single synthetic function.
+
+        Returns the list of per-goto records.
+        """
+        result = DecompileResult(functions={0: IRFunction(
+            name="test", findex=0, func_idx=0,
+            sig=FunctionSig("test", [], K_VOID, is_method=False, parent_class=None),
+            body=body, variables={}, raw_regnames={}, errors=[],
+        )}, classes={}, enums={}, orphan_functions=[], errors=[])
+        # Import B48 classifier
+        from pathlib import Path
+        import sys
+        _scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+        sys.path.insert(0, str(_scripts_dir))
+        try:
+            from scripts.b48_analyze_top_level_gotos import analyze_top_level_gotos
+            _, records = analyze_top_level_gotos(result)
+            return records
+        finally:
+            if _scripts_dir in sys.path:
+                sys.path.remove(str(_scripts_dir))
+
+    # -- Tests -------------------------------------------------------
+
+    def test_empty_body_no_gotos(self):
+        """Empty body produces no goto records."""
+        records = self._run_b48([])
+        assert len(records) == 0, f"Expected 0 records, got {len(records)}"
+
+    def test_top_level_goto_forward_to_next(self):
+        """Goto whose target is the next statement's index -> forward_to_next_label."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("3"),
+            self._ms("assign", index=3),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "forward_to_next_label"
+        assert records[0]["goto_comment"] == "3"
+
+    def test_top_level_goto_forward_to_merge(self):
+        """Goto targeting a label a few positions ahead -> forward_to_common_merge."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("5"),
+            self._ms("assign", index=3),
+            self._ms("expr", index=4),
+            self._ms("assign", index=5),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "forward_to_common_merge"
+        assert records[0]["goto_comment"] == "5"
+
+    def test_top_level_goto_backward_jump(self):
+        """Goto targeting a label before it -> backward_jump."""
+        body = [
+            self._ms("assign", index=1),
+            # Label at index 2 (before the goto)
+            self._ms("assign", index=2),
+            self._make_goto("2"),
+            self._ms("assign", index=4),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "backward_jump"
+        assert records[0]["goto_comment"] == "2"
+
+    def test_top_level_goto_unreachable(self):
+        """Goto after a return -> unreachable_or_dead_block."""
+        body = [
+            self._ms("return", index=1),
+            self._make_goto("3"),
+            self._ms("assign", index=3),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "unreachable_or_dead_block"
+
+    def test_top_level_goto_to_if_target(self):
+        """Goto targeting a label inside an if block -> to_if_target."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("4"),
+            self._ms("if", index=3, blocks=[
+                [self._ms("assign", index=4)],  # then-branch, target inside
+            ]),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "to_if_target"
+
+    def test_top_level_goto_to_loop_target(self):
+        """Goto targeting a label inside a while block -> to_loop_target."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("4"),
+            self._ms("while", index=3, blocks=[
+                [self._ms("assign", index=4)],  # loop body, target inside
+            ]),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "to_loop_target"
+
+    def test_top_level_goto_label_missing(self):
+        """Goto with no matching target in body -> label_target_missing (should not happen
+        with correct index-based matching, but test the fallback)."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("999"),
+            self._ms("assign", index=3),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        # With correct index-based matching, the target @999 won't be found
+        # in the body (no statement has index 999), so it should be
+        # label_target_missing
+        assert records[0]["classification"] == "label_target_missing"
+        assert records[0]["goto_comment"] == "999"
+
+    def test_top_level_goto_return_region(self):
+        """Goto targeting a label near a return -> return_region_jump."""
+        body = [
+            self._ms("assign", index=1),
+            self._make_goto("5"),
+            self._ms("assign", index=3),
+            self._ms("assign", index=4),
+            self._ms("assign", index=5),
+            self._ms("return", index=6),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 1
+        assert records[0]["classification"] == "return_region_jump"
+        assert records[0]["goto_comment"] == "5"
+
+    def test_multiple_top_level_gotos_mixed(self):
+        """Multiple top-level gotos with different patterns."""
+        body = [
+            # Goto 1: forward_to_next_label (index 10 -> next is 11)
+            self._ms("assign", index=9),
+            self._make_goto("12"),
+            self._ms("assign", index=12),
+            # Goto 2: forward_to_common_merge (index 13 -> 16)
+            self._make_goto("17"),
+            self._ms("assign", index=14),
+            self._ms("expr", index=15),
+            self._ms("assign", index=16),
+            self._ms("assign", index=17),
+            # Goto 3: backward_jump (back to index 12)
+            self._make_goto("12"),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 3
+
+        cats = {r["classification"] for r in records}
+        assert "forward_to_next_label" in cats, f"Missing forward_to_next, got {cats}"
+        assert "forward_to_common_merge" in cats, f"Missing forward_to_merge, got {cats}"
+        assert "backward_jump" in cats, f"Missing backward_jump, got {cats}"
+
+        # Check specific records
+        for rec in records:
+            if rec["goto_comment"] == "12" and rec["classification"] == "forward_to_next_label":
+                pass
+            elif rec["goto_comment"] == "17" and rec["classification"] == "forward_to_common_merge":
+                pass
+            elif rec["goto_comment"] == "12" and rec["classification"] == "backward_jump":
+                pass
+            else:
+                assert False, f"Unexpected record: {rec}"
+
+    def test_goto_not_collected_inside_if(self):
+        """Gotos inside an if block should NOT be collected as top-level."""
+        body = [
+            self._ms("if", index=1, blocks=[
+                [self._make_goto("10")],
+            ]),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 0, (
+            f"Expected 0 top-level goto records for goto inside if, "
+            f"got {len(records)}: {[r['classification'] for r in records]}"
+        )
+
+    def test_goto_not_collected_inside_while(self):
+        """Gotos inside a while block should NOT be collected as top-level."""
+        body = [
+            self._ms("while", index=1, blocks=[
+                [self._make_goto("10")],
+            ]),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 0
+
+    def test_goto_not_collected_inside_switch(self):
+        """Gotos inside a switch block should NOT be collected as top-level."""
+        body = [
+            self._ms("switch", index=1, blocks=[
+                [self._make_goto("10")],
+            ]),
+        ]
+        records = self._run_b48(body)
+        assert len(records) == 0
+
+
+class TestB50BackwardJumpClassification:
+    """B50: Backward-jump / loop frontier classification.
+
+    Tests verify that the B50 classifier correctly categorizes top-level
+    backward-position gotos into loop/control-flow buckets and properly
+    distinguishes IR-position artifacts from true bytecode back-edges.
+    These are synthetic IR tests -- no decompiler behavior changes.
+    """
+
+    def _make_goto(self, comment="0", index=-1):
+        stmt = IRStmt(op="goto", comment=comment)
+        if index >= 0:
+            stmt.index = index
+        return stmt
+
+    def _ms(self, op: str = "assign", index: int = -1, comment: str = "",
+            blocks=None):
+        """Make an IRStmt with given op, index, and optional blocks."""
+        return IRStmt(op=op, index=index, comment=comment,
+                      blocks=blocks or [])
+
+    def _classify_b50(self, body):
+        """Run B50 analysis on a single synthetic function body.
+
+        Creates a minimal DecompileResult with one function, then runs
+        the B50 classifier on it.
+
+        Returns:
+            (aggregate, records) tuple from the B50 analysis.
+        """
+        from hl_decompile import (
+            DecompileResult, IRFunction, FunctionSig, IRStmt,
+        )
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from pathlib import Path
+        import sys
+
+        ir_fn = IRFunction(
+            name="test", findex=0, func_idx=0,
+            sig=FunctionSig("test", [], 0, is_method=False, parent_class=None),
+            body=body, variables={}, raw_regnames={}, errors=[],
+        )
+        result = DecompileResult(
+            functions={0: ir_fn},
+            classes={}, enums={}, orphan_functions=[], errors=[],
+        )
+
+        # Create minimal parser (empty -- no real instruction data)
+        parser = HLParser.__new__(HLParser)
+        parser.filepath = ""
+        parser._logger = None
+        parser.version = 4
+        parser.functions = []
+        parser.ints = []
+        parser.floats = []
+        parser.strings = []
+        parser.types = []
+        parser.globals = []
+        parser.natives = []
+        parser.debug_files = []
+        parser.constants = []
+
+        disasm = Disassembler(parser)
+        decomp = Decompiler.__new__(Decompiler)
+        decomp.parser = parser
+        decomp.disasm = disasm
+        decomp.logger = None
+        decomp.type_resolver = None
+
+        _scripts_dir = Path(__file__).resolve().parent.parent / "scripts"
+        sys.path.insert(0, str(_scripts_dir))
+        try:
+            from scripts.b50_analyze_backward_jumps import analyze_backward_jumps
+            return analyze_backward_jumps(result, parser, disasm)
+        finally:
+            if _scripts_dir in sys.path:
+                sys.path.remove(str(_scripts_dir))
+
+    # -- Tests -------------------------------------------------------
+
+    def test_empty_body_no_records(self):
+        """Empty body produces no backward jump records."""
+        agg, records = self._classify_b50([])
+        assert agg["total_backward_jumps"] == 0
+        assert len(records) == 0
+
+    def test_forward_goto_not_backward(self):
+        """Forward goto (label after goto in body) is NOT backward_jump."""
+        body = [
+            self._make_goto("5", index=1),
+            self._ms("assign", index=3),
+            self._ms("assign", index=5),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0, (
+            f"Expected 0 for forward goto, got {agg['total_backward_jumps']}"
+        )
+
+    def test_ir_position_artifact_classification(self):
+        """Goto backward in body, forward in bytecode -> ir_position_artifact."""
+        body = [
+            self._ms("assign", index=10),
+            self._make_goto("10", index=20),
+            self._ms("return", index=30),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 1
+        rec = records[0]
+        assert rec["classification"] == "ir_position_artifact", (
+            f"Expected ir_position_artifact, got {rec['classification']}"
+        )
+
+    def test_missing_target_not_collected(self):
+        """Goto with nonexistent target is not in backward_jump category."""
+        body = [
+            self._make_goto("99", index=5),
+            self._ms("assign", index=3),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0
+
+    def test_multi_goto_backward_same_target(self):
+        """Multiple gotos backward to same label are all classified."""
+        body = [
+            self._ms("assign", index=5),
+            self._make_goto("5", index=10),
+            self._make_goto("5", index=15),
+            self._ms("return", index=20),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 2, (
+            f"Expected 2 backward jumps, got {agg['total_backward_jumps']}"
+        )
+        for rec in records:
+            assert rec["classification"] == "ir_position_artifact"
+
+    def test_goto_inside_if_not_top_level(self):
+        """Goto inside if block is NOT a top-level backward jump."""
+        body = [
+            self._ms("if", index=1, blocks=[
+                [
+                    self._ms("assign", index=5),
+                    self._make_goto("5", index=10),
+                ]
+            ]),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0
+
+    def test_goto_inside_while_not_top_level(self):
+        """Goto inside while block is NOT a top-level backward jump."""
+        body = [
+            self._ms("while", index=1, blocks=[
+                [
+                    self._ms("assign", index=5),
+                    self._make_goto("5", index=10),
+                ]
+            ]),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0
+
+    def test_aggregate_structure(self):
+        """B50 aggregate has expected keys."""
+        body = [
+            self._ms("assign", index=3),
+            self._make_goto("3", index=10),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 1
+        assert "category_breakdown" in agg
+        assert "examples_by_category" in agg
+        assert len(agg["category_breakdown"]) >= 1
+
+    def test_forward_to_next_not_backward(self):
+        """Forward_to_next_label goto is NOT classified as backward."""
+        body = [
+            self._make_goto("3", index=1),
+            self._ms("assign", index=3),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0
+
+    def test_unreachable_not_backward(self):
+        """Unreachable goto is NOT classified as backward."""
+        body = [
+            self._ms("return", index=1),
+            self._make_goto("5", index=3),
+            self._ms("assign", index=5),
+        ]
+        agg, records = self._classify_b50(body)
+        assert agg["total_backward_jumps"] == 0
+
+    def test_forward_to_merge_not_backward(self):
+        """Forward goto to merge point is NOT classified as backward."""
+        body = [
+            self._make_goto("5", index=1),
+            self._ms("assign", index=3),
+            self._ms("assign", index=5),
+        ]
+        agg, records = self._classify_b50(body)
+        # Goto at position 0, label at position 2 -- forward
+        assert agg["total_backward_jumps"] == 0
