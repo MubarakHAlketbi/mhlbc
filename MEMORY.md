@@ -8,11 +8,11 @@
 
 | Field | Value |
 |-------|-------|
-| Session | **51** |
+| Session | **52** |
 | Date | **June 2, 2026** |
 | Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `6539e91` (pushed -- B51 diagnostic complete) |
+| HEAD | `3c5da08` (Session 51 close -- MEMORY.md HEAD update) |
 | Tests | **730 passed, 4 skipped** |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
 | Track B | 200/500 sampled (seed=42), 0 errors |
@@ -244,6 +244,9 @@ Diagnostic script `scripts/b51_analyze_forward_to_common_merge.py` classifies ev
 - **B51 does NOT classify other top-level buckets:** to_if_target, return_region_jump, non-immediate forward_to_next_label, backward_jump (B50 already addressed as IR-position artifact)
 - Recommendation: fallthrough_target and jump_chain are provably safe for suppression; multi_pred_merge needs individual review. B52 should target only fallthrough_target suppression + jump_chain collapse.
 HEAD: e87223b (clean). 730 passed, 4 skipped (+8). Track A: 9/9, 0 errors. Track B 200/500: 0 errors. ASCII safety: all reports/tests 0 non-ASCII.
+
+### Session 52 -- June 2, 2026 (deepseek-v4-flash)
+**Session 52 bootstrap.** No new B-milestone. Previous B51 concluded fallthrough_target + jump_chain are provably safe for suppression (Recommended B52). HEAD moved to 3c5da08 (Session 51 close -- MEMORY.md HEAD update to 6539e91). Tests: 730 passed, 4 skipped (unchanged). Track A 9/9 locked. Track B 0 errors. State: same as Session 51 close. Awaiting instructions.
 
 ### B46 Detail -- ControlStructurer Frontier Census (Session 49)
 **Problem:** The existing `analyze_structured_flow` only counted top-level IR statements and returned `unstructured_goto_fallback=not_measured`. There was no IR-context breakdown of where goto/label comments actually live in the IR tree -- inside structured if/while blocks vs top-level fallbacks.
