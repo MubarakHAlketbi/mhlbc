@@ -8,15 +8,15 @@
 
 | Field | Value |
 |-------|-------|
-| Session | **50** |
+| Session | **51** |
 | Date | **June 2, 2026** |
 | Model | deepseek/deepseek-v4-flash via OpenRouter |
 | Branch | `main` |
-| HEAD | `966cbce` (clean -- B49/B50 complete) |
-| Tests | **722 passed, 4 skipped** |
+| HEAD | `e87223b` (clean -- B51 diagnostic complete) |
+| Tests | **730 passed, 4 skipped** |
 | Track A | 9/9, 0 errors, 0 unknown opcodes, zero frontier **LOCKED** |
 | Track B | 200/500 sampled (seed=42), 0 errors |
-| Next task | Diagnose `forward_to_common_merge` (B51) |
+| Next task | Evaluate B52: narrow behavior milestone targeting fallthrough_target suppression + jump_chain collapse |
 
 ### Current Accepted Frontier
 
@@ -231,6 +231,20 @@ Diagnostic-only analysis of all top-level B48 `backward_jump` gotos using instru
 Artifacts: `scripts/b50_analyze_backward_jumps.py`, `decompiler_quality_report/b50_backward_jump_analysis_*.*`. 11 new tests (TestB50BackwardJumpClassification).
 Validation: 722 passed, 4 skipped (+11). Track A: 9/9, 0 errors. Track B 200: 0 errors. Track B 500: 0 errors. ASCII safety: all reports/tests 0 non-ASCII.
 
+### Session 51 -- June 2, 2026 (deepseek-v4-flash)
+**B51: Forward-to-common-merge CFG Merge Evidence Analysis -- COMPLETE (diagnostic-only).**
+**No behavior changes.** No ControlStructurer, goto suppression, jump-chain collapse, HaxeWriter, or field/type recovery work.
+Diagnostic script `scripts/b51_analyze_forward_to_common_merge.py` classifies every B48 `forward_to_common_merge` top-level goto by CFG-level merge evidence. 8 buckets: two_way_merge, multi_pred_merge, fallthrough_target, jump_chain, single_pred_target, target_not_in_cfg, incomplete_evidence, unknown. Integrated into quality report pipeline (run_track_a, run_track_b, write_report). 8 synthetic IR tests (TestB51ForwardMergeClassification) covering helper functions and fixture-backed end-to-end validation. JSON and MD artifacts in `decompiler_quality_report/b51_forward_merge_analysis_*`.
+**Scopes analyzed: Track A, Track B sample=200, Track B sample=500.**
+**Key findings (all scopes):**
+- Track A 270: fallthrough_target 144 (53.3%), multi_pred_merge 72 (26.7%), jump_chain 54 (20.0%)
+- Track B 200: 51: fallthrough_target 35 (68.6%), multi_pred_merge 9 (17.6%), jump_chain 7 (13.7%)
+- Track B 500: 119: fallthrough_target 86 (72.3%), multi_pred_merge 23 (19.3%), jump_chain 10 (8.4%)
+- Within the B48 forward_to_common_merge bucket: zero two_way_merge, zero single_pred_target, zero incomplete_evidence across all scopes
+- **B51 does NOT classify other top-level buckets:** to_if_target, return_region_jump, non-immediate forward_to_next_label, backward_jump (B50 already addressed as IR-position artifact)
+- Recommendation: fallthrough_target and jump_chain are provably safe for suppression; multi_pred_merge needs individual review. B52 should target only fallthrough_target suppression + jump_chain collapse.
+HEAD: e87223b (clean). 730 passed, 4 skipped (+8). Track A: 9/9, 0 errors. Track B 200/500: 0 errors. ASCII safety: all reports/tests 0 non-ASCII.
+
 ### B46 Detail -- ControlStructurer Frontier Census (Session 49)
 **Problem:** The existing `analyze_structured_flow` only counted top-level IR statements and returned `unstructured_goto_fallback=not_measured`. There was no IR-context breakdown of where goto/label comments actually live in the IR tree -- inside structured if/while blocks vs top-level fallbacks.
 
@@ -424,6 +438,9 @@ Top-level gotos unchanged (1519 Track A, 236 Track B 200) -- correct because B47
 
 **B50 Backward-Jump / Loop Frontier Analysis (Session 50):** Standalone diagnostic script `scripts/b50_analyze_backward_jumps.py` analyzes every B48 top-level `backward_jump` case using instruction/CFG evidence. 10-bucket classifier (ir_position_artifact, simple_while_backedge_candidate, do_while_or_post_test_candidate, continue_to_header_candidate, multi_latch_loop, nested_loop_boundary, switch_inside_loop_boundary, try_catch_or_trap_boundary, irreducible_backedge, missing_or_ambiguous_header). Integrated into quality report pipeline. **Key finding: 100% IR-position artifacts.** All B48 backward_jump cases (Track A: 2, Track B 200: 73, Track B 500: 104) are forward in the bytecode instruction stream with target after source instruction index -- they appear "backward" only because the target label appears earlier in the IR body statement list. Zero true bytecode backward jumps exist. B41 loop detection effectively captures real loop back-edges. B51 recommendation: shift to `forward_to_common_merge` (Track A: 270, Track B 200: 51, Track B 500: 119). Artifacts: `scripts/b50_analyze_backward_jumps.py`, `decompiler_quality_report/b50_backward_jump_analysis_*.*`, `tests/test_decompile.py` (TestB50BackwardJumpClassification, 11 tests). Validation: 722 passed, 4 skipped. Track A 9/9, Track B 200/500: 0 errors.
 
+**B51 Forward-to-Common-Merge CFG Merge Evidence Analysis (Session 51):** Diagnostic-only. No behavior changes. Diagnostic script `scripts/b51_analyze_forward_to_common_merge.py` classifies every B48 `forward_to_common_merge` top-level goto by CFG-level merge evidence. 8 buckets: two_way_merge, multi_pred_merge, fallthrough_target, jump_chain, single_pred_target, target_not_in_cfg, incomplete_evidence, unknown. Integrated into quality report pipeline. **Scopes:** Track A (270), Track B sample=200 (51), Track B sample=500 (119). **Key findings:** Zero two_way_merge (B40/B47 captures clean if/else merges). Zero single_pred_target (within forward_to_common_merge bucket). Zero incomplete/unknown (100% CFG coverage). **B51 does NOT classify other top-level buckets:** to_if_target, return_region_jump, non-immediate forward_to_next_label, backward_jump (B50). Recommendation: fallthrough_target + jump_chain provably safe for suppression; multi_pred_merge needs individual review. B52 recommendation: narrow behavior milestone targeting fallthrough_target suppression + jump_chain collapse. Artifacts: `scripts/b51_analyze_forward_to_common_merge.py`, `decompiler_quality_report/b51_forward_merge_analysis_*.*`, `tests/test_decompile.py` (TestB51ForwardMergeClassification, 8 tests). Validation: 730 passed, 4 skipped. Track A 9/9, Track B 200/500: 0 errors. ASCII safety: all artifacts 0 non-ASCII.
+**Scope note:** `decompiler_quality_report/report.md` includes Track B sample=200 B51 data (default pipeline sample). Track B sample=500 B51 data is in separate canonical standalone artifacts (`b51_forward_merge_analysis_track_b_sample_500.*`). Same scope design as B48/B50.
+
 ### Dynamic / Null / Call-Return (B15, B22, B23, B31)
 
 **B15 Dynamic Type References:** Cross-referenced 204 attributions against all buckets. 0 unique. Rollup metric only.
@@ -482,10 +499,19 @@ Subcategory summary: 15 virtual_unsupported, 8 fun_or_method_type, 4 declared_dy
 
 ### Appendix C: Regeneration Commands
 
+**Scope note:** `report.md` generated by `decompiler_quality_report.py` includes Track A (all fixtures) + Track B at the `--sample` value passed (default 200). Track B sample=500 B51 data lives in separate standalone artifacts (`b51_forward_merge_analysis_track_b_sample_500.*`) generated by the B51 standalone script. This is the same pattern as B48 and B50 — the main report uses one sample size, standalone artifacts provide other scopes.
+
 ```bash
 # Quality report (Track B, 200 sampled funcs, seed=42)
 uv run python3 scripts/decompiler_quality_report.py --track B \
     --farever workspace/Farever/hlboot.dat --sample 200
+
+# B51: all three scopes (standalone artifacts)
+uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track A
+uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track B \
+    --farever workspace/Farever/hlboot.dat --sample 200
+uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track B \
+    --farever workspace/Farever/hlboot.dat --sample 500
 
 # B23 null detail extraction
 uv run python3 scripts/extract_b23_null_detail.py workspace/Farever/hlboot.dat
@@ -516,4 +542,5 @@ uv run python3 scripts/b36_analyze_field_names.py       # ~80s
 | `b43_field_layout_audit.py` | B43 | Deep field-layout audit: K_METHOD discovery, proto/binding range analysis |
 | `b47_analyze_if_gotos.py` | B47 | Goto-inside-if target pattern classification and common-merge detection |
 | `b48_analyze_top_level_gotos.py` | B48 | Top-level goto target pattern classification (7 evidence-backed buckets, Track A/B) |
-| `b50_analyze_backward_jumps.py` | B50 | Backward-jump / loop frontier analysis (10-bucket instruction/CFG classifier) |
+|| `b50_analyze_backward_jumps.py` | B50 | Backward-jump / loop frontier analysis (10-bucket instruction/CFG classifier) |
+| `b51_analyze_forward_to_common_merge.py` | B51 | Forward-to-common-merge CFG merge evidence analysis (8-bucket merge classifier) |

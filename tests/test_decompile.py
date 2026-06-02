@@ -6038,3 +6038,177 @@ class TestB50BackwardJumpClassification:
         agg, records = self._classify_b50(body)
         # Goto at position 0, label at position 2 -- forward
         assert agg["total_backward_jumps"] == 0
+
+
+class TestB51ForwardMergeClassification:
+    """B51: Forward-to-common-merge CFG merge evidence classification.
+
+    Tests verify that the B51 classifier correctly categorizes
+    forward_to_common_merge gotos by CFG-level merge evidence.
+    """
+
+    # -- Helper: make a synthetic BasicBlock ---------------------------
+
+    def _make_block(self, blk_id: int, start_ip: int, end_ip: int,
+                    succs=None, preds=None):
+        """Make a synthetic BasicBlock with given properties."""
+        from hl_disasm import BasicBlock
+        from hl_decompile import IRStmt
+        return BasicBlock(
+            id=blk_id,
+            start_ip=start_ip,
+            end_ip=end_ip,
+            instructions=[],
+            successors=succs or [],
+            predecessors=preds or [],
+        )
+
+    # -- Tests: helper functions ---------------------------------------
+
+    def test_block_containing_ip_found(self):
+        """_block_containing_ip finds the block containing an instruction index."""
+        from scripts.b51_analyze_forward_to_common_merge import _block_containing_ip
+        cfg = [
+            self._make_block(0, 0, 5),
+            self._make_block(1, 5, 10),
+            self._make_block(2, 10, 15),
+        ]
+        blk = _block_containing_ip(cfg, 3)
+        assert blk is not None
+        assert blk.id == 0
+        blk = _block_containing_ip(cfg, 7)
+        assert blk is not None
+        assert blk.id == 1
+        blk = _block_containing_ip(cfg, 14)
+        assert blk is not None
+        assert blk.id == 2
+
+    def test_block_containing_ip_not_found(self):
+        """_block_containing_ip returns None when index is out of range."""
+        from scripts.b51_analyze_forward_to_common_merge import _block_containing_ip
+        cfg = [
+            self._make_block(0, 0, 5),
+            self._make_block(1, 10, 15),
+        ]
+        blk = _block_containing_ip(cfg, 7)  # gap
+        assert blk is None
+        blk = _block_containing_ip(cfg, 99)  # out of range
+        assert blk is None
+
+    def test_block_by_id_found(self):
+        """_block_by_id returns the block with matching id."""
+        from scripts.b51_analyze_forward_to_common_merge import _block_by_id
+        cfg = [
+            self._make_block(5, 0, 3),
+            self._make_block(10, 3, 6),
+        ]
+        blk = _block_by_id(cfg, 5)
+        assert blk is not None
+        assert blk.start_ip == 0
+        blk = _block_by_id(cfg, 10)
+        assert blk is not None
+        assert blk.start_ip == 3
+
+    def test_block_by_id_not_found(self):
+        """_block_by_id returns None for nonexistent id."""
+        from scripts.b51_analyze_forward_to_common_merge import _block_by_id
+        cfg = [
+            self._make_block(0, 0, 3),
+        ]
+        blk = _block_by_id(cfg, 99)
+        assert blk is None
+
+    # -- Tests: fixture-backed end-to-end ------------------------------
+
+    def _run_b51_on_fixtures(self):
+        """Helper: run B51 analysis on all Track A fixtures.
+
+        Returns the combined aggregate dict and all per-goto records.
+        """
+        from pathlib import Path
+        import sys
+        _fixtures_dir = Path(__file__).resolve().parent / "fixtures" / "hl"
+        from scripts.decompiler_quality_report import _parse, _decompile
+
+        all_records = []
+        from collections import Counter
+        all_cat = Counter()
+
+        for fpath in sorted(_fixtures_dir.glob("*.hl")):
+            parser = _parse(str(fpath))
+            result, disasm = _decompile(parser)
+            from scripts.b51_analyze_forward_to_common_merge import (
+                analyze_forward_to_common_merge,
+            )
+            agg, recs = analyze_forward_to_common_merge(result, parser, disasm)
+            for r in recs:
+                all_cat[r.get("classification", "unknown")] += 1
+            all_records.extend(recs)
+
+        return all_cat, all_records
+
+    def test_total_forward_merge_matches_b48_baseline(self):
+        """Total forward_to_common_merge gotos matches B48 baseline (270)."""
+        all_cat, all_records = self._run_b51_on_fixtures()
+        total = sum(all_cat.values())
+        assert total == 270, (
+            f"Expected 270 forward_to_common_merge gotos, got {total}"
+        )
+
+    def test_no_unknown_or_incomplete(self):
+        """All forward_to_common_merge cases get a meaningful classification."""
+        all_cat, all_records = self._run_b51_on_fixtures()
+        unknown = all_cat.get("unknown", 0)
+        incomplete = all_cat.get("incomplete_evidence", 0)
+        target_not_in_cfg = all_cat.get("target_not_in_cfg", 0)
+        assert unknown == 0, f"Expected 0 unknown, got {unknown}"
+        assert incomplete == 0, f"Expected 0 incomplete_evidence, got {incomplete}"
+        assert target_not_in_cfg == 0, (
+            f"Expected 0 target_not_in_cfg, got {target_not_in_cfg}"
+        )
+
+    def test_all_buckets_have_cases(self):
+        """All active buckets have at least some cases in Track A.
+
+        Note: two_way_merge and single_pred_target have 0 cases because
+        B40/B47 already captures clean if/else merges, and all forward
+        gotos in standard fixtures reach targets that are reachable via
+        other paths.
+        """
+        all_cat, all_records = self._run_b51_on_fixtures()
+        active_buckets = [
+            "multi_pred_merge",
+            "fallthrough_target", "jump_chain",
+        ]
+        for bucket in active_buckets:
+            count = all_cat.get(bucket, 0)
+            assert count > 0, (
+                f"Bucket '{bucket}' has 0 cases -- expected at least 1"
+            )
+
+    def test_breakdown_reasonable(self):
+        """Bucket proportions are reasonable for standard fixtures.
+
+        fallthrough_target should be the largest bucket (many gotos are
+        structurally redundant in standard fixtures). multi_pred_merge
+        and jump_chain should each have a significant share.
+        """
+        all_cat, all_records = self._run_b51_on_fixtures()
+        total = sum(all_cat.values())
+        ft = all_cat.get("fallthrough_target", 0)
+        mp = all_cat.get("multi_pred_merge", 0)
+        jc = all_cat.get("jump_chain", 0)
+        ft_pct = 100.0 * ft / max(total, 1)
+        mp_pct = 100.0 * mp / max(total, 1)
+        jc_pct = 100.0 * jc / max(total, 1)
+        # fallthrough should dominate
+        assert ft_pct > 20.0, (
+            f"Expected fallthrough_target >20%%, got {ft_pct:.1f}%"
+        )
+        # multi_pred_merge and jump_chain should both be significant
+        assert mp_pct > 5.0, (
+            f"Expected multi_pred_merge >5%%, got {mp_pct:.1f}%"
+        )
+        assert jc_pct > 5.0, (
+            f"Expected jump_chain >5%%, got {jc_pct:.1f}%"
+        )

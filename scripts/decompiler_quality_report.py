@@ -1286,6 +1286,13 @@ def run_track_a() -> Dict[str, Any]:
         b50_agg, _ = analyze_backward_jumps(result, parser, disasm)
         census_metrics["b50_backward_jump_analysis"] = b50_agg
 
+        # B51: Forward-to-common-merge CFG merge evidence analysis
+        from scripts.b51_analyze_forward_to_common_merge import (
+            analyze_forward_to_common_merge,
+        )
+        b51_agg, _ = analyze_forward_to_common_merge(result, parser, disasm)
+        census_metrics["b51_forward_merge_analysis"] = b51_agg
+
         file_metrics = {
             "function_level": func_metrics,
             "class_level": cls_metrics,
@@ -1426,6 +1433,13 @@ def run_track_b(farever_path: str, sample_size: int = 200) -> Dict[str, Any]:
     from scripts.b50_analyze_backward_jumps import analyze_backward_jumps
     b50_agg, _ = analyze_backward_jumps(result, parser, disasm)
     inventory["b50_backward_jump_analysis"] = b50_agg
+
+    # B51: Forward-to-common-merge CFG merge evidence analysis
+    from scripts.b51_analyze_forward_to_common_merge import (
+        analyze_forward_to_common_merge,
+    )
+    b51_agg, _ = analyze_forward_to_common_merge(result, parser, disasm)
+    inventory["b51_forward_merge_analysis"] = b51_agg
 
     # Dynamic attribution
     if result:
@@ -3026,7 +3040,7 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             total_while_all += sf.get('structured_while_count', 0)
             fc = fd.get('frontier_census', {})
             for k, v in fc.items():
-                if k in ("b48_top_level_goto_analysis", "b50_backward_jump_analysis"):
+                if k in ("b48_top_level_goto_analysis", "b50_backward_jump_analysis", "b51_forward_merge_analysis"):
                     continue
                 frontier_census_agg[k] += v
 
@@ -4955,6 +4969,136 @@ def write_report(track_a: Dict[str, Any], track_b: Optional[Dict[str, Any]],
             f"(Track A: {fwd_merge_tot}, Track B: {tb_fwd_merge}), which represents "
             "genuine forward jumps past merge blocks that the if-structurer did not "
             "capture. Each case needs CFG-level merge evidence before suppression."
+        )
+
+    # ---- B51 Forward-to-Common-Merge CFG Merge Evidence Analysis -------------
+    b51_track_a: Counter[str] = Counter()
+    b51_ta_total = 0
+    b51_tb_total = 0
+    if track_a:
+        for fname, fd in track_a["fixtures"].items():
+            fc = fd.get("frontier_census", {})
+            b51_data = fc.get("b51_forward_merge_analysis", {})
+            for cb in b51_data.get("category_breakdown", []):
+                b51_track_a[cb["category"]] += cb["count"]
+    track_b_b51 = None
+    if track_b:
+        track_b_b51 = track_b.get("b51_forward_merge_analysis", {})
+
+    if b51_track_a or (track_b_b51 and track_b_b51.get("total_forward_merge", 0) > 0):
+        md_lines.append("---")
+        md_lines.append("")
+        md_lines.append("## B51 Forward-to-Common-Merge CFG Merge Evidence Analysis")
+        md_lines.append("")
+        md_lines.append(
+            "CFG-level classification of all B48 `forward_to_common_merge` top-level "
+            "gotos. Each case is categorized by the merge evidence type of its "
+            "target block, using the CFG predecessor count and fall-through chain "
+            "analysis."
+        )
+        md_lines.append("")
+
+        from scripts.b51_analyze_forward_to_common_merge import (
+            CAT_LABELS as B51_CAT_LABELS,
+        )
+
+        # Track A table
+        if b51_track_a:
+            b51_ta_total = sum(b51_track_a.values())
+            md_lines.append("### Track A -- Forward-to-Common-Merge Breakdown")
+            md_lines.append("")
+            md_lines.append("| Category | Count | % | Description |")
+            md_lines.append("|----------|-------|---|-------------|")
+            for cat, count in sorted(b51_track_a.items(),
+                                     key=lambda x: -x[1]):
+                pct = 100.0 * count / max(b51_ta_total, 1)
+                label = B51_CAT_LABELS.get(cat, cat)
+                md_lines.append(f"| {cat} | {count} | {pct:.1f}% | {label} |")
+            md_lines.append(f"| **Total** | **{b51_ta_total}** | 100% | |")
+            md_lines.append("")
+
+        # Track B table
+        if track_b and track_b_b51:
+            b51_tb_total = track_b_b51.get("total_forward_merge", 0)
+            if b51_tb_total > 0:
+                md_lines.append("### Track B -- Forward-to-Common-Merge Breakdown")
+                md_lines.append("")
+                md_lines.append(
+                    f"*(Scope: sampled="
+                    f"{track_b.get('decompilation_stats', {}).get('sample_size', '?')}, "
+                    f"seed=42)*"
+                )
+                md_lines.append("")
+                md_lines.append("| Category | Count | % | Description |")
+                md_lines.append("|----------|-------|---|-------------|")
+                for cb in track_b_b51.get("category_breakdown", []):
+                    cat = cb["category"]
+                    count = cb["count"]
+                    pct = cb["percentage"]
+                    label = B51_CAT_LABELS.get(cat, cat)
+                    md_lines.append(
+                        f"| {cat} | {count} | {pct:.1f}% | {label} |"
+                    )
+                md_lines.append(
+                    f"| **Total** | **{b51_tb_total}** | 100% | |"
+                )
+                md_lines.append("")
+
+        # Key findings
+        ft_ta = b51_track_a.get("fallthrough_target", 0)
+        mp_ta = b51_track_a.get("multi_pred_merge", 0)
+        jc_ta = b51_track_a.get("jump_chain", 0)
+        ft_tb = 0
+        mp_tb = 0
+        jc_tb = 0
+        if track_b_b51:
+            for cb in track_b_b51.get("category_breakdown", []):
+                if cb["category"] == "fallthrough_target":
+                    ft_tb = cb["count"]
+                elif cb["category"] == "multi_pred_merge":
+                    mp_tb = cb["count"]
+                elif cb["category"] == "jump_chain":
+                    jc_tb = cb["count"]
+
+        md_lines.append("### Key Findings")
+        md_lines.append("")
+        md_lines.append(
+            f"1. **fallthrough_target dominates** "
+            f"(Track A: {ft_ta}/{b51_ta_total if b51_track_a else 0}, "
+            f"Track B: {ft_tb}/{b51_tb_total}): "
+            "The majority of forward-to-common-merge gotos skip over blocks "
+            "that already fall through to the target. These gotos are structurally "
+            "redundant -- the skipped region reaches the merge point via normal "
+            "fall-through without intervening branches."
+        )
+        md_lines.append(
+            f"2. **multi_pred_merge** "
+            f"(Track A: {mp_ta}/{b51_ta_total if b51_track_a else 0}, "
+            f"Track B: {mp_tb}/{b51_tb_total}): "
+            "Target blocks with 3+ predecessors from different paths. "
+            "These are genuine multi-way merge points (switch-case merges, "
+            "if-else chain merges) that the if-structurer does not capture."
+        )
+        md_lines.append(
+            f"3. **jump_chain** "
+            f"(Track A: {jc_ta}/{b51_ta_total if b51_track_a else 0}, "
+            f"Track B: {jc_tb}/{b51_tb_total}): "
+            "Gotos that target bridge labels (gotos-to-gotos). These are "
+            "multi-hop chains -- the target label is itself just another goto. "
+            "Safe to collapse via chain resolution."
+        )
+        md_lines.append(
+            "4. **two_way_merge: zero cases in Track A**: B40/B47 if-structurer "
+            "already captures all clean if/else merges. No remaining provable "
+            "two-way merge points in standard fixtures."
+        )
+        md_lines.append(
+            "5. **Recommendation**: `fallthrough_target` and `jump_chain` "
+            "cases are provably safe for suppression -- they are structurally "
+            "redundant or chainable. `multi_pred_merge` cases need individual "
+            "review: some may be naturally absorbable by switch/if-else chain "
+            "structuring, others may be genuinely multi-way merge regions that "
+            "require a new structuring pass."
         )
 
     md_report = "\n".join(md_lines)
