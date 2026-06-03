@@ -2,10 +2,10 @@
 
 Current accepted state for mhlbc.
 
-Last updated: 2026-06-04
-Current accepted project state: Session 54 wave closure (Sessions 54-54E accepted)
+Last updated: 2026-06-03
+Current accepted project state: Session 55 OEnumField operand resolution accepted
 Branch: main
-HEAD: 4b58bac
+HEAD: ae078ad
 Tests: 838 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 0 errors, 0 unknown opcodes
@@ -19,6 +19,8 @@ Keep this file small. Move details to docs/, reports, tests, or scripts and leav
 ## 1. Current accepted state
 
 mhlbc currently has a stable parser/decompiler validation baseline with Track A zero errors and Track B sample=200/sample=500 zero errors. The dynamic/null/call-return frontier is closed and locked at zero actionable cases. The remaining active quality frontier is ControlStructurer/top-level goto behavior, especially the to_if_target bucket.
+
+OEnumField(93) operand layout was resolved in Session 55: args=[dst, enum_val_reg, construct_idx, field_offset_idx]. Both construct_idx and field_offset_idx are integer constants (not registers), confirmed from hashlink/src/jit.c. RegisterLiveness._get_src_regs now returns only the enum value register.
 
 Farever remains the main real-world benchmark, but core behavior must stay general-purpose and must not become Farever-specific.
 
@@ -385,14 +387,16 @@ cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q
 ## 14. Latest handoff
 
 Accepted last milestone:
-- B53: Post-B52 frontier refresh/rebaseline
-- Type: diagnostic-only
-- Behavior changes: none
-- Result: post-B52 baseline accepted and B52/B48 metric reconciliation recorded
-- Tests remained 746 passed, 4 skipped
-- Track A remained 9/9, 0 errors
-- Track B sample=200/sample=500 remained 0 errors
-- Guardrails remained 86/86
+|- Session 55: OEnumField(93) operand ambiguity resolution
+|- Type: behavior fix (RegisterLiveness source-register correction)
+|- Behavior changes: _get_src_regs for op 93 now returns [args[1]] (enum_val register) instead of [args[1], args[2]]; args[2] (construct_idx) and args[3] (field_offset_idx) are proven constants, not registers
+|- Evidence: hashlink/src/jit.c lines 4134-4137: constructs[o->p3] and c->offsets[(int)(int_val)o->extra] confirm both are array indices, not registers
+|- Docs/descs updated: hl_disasm.py _ARG_DESCS[93], docs/opcodes.md, hl_decompile.py docstrings
+|- Tests: 3 OEnumField-specific tests added/updated; full suite 838 passed, 4 skipped; Track A 9/9, 0 errors
+|- All existing behavior preserved; no ControlStructurer/HaxeWriter/TypeResolver changes
+
+Current next recommendation:
+|- B54 to_if_target diagnostic-only milestone
 
 Session 53 docs-audit:
 - Removed work.md
@@ -411,29 +415,7 @@ Mismatches found and corrected:
 8. docs/validation_matrix.md: Only 7 of 9 Track A fixtures listed; wrong HL versions
 9. docs/getting_started.md: Used .hlb extension (CLI uses .hl)
 10. docs/opcodes.md: Instruction format said "VarInt: opcode_index" (should be single byte)
-    (pre-existing bug found during audit)
-
-Current next recommendation:
-- B54 to_if_target diagnostic-only milestone
-
-B54 should:
-- Classify to_if_target cases across Track A, Track B sample=200, and Track B sample=500.
-- Determine whether cases are provable merge skips, genuine cross-boundary jumps, loop/switch/try boundary cases, artifact cases, or unknown.
-- Produce report.md/report.json sections or standalone B54 artifacts.
-- Add focused tests for classifier helpers and representative synthetic IR patterns.
-- Preserve all existing behavior.
-
-B54 must exclude:
-- Behavior changes.
-- ControlStructurer cleanup.
-- HaxeWriter changes.
-- TypeResolver or field recovery.
-- Parser/disassembler changes.
-- forward_to_common_merge behavior.
-- return_region_jump behavior.
-- backward_jump behavior.
-- loop/switch/try restructuring.
-- broad goto/label suppression.
+|    (pre-existing bug found during audit)
 
 ## 15. MEMORY.md maintenance rules
 

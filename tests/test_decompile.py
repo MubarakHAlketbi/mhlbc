@@ -600,7 +600,8 @@ class TestRegisterLiveness:
         self._check_dst_regs_eq(92, [1, 2], [1], "OEnumIndex r1, r_val")
 
     def test_dst_regs_oenumfield(self):
-        self._check_dst_regs_eq(93, [1, 2, 3], [1], "OEnumField r1, r_enum, r_idx")
+        """OEnumField (op 93): dst is args[0]; nargs=4: args=[dst, enum_val, construct_idx, field_offset_idx]."""
+        self._check_dst_regs_eq(93, [1, 2, 3, 0], [1], "OEnumField dst=r1")
 
     def test_dst_regs_no_args(self):
         """Instruction with no args returns empty list."""
@@ -715,13 +716,13 @@ class TestRegisterLiveness:
         instr = Instruction(0, 91, "OEnumAlloc", [1, 2], 0, 2)
         assert RegisterLiveness._get_src_regs(instr) == []
 
-    # OEnumField (93): "dst, enum_val_reg, field_idx, ???" — args[2] might not
-    # be a register but 4th arg is ambiguous; keep current behavior.
+    # OEnumField (93): "dst, enum_val, construct_idx, field_offset_idx"
+    # args[2] (construct_idx) and args[3] (field_offset_idx) are both
+    # integer constants, not registers — confirmed from hashlink/src/jit.c.
     def test_src_regs_oenumfield(self):
-        """OEnumField (op 93): src includes enum_val_reg; field_idx is index (ambiguous, keep)."""
+        """OEnumField (op 93): src includes only enum_val reg; construct_idx and field_offset_idx are constants."""
         instr = Instruction(0, 93, "OEnumField", [1, 2, 3, 0], 0, 4)
-        # Currently returns [args[1], args[2]] — confirmed but noted as ambiguous
-        assert RegisterLiveness._get_src_regs(instr) == [2, 3]
+        assert RegisterLiveness._get_src_regs(instr) == [2]
 
     def test_dst_regs_oenumfield_preserved(self):
         """OEnumField (op 93): dst is args[0] — verify unchanged after audit."""

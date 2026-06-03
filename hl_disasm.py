@@ -136,7 +136,7 @@ _ARG_DESCS = {
     89: "val, ref",
     # Enum
     90: "dst, nargs, args...", 91: "dst, enum_type",
-    92: "dst, enum_val",      93: "dst, enum_val, field_idx",
+    92: "dst, enum_val",      93: "dst, enum_val, construct_idx, field_offset_idx",
     94: "val, enum_val, field_idx",
     # Misc
     95: "",                   96: "dst, obj",

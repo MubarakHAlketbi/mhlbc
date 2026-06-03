@@ -700,11 +700,14 @@ class RegisterLiveness:
             return srcs
         if op == 92 and len(args) >= 2:
             return [args[1]]
-        if op == 93 and len(args) >= 3:
-            # OEnumField: args = [dst, enum_val_reg, field_idx, ???]
-            # args[2] = field_idx (index, not a register). 4th arg ambiguous — keep
-            # current behavior for OEnumField; only fix the OSetEnumField case below.
-            return [args[1], args[2]]
+        if op == 93 and len(args) >= 2:
+            # OEnumField: args = [dst, enum_val_reg, construct_idx, field_offset_idx]
+            # args[1] is the enum value register (source). args[2] = construct index
+            # (which constructor within the enum). args[3] = field offset index within
+            # that construct. BOTH args[2] and args[3] are integer constants, not
+            # registers — confirmed from hashlink/src/jit.c: constructs[o->p3] and
+            # c->offsets[(int)(int_val)o->extra].
+            return [args[1]]
         if op == 94 and len(args) >= 3:
             # OSetEnumField: args = [enum_val_reg, value_reg, field_idx]
             # args[0] = enum_val, args[1] = value, args[2] = field_idx (NOT a reg)
@@ -2107,7 +2110,9 @@ class ExprBuilder:
     def _resolve_enum_field_name(self, args: List[int], op: int) -> Optional[str]:
         """Resolve an enum field index to a construct name from type metadata.
 
-        OEnumField args: [dst, enum_val_reg, field_idx, enum_type_idx???]
+        OEnumField args: [dst, enum_val_reg, construct_idx, field_offset_idx]
+        (construct_idx = which constructor within the enum; field_offset_idx
+        = which field of that constructor; both are constants, not registers)
         OSetEnumField args: [enum_val_reg, value_reg, field_idx]
 
         Uses the enum value register's declared type (from reg_types) to find

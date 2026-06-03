@@ -213,7 +213,7 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 | 90 | **OMakeEnum** | `R(dst), C(construct_idx), AR(n), extra...` | `dst = EnumConstructor(args[0..])` (vararg: p1=dst, p2=construct_idx (constant, NOT a register), p3=count byte, extras=arg regs) |
 | 91 | **OEnumAlloc** | `R(dst), C(enum_type_idx), X` | `dst = alloc(enum_type_idx)` (raw alloc; args[1] is a type pool index, NOT a register -- no source registers consumed) |
 | 92 | **OEnumIndex** | `R(dst), R(enum_val), X` | `dst = enum_val.index` (constructor index as integer) |
-| 93 | **OEnumField** | `R(dst), R(enum_val), C(field_idx), ???` | `dst = enum_val.field[field_idx]` (nargs=4; args[2] is field_idx constant; 4th arg purpose is ambiguous -- possibly enum_type_idx) |
+| 93 | **OEnumField** | `R(dst), R(enum_val), C(construct_idx), C(field_offset_idx)` | `dst = enum_val.constructs[construct_idx].field[field_offset_idx]` (nargs=4; args[2] = construct index (which constructor within the enum), args[3] = field offset index within that construct; BOTH are integer constants, NOT registers -- confirmed from hashlink/src/jit.c: `constructs[o->p3]` and `c->offsets[(int)(int_val)o->extra]`) |
 | 94 | **OSetEnumField** | `R_NW(enum_val), R_NW(value), C(field_idx)` | `enum_val.field[field_idx] = value` (BOTH enum_val and value are read-only source registers; field_idx is a constant; no destination register) |
 
 ### 95-101: Miscellaneous
