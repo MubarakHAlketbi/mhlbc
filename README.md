@@ -10,19 +10,19 @@ Current scope is **Tier 1: Core Decompiler**. Later modding layers such as bytec
 
 ## Current Snapshot
 
-This README reflects the repository snapshot at Session 58.
+This README reflects the repository snapshot at Session 59.
 
 | Area | Status |
 |------|--------|
 | Branch | `main` |
-| Latest documented milestone | Sessions 57-58 (MEMORY.md refactor, to_if_target/cfg_jump_chain diagnostics) |
-| Test suite | 838 passed, 4 skipped |
+| Latest documented milestones | Sessions 58-59 (return_region_jump suppression, backward_jump exhaustion, all goto buckets now exhausted) |
+| Test suite | 844 passed, 4 skipped |
 | Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes |
 | Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors |
-| Current next target | return_region_jump diagnostic (goto frontier) |
+| Current next target | Awaiting project-owner direction -- all goto-frontier diagnostics exhausted |
 | Later tiers | Frozen |
 
-The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) has closed the opcode source/destination frontier. The remaining active work is controlled ControlStructurer quality improvement, especially classifying and reducing top-level goto patterns with diagnostic-first analysis.
+The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) closed the opcode source/destination frontier. The goto-frontier diagnostic pipeline (Sessions 58-59) has now exhausted all top-level goto buckets: forward_to_next_label and return_region_jump are suppressed, backward_jump and to_if_target are diagnosed as non-actionable, and structural crosses remain as-is. No remaining goto-frontier work exists without project-owner direction.
 
 ---
 
