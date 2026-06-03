@@ -2,11 +2,11 @@
 
 Current accepted state for mhlbc.
 
-Last updated: 2026-06-03
-Current accepted project state: Session 53 close
+Last updated: 2026-06-04
+Current accepted project state: Session 54 wave closure (Sessions 54-54E accepted)
 Branch: main
-HEAD: c4b32a5 (pushed 2026-06-03)
-Tests: 746 passed, 4 skipped
+HEAD: 4b58bac
+Tests: 838 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -73,9 +73,10 @@ Latest accepted command:
 cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q
 
 Latest accepted result:
-- 746 passed
+- 838 passed (Sessions 54-54E: +92 tests from baseline)
 - 4 skipped
 - Guardrails: 86/86
+- Session 54C diagnostic movement: call-return unresolved 135->126 accepted
 
 Guardrail milestone coverage:
 - B34: 4

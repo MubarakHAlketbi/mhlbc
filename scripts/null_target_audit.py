@@ -118,17 +118,19 @@ def classify_null_target(
         if op == 39:  # OSetField (field, reg)
             # args: [field_idx, value_reg]
             has_field_store = True
+        elif op == 41:  # OSetThis
+            has_field_store = True
         elif op == 81:  # OSetArray (array_reg, idx_reg, val_reg)
             has_array_store = True
         elif op in (91, 92):  # array/dynamic stores
             has_array_store = True
         elif op in _CALL_OPS:
             has_call_arg = True
-        elif op in (44, 45, 46, 47, 56, 57, 58):  # conditional jumps
+        elif op in (44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57):  # conditional jumps (excl OJAlways)
             has_branch = True
     
     # 5. Check for OMov chain
-    has_omov = any(instr.opcode == 1 for instr in consumer_map.get(reg_idx, []))
+    has_omov = any(instr.opcode == 0 for instr in consumer_map.get(reg_idx, []))
     
     # Priority: field store > global store > array/dynamic > mov chain > branch > unknown
     if has_field_store:
@@ -226,9 +228,9 @@ def audit():
                         producers.append(instr)
                 
                 consumers = consumer_map.get(reg_idx, [])
-                has_field_store = any(i.opcode in (39,) for i in consumers)
-                has_global_store = any(i.opcode in (36,) for i in consumers)
-                has_omov = any(i.opcode == 1 for i in consumers)
+                has_field_store = any(i.opcode in (39, 41) for i in consumers)
+                has_global_store = any(i.opcode in (37,) for i in consumers)
+                has_omov = any(i.opcode == 0 for i in consumers)
                 
                 case = {
                     "fixture": fname,

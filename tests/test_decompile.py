@@ -409,6 +409,417 @@ class TestRegisterLiveness:
         assert 1 not in uses, "args[1]=1 is ctor_idx for OMakeEnum, not a register"
         assert 2 not in uses, "args[2]=2 is count for OMakeEnum, not a register"
 
+    # -- Source-register delegation (B54) -------------------------------
+
+    def _check_src_regs_eq(self, op, args, desc):
+        """Verify _get_src_regs_instr delegates to _get_src_regs."""
+        from hl_decompile import Decompiler
+        instr = Instruction(0, op, f"op{op}", list(args), 0, 0)
+        canonical = RegisterLiveness._get_src_regs(instr)
+        delegated = Decompiler._get_src_regs_instr(instr)
+        assert canonical == delegated, (
+            f"{desc}: _get_src_regs={canonical}, "
+            f"_get_src_regs_instr={delegated}"
+        )
+
+    def test_src_regs_omov(self):
+        """OMov (op 0): reads args[1]."""
+        self._check_src_regs_eq(0, [1, 2], "OMov")
+
+    def test_src_regs_oint(self):
+        """OInt (op 1): no source registers."""
+        self._check_src_regs_eq(1, [1, 5], "OInt")
+
+    def test_src_regs_osetglobal(self):
+        """OSetGlobal (op 37): reads args[0]."""
+        self._check_src_regs_eq(37, [3, 0], "OSetGlobal")
+
+    def test_src_regs_osetthis(self):
+        """OSetThis (op 41): reads args[0]."""
+        self._check_src_regs_eq(41, [3, 0], "OSetThis")
+
+    def test_src_regs_ofield(self):
+        """OField (op 38): reads args[1]."""
+        self._check_src_regs_eq(38, [2, 1, 0], "OField")
+
+    def test_src_regs_osetfield(self):
+        """OSetField (op 39): reads args[0], args[1]."""
+        self._check_src_regs_eq(39, [3, 1, 0], "OSetField")
+
+    def test_src_regs_osetarray(self):
+        """OSetArray (op 81): reads args[0], args[1], args[2]."""
+        self._check_src_regs_eq(81, [3, 1, 2], "OSetArray")
+
+    def test_src_regs_otype(self):
+        """OType (op 84): reads args[1]."""
+        self._check_src_regs_eq(84, [1, 2], "OType")
+
+    def test_src_regs_ogettype(self):
+        """OGetType (op 85): reads args[1]."""
+        self._check_src_regs_eq(85, [1, 2], "OGetType")
+
+    def test_src_regs_ogettid(self):
+        """OGetTID (op 86): reads args[1]."""
+        self._check_src_regs_eq(86, [1, 2], "OGetTID")
+
+    def test_src_regs_ojtrue(self):
+        """OJTrue (op 44): unary jump -- reads args[0]."""
+        self._check_src_regs_eq(44, [3], "OJTrue")
+
+    def test_src_regs_ojslt(self):
+        """OJSLt (op 48): binary comparison jump -- reads args[0], args[1]."""
+        self._check_src_regs_eq(48, [1, 2, 10], "OJSLt")
+
+    def test_src_regs_ojeq(self):
+        """OJEq (op 56): binary comparison jump -- reads args[0], args[1]."""
+        self._check_src_regs_eq(56, [1, 2, 10], "OJEq")
+
+    def test_src_regs_ojalways(self):
+        """OJAlways (op 58): unconditional jump -- no source registers."""
+        self._check_src_regs_eq(58, [99], "OJAlways")
+
+    def test_src_regs_oret(self):
+        """ORet (op 67): reads args[0]."""
+        self._check_src_regs_eq(67, [3], "ORet")
+
+    def test_src_regs_othrow(self):
+        """OThrow (op 68): reads args[0]."""
+        self._check_src_regs_eq(68, [3], "OThrow")
+
+    def test_src_regs_onullcheck(self):
+        """ONullCheck (op 71): reads args[0]."""
+        self._check_src_regs_eq(71, [3], "ONullCheck")
+
+    # -- Destination-register delegation (B56) --------------------------
+
+    def _check_dst_regs_eq(self, op, args, expected, desc):
+        """Verify _get_dst_regs returns expected destination registers."""
+        instr = Instruction(0, op, f"op{op}", list(args), 0, 0)
+        result = RegisterLiveness._get_dst_regs(instr)
+        assert result == expected, (
+            f"{desc}: expected {expected}, got {result}"
+        )
+
+    def test_dst_regs_omov(self):
+        self._check_dst_regs_eq(0, [3, 1], [3], "OMov r3, r1")
+
+    def test_dst_regs_oint(self):
+        self._check_dst_regs_eq(1, [2, 42], [2], "OInt r2, 42")
+
+    def test_dst_regs_ofload(self):
+        self._check_dst_regs_eq(2, [1, 3.14], [1], "OFloat r1, 3.14")
+
+    def test_dst_regs_obool(self):
+        self._check_dst_regs_eq(3, [0, 1], [0], "OBool r0, true")
+
+    def test_dst_regs_obytes(self):
+        self._check_dst_regs_eq(4, [5, 0], [5], "OBytes r5, data")
+
+    def test_dst_regs_ostring(self):
+        self._check_dst_regs_eq(5, [1, 0], [1], "OString r1, str")
+
+    def test_dst_regs_onull(self):
+        self._check_dst_regs_eq(6, [0], [0], "ONull r0")
+
+    def test_dst_regs_oadd(self):
+        self._check_dst_regs_eq(7, [3, 1, 2], [3], "OAdd r3, r1, r2")
+
+    def test_dst_regs_oneg(self):
+        self._check_dst_regs_eq(20, [2, 1], [2], "ONeg r2, r1")
+
+    def test_dst_regs_onot(self):
+        self._check_dst_regs_eq(21, [2, 1], [2], "ONot r2, r1")
+
+    def test_dst_regs_oincr(self):
+        self._check_dst_regs_eq(22, [0], [0], "OIncr r0")
+
+    def test_dst_regs_odecr(self):
+        self._check_dst_regs_eq(23, [0], [0], "ODecr r0")
+
+    def test_dst_regs_ocall0(self):
+        self._check_dst_regs_eq(24, [3, 0], [3], "OCall0 r3, findex")
+
+    def test_dst_regs_ocalln(self):
+        self._check_dst_regs_eq(29, [2, 1, 0], [2], "OCallN r2, ...")
+
+    def test_dst_regs_ocallmethod(self):
+        self._check_dst_regs_eq(30, [1, 0, 0], [1], "OCallMethod r1, ...")
+
+    def test_dst_regs_ocallthis(self):
+        self._check_dst_regs_eq(31, [1, 0], [1], "OCallThis r1, ...")
+
+    def test_dst_regs_ocallclosure(self):
+        self._check_dst_regs_eq(32, [2, 1, 0], [2], "OCallClosure r2, ...")
+
+    def test_dst_regs_ostaticclosure(self):
+        self._check_dst_regs_eq(33, [2, 0], [2], "OStaticClosure r2, findex")
+
+    def test_dst_regs_oinstanceclosure(self):
+        self._check_dst_regs_eq(34, [2, 1, 0], [2], "OInstanceClosure r2, r_obj, findex")
+
+    def test_dst_regs_ogetglobal(self):
+        self._check_dst_regs_eq(36, [2, 0], [2], "OGetGlobal r2, gidx")
+
+    def test_dst_regs_ofield(self):
+        self._check_dst_regs_eq(38, [2, 1, 0], [2], "OField r2, r_obj, fidx")
+
+    def test_dst_regs_ogetthis(self):
+        self._check_dst_regs_eq(40, [1, 0], [1], "OGetThis r1, fidx")
+
+    def test_dst_regs_odynget(self):
+        self._check_dst_regs_eq(42, [2, 1, 0], [2], "ODynGet r2, r_obj, str")
+
+    def test_dst_regs_onew(self):
+        self._check_dst_regs_eq(82, [2, 0], [2], "ONew r2, type_idx")
+
+    def test_dst_regs_oarraysize(self):
+        self._check_dst_regs_eq(83, [1, 2], [1], "OArraySize r1, r_array")
+
+    def test_dst_regs_otype(self):
+        self._check_dst_regs_eq(84, [1, 2], [1], "OType r1, r_val")
+
+    def test_dst_regs_ogettype(self):
+        self._check_dst_regs_eq(85, [1, 2], [1], "OGetType r1, r_val")
+
+    def test_dst_regs_ogettid(self):
+        self._check_dst_regs_eq(86, [1, 2], [1], "OGetTID r1, r_val")
+
+    def test_dst_regs_oref(self):
+        self._check_dst_regs_eq(87, [2, 1], [2], "ORef r2, r_val")
+
+    def test_dst_regs_ounref(self):
+        self._check_dst_regs_eq(88, [2, 1], [2], "OUnref r2, r_val")
+
+    def test_dst_regs_omakeenum(self):
+        self._check_dst_regs_eq(90, [1, 0, 0], [1], "OMakeEnum r1, ...")
+
+    def test_dst_regs_oenumalloc(self):
+        self._check_dst_regs_eq(91, [1, 2], [1], "OEnumAlloc r1, r_val")
+
+    def test_dst_regs_oenumindex(self):
+        self._check_dst_regs_eq(92, [1, 2], [1], "OEnumIndex r1, r_val")
+
+    def test_dst_regs_oenumfield(self):
+        self._check_dst_regs_eq(93, [1, 2, 3], [1], "OEnumField r1, r_enum, r_idx")
+
+    def test_dst_regs_no_args(self):
+        """Instruction with no args returns empty list."""
+        instr = Instruction(0, 66, "OLabel", [], 0, 1)
+        assert RegisterLiveness._get_dst_regs(instr) == []
+
+    def test_dst_regs_oret(self):
+        """ORet (op 67): no destination register (reads, not writes)."""
+        self._check_dst_regs_eq(67, [3], [], "ORet r3")
+
+    def test_dst_regs_osetfield(self):
+        """OSetField (op 39): no destination register (writes to memory, not a reg)."""
+        self._check_dst_regs_eq(39, [3, 1, 0], [], "OSetField r3, r_obj, fidx")
+
+    # -- Call operand role tests (B56C) ---------------------------------
+
+    def test_call_operand_ocall0(self):
+        """OCall0: args=[dst, findex] -> dst_reg=[dst], src_regs=[]."""
+        instr = Instruction(0, 24, "OCall0", [2, 0], 0, 2)
+        assert RegisterLiveness._get_dst_regs(instr) == [2]
+        assert RegisterLiveness._get_src_regs(instr) == []
+
+    def test_call_operand_ocall1(self):
+        """OCall1: args=[dst, findex, a0] -> dst_reg=[dst], src_regs=[a0]."""
+        instr = Instruction(0, 25, "OCall1", [2, 0, 3], 0, 3)
+        assert RegisterLiveness._get_dst_regs(instr) == [2]
+        assert RegisterLiveness._get_src_regs(instr) == [3]
+
+    def test_call_operand_ocalln(self):
+        """OCallN: args=[dst, fun_reg, count, args...] -> dst, src including fun_reg + args."""
+        instr = Instruction(0, 29, "OCallN", [2, 1, 2, 3, 4], 0, 5)
+        assert RegisterLiveness._get_dst_regs(instr) == [2]
+        # src = [fun_reg=1, arg0=3, arg1=4]
+        assert RegisterLiveness._get_src_regs(instr) == [1, 3, 4]
+
+    def test_call_operand_ocallmethod(self):
+        """OCallMethod: args=[dst, method_idx, count, receiver, args...] -> dst=[dst],
+        src=[receiver, args...] (method_idx is NOT a register)."""
+        # count=2: 1 receiver + 1 method arg = 2 extras
+        instr = Instruction(0, 30, "OCallMethod", [1, 0, 2, 3, 4], 0, 5)
+        assert RegisterLiveness._get_dst_regs(instr) == [1]
+        # src = [receiver=3, arg0=4]
+        assert RegisterLiveness._get_src_regs(instr) == [3, 4]
+
+    def test_call_operand_ocallthis_no_args(self):
+        """OCallThis: args=[dst, method_idx, count] with count=0 -> dst but no src regs."""
+        instr = Instruction(0, 31, "OCallThis", [1, 0, 0], 0, 3)
+        assert RegisterLiveness._get_dst_regs(instr) == [1]
+        assert RegisterLiveness._get_src_regs(instr) == []
+
+    def test_call_operand_ocallthis_with_args(self):
+        """OCallThis: args=[dst, method_idx, count, args...] -> src are args, NOT method_idx."""
+        instr = Instruction(0, 31, "OCallThis", [1, 0, 2, 3, 4], 0, 5)
+        assert RegisterLiveness._get_dst_regs(instr) == [1]
+        # src = [arg0=3, arg1=4]  -- method_idx=0 is NOT a source register
+        assert RegisterLiveness._get_src_regs(instr) == [3, 4]
+
+    def test_call_operand_ocallthis_method_index_positive(self):
+        """OCallThis with method_index > 0: src arg extraction uses count (args[2]), not
+        method_index (args[1]). Verifies the fix for operand role drift."""
+        # method_idx=5, count=1, 1 arg register=r3
+        instr = Instruction(0, 31, "OCallThis", [1, 5, 1, 3], 0, 4)
+        assert RegisterLiveness._get_dst_regs(instr) == [1]
+        # src = [arg0=3] -- method_idx=5 is NOT included as a source
+        assert RegisterLiveness._get_src_regs(instr) == [3]
+
+    def test_call_operand_ocallclosure(self):
+        """OCallClosure: args=[dst, closure_reg, count, args...] -> dst=[dst],
+        src=[closure_reg, args...]."""
+        instr = Instruction(0, 32, "OCallClosure", [2, 1, 2, 3, 4], 0, 5)
+        assert RegisterLiveness._get_dst_regs(instr) == [2]
+        # src = [closure_reg=1, arg0=3, arg1=4]
+        assert RegisterLiveness._get_src_regs(instr) == [1, 3, 4]
+
+    def test_call_operand_ocall0_findex_not_src(self):
+        """OCall0: args[1] is a function index, never a source register."""
+        instr = Instruction(0, 24, "OCall0", [0, 999], 0, 2)
+        assert RegisterLiveness._get_dst_regs(instr) == [0]
+        assert 999 not in RegisterLiveness._get_src_regs(instr)
+
+    def test_call_operand_ocallmethod_index_not_src(self):
+        """OCallMethod: args[1] is a method/proto index, never a source register."""
+        instr = Instruction(0, 30, "OCallMethod", [0, 42, 2, 3, 4], 0, 5)
+        assert RegisterLiveness._get_dst_regs(instr) == [0]
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 42 not in src, "method_index should not be in source regs"
+
+    def test_call_operand_ocallthis_method_index_not_src(self):
+        """OCallThis: args[1] is a method/proto index, never a source register.
+        Verifies the B56C fix where args[1] was incorrectly treated as nargs."""
+        instr = Instruction(0, 31, "OCallThis", [0, 7, 1, 2], 0, 4)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 7 not in src, "method_index=7 should not be in source regs"
+        assert 2 in src, "arg register r2 should be in source regs"
+
+    # -- Opcode register semantics audit tests (B56D) -----------------------
+
+    # OSetref (89): "val, ref" — both are source registers, NO destination
+    def test_dst_regs_osetref(self):
+        """OSetref (op 89): NO destination register (store to ref)."""
+        self._check_dst_regs_eq(89, [5, 1], [], "OSetref val=r5, ref=r1")
+        self._check_dst_regs_eq(89, [0, 2], [], "OSetref val=r0, ref=r2")
+
+    def test_src_regs_osetref(self):
+        """OSetref (op 89): both args are register sources."""
+        instr = Instruction(0, 89, "OSetref", [5, 1], 0, 2)
+        assert RegisterLiveness._get_src_regs(instr) == [5, 1]
+
+    # OEnumAlloc (91): "dst, enum_type" — args[1] is a type index, NOT a register
+    def test_src_regs_oenumalloc(self):
+        """OEnumAlloc (op 91): args[1] is a type index, not a register — no src regs."""
+        instr = Instruction(0, 91, "OEnumAlloc", [1, 2], 0, 2)
+        assert RegisterLiveness._get_src_regs(instr) == []
+
+    # OEnumField (93): "dst, enum_val_reg, field_idx, ???" — args[2] might not
+    # be a register but 4th arg is ambiguous; keep current behavior.
+    def test_src_regs_oenumfield(self):
+        """OEnumField (op 93): src includes enum_val_reg; field_idx is index (ambiguous, keep)."""
+        instr = Instruction(0, 93, "OEnumField", [1, 2, 3, 0], 0, 4)
+        # Currently returns [args[1], args[2]] — confirmed but noted as ambiguous
+        assert RegisterLiveness._get_src_regs(instr) == [2, 3]
+
+    def test_dst_regs_oenumfield_preserved(self):
+        """OEnumField (op 93): dst is args[0] — verify unchanged after audit."""
+        self._check_dst_regs_eq(93, [1, 2, 3, 0], [1], "OEnumField dst=r1")
+
+    # OSetEnumField (94): "enum_val_reg, value_reg, field_idx"
+    def test_src_regs_osetenumfield(self):
+        """OSetEnumField (op 94): src = [enum_val_reg, value_reg]; field_idx is index, not reg."""
+        instr = Instruction(0, 94, "OSetEnumField", [2, 3, 0], 0, 3)
+        assert RegisterLiveness._get_src_regs(instr) == [2, 3], \
+            "OSetEnumField should include enum_val and value, NOT field_idx"
+
+    def test_dst_regs_osetenumfield(self):
+        """OSetEnumField (op 94): no destination register (store to enum field)."""
+        self._check_dst_regs_eq(94, [2, 3, 0], [], "OSetEnumField store")
+
+    # -- Stores that should NOT have destination registers -----------------
+
+    def test_dst_regs_osetglobal(self):
+        """OSetGlobal (op 37): no destination register (write to global)."""
+        self._check_dst_regs_eq(37, [3, 0], [], "OSetGlobal src=r3, gidx=0")
+
+    def test_dst_regs_osetthis(self):
+        """OSetThis (op 41): no destination register (write to this.field)."""
+        self._check_dst_regs_eq(41, [3, 0], [], "OSetThis src=r3, fidx=0")
+
+    def test_dst_regs_odynget_is_read(self):
+        """ODynGet (op 42): IS a read — produces destination."""
+        self._check_dst_regs_eq(42, [2, 1, 0], [2], "ODynGet dst=r2, obj=r1, str=0")
+
+    def test_dst_regs_odynset(self):
+        """ODynSet (op 43): no destination register (write to obj[str])."""
+        self._check_dst_regs_eq(43, [3, 1, 0], [], "ODynSet src=r3, obj=r1, str=0")
+
+    def test_dst_regs_osetarray(self):
+        """OSetArray (op 81): no destination register (write to array[idx])."""
+        self._check_dst_regs_eq(81, [3, 1, 2], [], "OSetArray val=r3, arr=r1, idx=r2")
+
+    # -- Non-register operand indices should not appear in src regs ---------
+
+    def test_src_regs_ofield_idx_not_reg(self):
+        """OField (op 38): args[2] is field_idx (not a register)."""
+        instr = Instruction(0, 38, "OField", [1, 2, 999], 0, 3)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "field_idx=999 should not be in source regs"
+
+    def test_src_regs_osetfield_idx_not_reg(self):
+        """OSetField (op 39): args[2] is field_idx (not a register)."""
+        instr = Instruction(0, 39, "OSetField", [3, 1, 999], 0, 3)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "field_idx=999 should not be in source regs"
+
+    def test_src_regs_ogetthis_idx_not_reg(self):
+        """OGetThis (op 40): args[1] is field_idx (not a register)."""
+        instr = Instruction(0, 40, "OGetThis", [1, 999], 0, 2)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert src == [], "OGetThis should have no source registers"
+
+    def test_src_regs_osetthis_idx_not_reg(self):
+        """OSetThis (op 41): args[1] is field_idx (not a register)."""
+        instr = Instruction(0, 41, "OSetThis", [3, 999], 0, 2)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "field_idx=999 should not be in source regs"
+
+    def test_src_regs_odynget_idx_not_reg(self):
+        """ODynGet (op 42): args[2] is str_idx (not a register)."""
+        instr = Instruction(0, 42, "ODynGet", [1, 2, 999], 0, 3)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "str_idx=999 should not be in source regs"
+
+    def test_src_regs_odynset_idx_not_reg(self):
+        """ODynSet (op 43): args[2] is str_idx (not a register)."""
+        instr = Instruction(0, 43, "ODynSet", [3, 1, 999], 0, 3)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "str_idx=999 should not be in source regs"
+
+    # -- OMakeEnum: vararg with non-register ctor_idx ----------------------
+
+    def test_src_regs_omakeenum_ctor_idx_not_reg(self):
+        """OMakeEnum (op 90): args[1] is ctor_idx (not a register)."""
+        instr = Instruction(0, 90, "OMakeEnum", [1, 999, 0], 0, 3)
+        src = RegisterLiveness._get_src_regs(instr)
+        assert 999 not in src, "ctor_idx=999 should not be in source regs"
+
+    # -- OIncr/ODecr: read-write same register ------------------------------
+
+    def test_src_regs_oincr(self):
+        """OIncr (op 22): reads and writes same register."""
+        instr = Instruction(0, 22, "OIncr", [3], 0, 1)
+        assert RegisterLiveness._get_dst_regs(instr) == [3]
+        assert RegisterLiveness._get_src_regs(instr) == [3]
+
+    def test_src_regs_odecr(self):
+        """ODecr (op 23): reads and writes same register."""
+        instr = Instruction(0, 23, "ODecr", [3], 0, 1)
+        assert RegisterLiveness._get_dst_regs(instr) == [3]
+        assert RegisterLiveness._get_src_regs(instr) == [3]
+
 
 # ============================================================================
 # Test: Variable Mapping
@@ -3848,18 +4259,18 @@ class TestActionableDynamicFormula:
             nt_declared_dyn = formula.get('null_target_declared_dynamic')
 
             # Core counts
-            assert cr_total == 135, \
-                f'Expected call_return_unresolved_total=135, got {cr_total}'
-            assert cr_expected == 135, \
-                f'Expected call_return_expected_non_actionable=135, got {cr_expected}'
+            assert cr_total == 126, \
+                f'Expected call_return_unresolved_total=126, got {cr_total}'
+            assert cr_expected == 126, \
+                f'Expected call_return_expected_non_actionable=126, got {cr_expected}'
             assert cr_actionable == 0, \
                 f'Expected call_return_actionable=0, got {cr_actionable}'
             assert null_ambig == 163, \
                 f'Expected null_without_target_type=163, got {null_ambig}'
             assert corrected == 0, \
                 f'Expected actionable_dynamic_corrected=0, got {corrected}'
-            assert legacy == 298, \
-                f'Expected actionable_dynamic_legacy=298, got {legacy}'
+            assert legacy == 289, \
+                f'Expected actionable_dynamic_legacy=289, got {legacy}'
 
             # Null target frontier
             assert nt_expected == 163, \
@@ -6494,3 +6905,276 @@ class TestB52ForwardMergeCleanup:
         assert after <= before, (
             f"Expected after <= before, got {after} > {before}"
         )
+
+# ============================================================================
+# Test: B54 -- Null-target classification regression (OSetThis)
+# ============================================================================
+
+class TestB54NullTargetClassification:
+    """Verify null-target classification works with OSetThis consumers.
+
+    B54 fixed _get_src_regs_instr to delegate to the canonical
+    RegisterLiveness._get_src_regs, which correctly returns args[0]
+    for OSetThis (op 41). Previously the diagnostic helper had a
+    divergent buggy copy that returned [] for OSetThis.
+
+    The OSetThis fix means null registers consumed by OSetThis now
+    appear in the consumer map and are classified as field_store.
+    """
+
+    def test_osetthis_consumer_visible_in_decompiler_helper(self):
+        """OSetThis r0, r_src -> r_src captured as consumer by _get_src_regs_instr."""
+        from hl_decompile import Decompiler, RegisterLiveness
+        from hl_disasm import Instruction
+
+        # OSetThis op 41: args = [r_src, field_idx]
+        instr = Instruction(0, 41, "OSetThis", [3, 0], 0, 2)
+
+        # Canonical source regs
+        canonical = RegisterLiveness._get_src_regs(instr)
+        assert canonical == [3], f"OSetThis should read args[0]=3, got {canonical}"
+
+        # Delegated helper
+        delegated = Decompiler._get_src_regs_instr(instr)
+        assert delegated == [3], f"_get_src_regs_instr should delegate to match, got {delegated}"
+
+    def test_null_with_osetthis_classified_as_field_store(self):
+        """ONull into register consumed by OSetThis -> field_store subcategory.
+
+        Builds a function body with ONull r0 on K_DYN register, then
+        consumes r0 via OSetThis. Verifies the consumer map built by
+        _get_src_regs_instr correctly captures the OSetThis consumer.
+        """
+        dyn = build_type_primitive(K_DYN)
+        obj = build_type_objlike(K_OBJ, name_si=0, super_si=0, global_si=0,
+                                 fields=[], protos=[], bindings=[])
+        # Need a string for K_OBJ name_si
+        strings = ["_"]
+
+        # 3 regs: reg0=K_DYN (null target), reg1=K_DYN, reg2=K_OBJ
+        # Body opcodes (opcode only, args are auto-filled with 0):
+        #   ONull (op 6, nargs=1): r0=null
+        #   OSetThis (op 41, nargs=2): this.field0 = r0
+        #   ORet (op 67, nargs=1): return r0
+        parser = _parse_bytecode(_build_minimal_with_types(
+            strings=strings,
+            ntypes=2,
+            type_blobs=[dyn, obj],
+            functions=[(0, 0, [0, 0, 1], [6, 41, 67])],
+        ))
+
+        from hl_decompile import Decompiler
+        from hl_disasm import Disassembler
+        disasm = Disassembler(parser)
+        decomp = Decompiler(parser, disasm, logger=None)
+        _result = decomp.decompile_all()
+
+        # Build consumer map using the fixed helper
+        consumers = {}
+        for instr in disasm.disassemble_function(0):
+            src_regs = Decompiler._get_src_regs_instr(instr)
+            for r in src_regs:
+                if r not in consumers:
+                    consumers[r] = []
+                consumers[r].append(instr)
+
+        # r0 should appear in consumers because OSetThis reads it
+        assert 0 in consumers, (
+            f"r0 should be a consumer (OSetThis reads args[0]), "
+            f"got consumers={consumers}"
+        )
+        osetthis_consumers = [i for i in consumers[0] if i.opcode == 41]
+        assert len(osetthis_consumers) == 1, (
+            f"Expected 1 OSetThis consumer of r0, "
+            f"got {len(osetthis_consumers)}: {osetthis_consumers}"
+        )
+
+# ============================================================================
+# Test: B55 -- HaxeWriter if/else indentation fix
+# ============================================================================
+
+class TestB55HaxeWriterIfElseIndent:
+    """Verify HaxeWriter if/else indentation is correct.
+
+    B55 fixed a bug where the else path decremented indentation before
+    writing '} else {' and then incremented twice, causing the else
+    line to emit at the wrong level.
+    """
+
+    def _make_ir(self, body, variables=None):
+        """Build a minimal IRFunction for HaxeWriter testing."""
+        sig = FunctionSig("testFn", [], K_VOID,
+                          is_method=False, parent_class=None, has_this=False)
+        return IRFunction(
+            name="testFn", findex=0, func_idx=0, sig=sig,
+            body=body,
+            variables=variables or {},
+            raw_regnames={},
+        )
+
+    def _make_writer(self):
+        """Build a HaxeWriter with MockParser."""
+        parser = MockParser()
+        tr = TypeResolver(parser)
+        return HaxeWriter(tr, parser, include_comments=False)
+
+    def _line_indent(self, line: str) -> int:
+        """Count leading spaces to determine indent level (0-based)."""
+        return len(line) - len(line.lstrip())
+
+    def _assert_indent_seq(self, lines, expected_levels, desc):
+        """Assert that each line's indent level (in 4-space units) matches expected.
+
+        expected_levels: list of (line_pattern, indent_level) pairs.
+        """
+        for i, (pattern, level) in enumerate(expected_levels):
+            line = lines[i]
+            assert pattern in line, (
+                f"{desc}: line[{i}] expected pattern {pattern!r}, "
+                f"got {line!r}"
+            )
+            actual = self._line_indent(line) // 4
+            assert actual == level, (
+                f"{desc}: line[{i}] {line!r}: "
+                f"expected indent {level}, got {actual}"
+            )
+
+    def test_if_without_else(self):
+        """Simple if without else produces correct indentation."""
+        ir = self._make_ir([
+            IRStmt("if", src=IRVar("cond", K_BOOL), blocks=[
+                [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(1, K_I32))],
+            ]),
+        ], variables={"x": K_I32})
+        output = self._make_writer().write_function(ir)
+        lines = [l for l in output.splitlines() if l.strip()]
+
+        # Expected: function -> if(cond) { -> x=1; -> }
+        # Indent levels: 0 -> 1 -> 2 -> 1
+        if_lines = [l for l in lines if "if" in l]
+        assert len(if_lines) == 1, f"Expected 1 if-line, got {len(if_lines)}: {if_lines}"
+        assert "if (cond) {" in if_lines[0], f"Unexpected if-line: {if_lines[0]}"
+        assert self._line_indent(if_lines[0]) // 4 == 1, \
+            f"if should be at indent 1, got {self._line_indent(if_lines[0]) // 4}"
+
+        # Find the closing brace for the if-block (at indent 1, not the function's at 0)
+        if_brace = [l for l in lines if l.strip() == "}" and self._line_indent(l) // 4 == 1]
+        assert len(if_brace) == 1, \
+            f"Expected 1 if-closing brace at indent 1, got {len(if_brace)}: {if_brace}"
+        assert self._line_indent(if_brace[0]) // 4 == 1, \
+            f"closing brace should be at indent 1, got {self._line_indent(if_brace[0]) // 4}"
+
+    def test_if_else_simple(self):
+        """Simple if/else produces correct indentation on all lines."""
+        ir = self._make_ir([
+            IRStmt("if", src=IRVar("cond", K_BOOL), blocks=[
+                [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(1, K_I32))],
+                [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(2, K_I32))],
+            ]),
+        ], variables={"x": K_I32})
+        output = self._make_writer().write_function(ir)
+        lines = [l for l in output.splitlines() if l.strip()]
+
+        # Find the key lines
+        if_line = next(l for l in lines if "if (" in l)
+        else_line = next(l for l in lines if "} else {" in l)
+        then_assign = next(l for l in lines if "x = 1" in l)
+        else_assign = next(l for l in lines if "x = 2" in l)
+        closing_lines = [l for l in lines if l.strip() == "}"]
+
+        assert self._line_indent(if_line) // 4 == 1, \
+            f"if at indent 1, got {self._line_indent(if_line) // 4}"
+        assert self._line_indent(else_line) // 4 == 1, \
+            f"'}} else {{' at indent 1, got {self._line_indent(else_line) // 4}"
+        assert self._line_indent(then_assign) // 4 == 2, \
+            f"then-body at indent 2, got {self._line_indent(then_assign) // 4}"
+        assert self._line_indent(else_assign) // 4 == 2, \
+            f"else-body at indent 2, got {self._line_indent(else_assign) // 4}"
+        # Closing braces: one for else, none for function (not applicable here:
+        # there's also the function-level closing brace)
+        body_braces = [l for l in closing_lines if self._line_indent(l) // 4 == 1]
+        assert len(body_braces) == 1, \
+            f"Expected 1 closing brace at indent 1, got {len(body_braces)}"
+
+    def test_if_else_nested(self):
+        """Nested if/else maintains correct indentation at all levels."""
+        inner_if = IRStmt("if", src=IRVar("inner", K_BOOL), blocks=[
+            [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(1, K_I32))],
+            [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(2, K_I32))],
+        ])
+        ir = self._make_ir([
+            IRStmt("if", src=IRVar("outer", K_BOOL), blocks=[
+                [inner_if],
+                [IRStmt("assign", dst=IRVar("x", K_I32), src=IRConst(3, K_I32))],
+            ]),
+        ], variables={"x": K_I32})
+        output = self._make_writer().write_function(ir)
+        lines = output.splitlines()
+        # Remove empty/whitespace-only lines
+        lines = [l for l in lines if l.strip()]
+
+        # Structure should be:
+        #   function testFn(): Void {       indent 0
+        #       if (outer) {               indent 1
+        #           if (inner) {           indent 2
+        #               x = 1;             indent 3
+        #           } else {               indent 2
+        #               x = 2;             indent 3
+        #           }                       indent 2
+        #       } else {                   indent 1
+        #           x = 3;                 indent 2
+        #       }                           indent 1
+        #   }                               indent 0
+
+        # Collect all braces to understand structure
+        outer_if_line = next(l for l in lines if "if (outer)" in l)
+        inner_if_line = next(l for l in lines if "if (inner)" in l)
+        outer_else_line = next(l for l in lines if "} else {" in l and "if (outer)" not in l)
+
+        assert self._line_indent(outer_if_line) // 4 == 1
+        assert self._line_indent(inner_if_line) // 4 == 2, \
+            f"inner if at indent 2, got {self._line_indent(inner_if_line) // 4}"
+
+        # Find which '} else {' belongs to outer vs inner
+        else_lines = [l for l in lines if "} else {" in l]
+        assert len(else_lines) == 2, f"Expected 2 else lines, got {len(else_lines)}"
+
+        # The outer '} else {' should be at indent 1, inner at indent 2
+        outer_brace_else = next(l for l in else_lines if self._line_indent(l) // 4 == 1)
+        inner_brace_else = next(l for l in else_lines if self._line_indent(l) // 4 == 2)
+        assert "} else {" in outer_brace_else
+        assert "} else {" in inner_brace_else
+
+        # Assignments at correct depth
+        x1 = next(l for l in lines if "x = 1" in l)
+        x2 = next(l for l in lines if "x = 2" in l)
+        x3 = next(l for l in lines if "x = 3" in l)
+        assert self._line_indent(x1) // 4 == 3
+        assert self._line_indent(x2) // 4 == 3
+        assert self._line_indent(x3) // 4 == 2
+
+    def test_indent_preserved_after_if_else(self):
+        """Indentation state is correct after rendering an if/else block.
+
+        Statements after an if/else should be at the same indent level
+        as those before it.
+        """
+        ir = self._make_ir([
+            IRStmt("var", dst=IRVar("a", K_I32)),
+            IRStmt("assign", dst=IRVar("a", K_I32), src=IRConst(0, K_I32)),
+            IRStmt("if", src=IRVar("cond", K_BOOL), blocks=[
+                [IRStmt("assign", dst=IRVar("a", K_I32), src=IRConst(1, K_I32))],
+                [IRStmt("assign", dst=IRVar("a", K_I32), src=IRConst(2, K_I32))],
+            ]),
+            IRStmt("assign", dst=IRVar("a", K_I32), src=IRConst(3, K_I32)),
+        ], variables={"a": K_I32})
+        output = self._make_writer().write_function(ir)
+        lines = [l for l in output.splitlines() if l.strip()]
+
+        before_if = next(l for l in lines if "var a" in l)
+        after_if = next(l for l in lines if "a = 3" in l)
+
+        assert self._line_indent(before_if) // 4 == 1, \
+            f"var a at indent 1, got {self._line_indent(before_if) // 4}"
+        assert self._line_indent(after_if) // 4 == 1, \
+            f"a=3 after if at indent 1, got {self._line_indent(after_if) // 4}"

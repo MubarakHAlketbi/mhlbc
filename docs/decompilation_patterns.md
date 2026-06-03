@@ -193,26 +193,26 @@ switch (r1) {
 ### Direct/Static Call
 
 ```
-OCall1 r_dst, findex, r_arg0   ; 1 arg
-OCall0 r_dst, findex           ; 0 args
-OCallN r_dst, findex, r0, r1, ... ; N args
+OCall1 r_dst, fun_idx, r_arg0   ; 1 arg; fun_idx is function pool index or type index (NOT a register)
+OCall0 r_dst, fun_idx           ; 0 args
+OCallN r_dst, r_fun_reg, count, r0, r1, ... ; N args; args[1] is a register holding the function value
 ```
 
 ### Method Call (Virtual Dispatch)
 
 ```
-OCallMethod r_dst, field_idx, r_obj, r_arg0, ...
+OCallMethod r_dst, method_idx, count, r_obj, r_arg0, ...
 ```
 
-The `field_idx` is the virtual table slot index (pindex from the proto).
+The `method_idx` is the virtual table slot index (pindex from the proto) -- NOT a register. `count` is the total extras byte (receiver + arg regs). `r_obj` is the receiver register.
 
 ### This-Method Call
 
 ```
-OCallThis r_dst, field_idx, r_arg0, ...
+OCallThis r_dst, method_idx, count, r_arg0, ...
 ```
 
-Uses `this` (register 0) as the receiver.
+Uses `this` (register 0) as the receiver. `method_idx` is a proto index (NOT a register). `count` is the extras byte (arg regs only).
 
 ### Closure Call
 
@@ -253,7 +253,7 @@ OMakeEnum r_dst, construct_idx, r_param0, r_param1, ...
 OR:
 
 ```
-OEnumAlloc r_dst, r_type     ; allocate raw enum
+OEnumAlloc r_dst, enum_type_idx     ; allocate raw enum (args[1] is a type pool index, NOT a register)
 OSetEnumField r_val, r_dst, 0  ; set field 0
 OSetEnumField r_val, r_dst, 1  ; set field 1
 ```

@@ -94,15 +94,15 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 
 | # | Opcode | Args | Description |
 |---|--------|------|-------------|
-| 24 | **OCall0** | `R(dst), R(fun_reg), X` | `dst = fun_reg()` (0 args) |
-| 25 | **OCall1** | `R(dst), R(fun_reg), R(a0)` | `dst = fun_reg(a0)` |
-| 26 | **OCall2** | `R(dst), AR(always_4), 4` | `dst = fun_reg(a0, a1)` (4 = fixed 2-reg count) |
-| 27 | **OCall3** | `R(dst), AR(always_5), 5` | `dst = fun_reg(a0, a1, a2)` |
-| 28 | **OCall4** | `R(dst), AR(always_6), 6` | `dst = fun_reg(a0, a1, a2, a3)` |
-| 29 | **OCallN** | `R(dst), AR(n), VAR_ARGS` | `dst = fun_reg(a0, a1, ..., a[n-1])` |
-| 30 | **OCallMethod** | `R(dst), AR(n), VAR_ARGS` | `dst = args[0].method(args[1..])` |
-| 31 | **OCallThis** | `R(dst), AR(n), VAR_ARGS` | `dst = this.method(args[0..])` (this = reg0) |
-| 32 | **OCallClosure** | `R(dst), AR(n), VAR_ARGS` | `dst = closure_reg(args[0..])` |
+| 24 | **OCall0** | `R(dst), C(fun_idx), X` | `dst = fun_idx()` (0 args; args[1] is a function index or type index, NOT a register) |
+| 25 | **OCall1** | `R(dst), C(fun_idx), R(a0)` | `dst = fun_idx(a0)` (args[1] is a function index or type index) |
+| 26 | **OCall2** | `R(dst), C(fun_idx), AR(2_regs)` | `dst = fun_idx(a0, a1)` (args[1] is a function index or type index, not a register) |
+| 27 | **OCall3** | `R(dst), C(fun_idx), AR(3_regs)` | `dst = fun_idx(a0, a1, a2)` |
+| 28 | **OCall4** | `R(dst), C(fun_idx), AR(4_regs)` | `dst = fun_idx(a0, a1, a2, a3)` |
+| 29 | **OCallN** | `R(dst), R(fun_reg), AR(n), extra...` | `dst = fun_reg(a0, ..., a[n-1])` (vararg layout: p1=dst, p2=fun_reg, p3=count byte, extras=args) |
+| 30 | **OCallMethod** | `R(dst), C(method_idx), AR(n), extra[0]=receiver, extra[1:]=args` | `dst = receiver.method(args[0..])` (vararg: p1=dst, p2=method_index, p3=count byte, extra[0]=receiver reg, extra[1:]=method arg regs; method_index is a proto index, NOT a register) |
+| 31 | **OCallThis** | `R(dst), C(method_idx), AR(n), extras=args` | `dst = this.method(args[0..])` (vararg: p1=dst, p2=method_index, p3=count byte, extras=args; method_index is a proto index, NOT a register; receiver is implicit reg0) |
+| 32 | **OCallClosure** | `R(dst), R(closure_reg), AR(n), extra...` | `dst = closure_reg(args[0..])` (vararg: p1=dst, p2=closure_reg, p3=count byte, extras=args) |
 
 ### 33-35: Closures
 
@@ -126,7 +126,7 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 | 38 | **OField** | `R(dst), R(obj), C(field_idx)` | `dst = obj.fields[field_idx]` |
 | 39 | **OSetField** | `R_NW(src), R(obj), C(field_idx)` | `obj.fields[field_idx] = src` |
 | 40 | **OGetThis** | `R(dst), C(field_idx), X` | `dst = this.fields[field_idx]` |
-| 41 | **OSetThis** | `R_NW(src), R(reg), X` | `this.fields[reg_idx] = src` (field index from register) |
+| 41 | **OSetThis** | `R_NW(src), C(field_idx), X` | `this.fields[field_idx] = src` (args[1] is a field index constant, NOT a register -- despite the "reg_" prefix in some code comments) |
 | 42 | **ODynGet** | `R(dst), R(obj), C(field_name_str_idx)` | `dst = obj[field_name]` (dynamic) |
 | 43 | **ODynSet** | `R_NW(src), R(obj), C(field_name_str_idx)` | `obj[field_name] = src` (dynamic) |
 
@@ -210,11 +210,11 @@ p3 = UINDEX()        — unsigned VarInt (default offset)
 
 | # | Opcode | Args | Description |
 |---|--------|------|-------------|
-| 90 | **OMakeEnum** | `R(dst), AR(n), VAR_ARGS` | `dst = EnumConstructor(args[0..])` |
-| 91 | **OEnumAlloc** | `R(dst), R(enum_type), X` | `dst = alloc(enum_type)` (raw alloc, no constructor) |
-| 92 | **OEnumIndex** | `R(dst), R(enum_val), X` | `dst = enum_val.index` (constructor index) |
-| 93 | **OEnumField** | `R(dst), AR(always_4), 4` | `dst = enum_val.field[param_idx]` (4 = fixed 1-reg + 1-const) |
-| 94 | **OSetEnumField** | `R_NW(val), R(enum_val), C(field_idx)` | `enum_val.field[field_idx] = val` |
+| 90 | **OMakeEnum** | `R(dst), C(construct_idx), AR(n), extra...` | `dst = EnumConstructor(args[0..])` (vararg: p1=dst, p2=construct_idx (constant, NOT a register), p3=count byte, extras=arg regs) |
+| 91 | **OEnumAlloc** | `R(dst), C(enum_type_idx), X` | `dst = alloc(enum_type_idx)` (raw alloc; args[1] is a type pool index, NOT a register -- no source registers consumed) |
+| 92 | **OEnumIndex** | `R(dst), R(enum_val), X` | `dst = enum_val.index` (constructor index as integer) |
+| 93 | **OEnumField** | `R(dst), R(enum_val), C(field_idx), ???` | `dst = enum_val.field[field_idx]` (nargs=4; args[2] is field_idx constant; 4th arg purpose is ambiguous -- possibly enum_type_idx) |
+| 94 | **OSetEnumField** | `R_NW(enum_val), R_NW(value), C(field_idx)` | `enum_val.field[field_idx] = value` (BOTH enum_val and value are read-only source registers; field_idx is a constant; no destination register) |
 
 ### 95-101: Miscellaneous
 

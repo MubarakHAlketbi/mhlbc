@@ -501,8 +501,8 @@ class RegisterLiveness:
         # Field reads
         if op in (38, 40, 42, 74, 75, 76, 77):
             return [args[0]]
-        # Type/ref/enum reads
-        if op in (83, 89, 90, 93, 96, 97):
+        # Type/ref/enum reads (NOT stores: OSetref 89 is excluded)
+        if op in (83, 90, 93, 96, 97):
             return [args[0]]
         # OGetThis writes to dst
         if op == 40:
@@ -576,9 +576,9 @@ class RegisterLiveness:
                     srcs.append(args[count_idx + 1 + k])
             return srcs
 
-        # OCallThis: dst, nargs, args...
-        if op == 31 and len(args) >= 2:
-            count_idx = 1
+        # OCallThis: dst, method_index, count, args...
+        if op == 31 and len(args) >= 3:
+            count_idx = 2
             count = args[count_idx]
             for k in range(min(count, len(args) - count_idx - 1)):
                 srcs.append(args[count_idx + 1 + k])
@@ -696,12 +696,19 @@ class RegisterLiveness:
             for k in range(min(count, len(args) - count_idx - 1)):
                 srcs.append(args[count_idx + 1 + k])
             return srcs
-        if op == 91 and len(args) >= 2:
-            return [args[1]]
+        if op == 91:  # OEnumAlloc: args[1] is a type index (NOT a register)
+            return srcs
         if op == 92 and len(args) >= 2:
             return [args[1]]
-        if op in (93, 94) and len(args) >= 3:
+        if op == 93 and len(args) >= 3:
+            # OEnumField: args = [dst, enum_val_reg, field_idx, ???]
+            # args[2] = field_idx (index, not a register). 4th arg ambiguous — keep
+            # current behavior for OEnumField; only fix the OSetEnumField case below.
             return [args[1], args[2]]
+        if op == 94 and len(args) >= 3:
+            # OSetEnumField: args = [enum_val_reg, value_reg, field_idx]
+            # args[0] = enum_val, args[1] = value, args[2] = field_idx (NOT a reg)
+            return [args[0], args[1]]
 
         # Misc
         if op == 96 and len(args) >= 2:
@@ -1063,23 +1070,12 @@ def build_register_type_evidence(
 
     # Call return type resolution: safe cases only
     # Build producer_map: reg -> instruction whose dst matches reg
+    # Delegates to canonical RegisterLiveness._get_dst_regs for opcode semantics
     producer_map: Dict[int, Instruction] = {}
     for instr in instructions:
-        a = instr.args
-        if not a:
-            continue
-        opc = instr.opcode
-        dst = None
-        if opc in (0, 1, 2, 3, 4, 5, 6):
-            dst = a[0]
-        elif opc in _ARITHMETIC_BINARY_OPS or opc in _ARITHMETIC_UNARY_OPS:
-            dst = a[0]
-        elif opc in _CALL_OPS:
-            dst = a[0]
-        elif opc in (33, 34, 35, 36, 38, 40, 42, 82, 83, 84, 85, 86, 87, 88, 90):
-            dst = a[0]
-        if dst is not None and dst not in producer_map:
-            producer_map[dst] = instr
+        dst_regs = RegisterLiveness._get_dst_regs(instr)
+        if dst_regs and dst_regs[0] not in producer_map:
+            producer_map[dst_regs[0]] = instr
 
     for instr in instructions:
         opc = instr.opcode
@@ -1335,56 +1331,13 @@ def _categorize_dynamic_attributions(
     """
     attributions: Dict[str, str] = {}
 
-    # Build: for each instruction, track which dst register is set and by what opcode
-    instr_dst_info: Dict[int, int] = {}  # reg_idx -> opcode that writes to it (first write)
+    # Build instr_dst_info: reg_idx -> opcode of first instruction that writes it
+    # Delegates to canonical RegisterLiveness._get_dst_regs for opcode semantics
+    instr_dst_info: Dict[int, int] = {}
     for instr in instructions:
-        # Determine dst register based on opcode
-        dst_reg = None
-        args = instr.args
-        if not args:
-            continue
-        op = instr.opcode
-        if op == 0:  # OMov
-            dst_reg = args[0]
-        # Constants: args[0] is dst
-        elif op in (1, 2, 3, 4, 5, 6):
-            dst_reg = args[0]
-        # Arithmetic binary: args[0] is dst
-        elif op in _ARITHMETIC_BINARY_OPS:
-            dst_reg = args[0]
-        # Unary arithmetic: args[0] is dst
-        elif op in _ARITHMETIC_UNARY_OPS:
-            dst_reg = args[0]
-        # Conversions: args[0] is dst
-        elif op in _CONVERSION_OPS:
-            dst_reg = args[0]
-        # Calls: args[0] is dst
-        elif op in _CALL_OPS:
-            dst_reg = args[0]
-        # OField: args[0] is dst
-        elif op in (38, 42):
-            dst_reg = args[0]
-        # OGetThis: args[0] is dst
-        elif op == 40:
-            dst_reg = args[0]
-        # OGetGlobal: args[0] is dst
-        elif op == 36:
-            dst_reg = args[0]
-        # Closures: args[0] is dst
-        elif op in (33, 34, 35):
-            dst_reg = args[0]
-        # Type ops: args[0] is dst
-        elif op in (82, 83, 84, 85, 86):
-            dst_reg = args[0]
-        # ORef, OUnref: args[0] is dst
-        elif op in (87, 88):
-            dst_reg = args[0]
-        # OMakeEnum: args[0] is dst
-        elif op == 90:
-            dst_reg = args[0]
-
-        if dst_reg is not None and dst_reg not in instr_dst_info:
-            instr_dst_info[dst_reg] = op
+        dst_regs = RegisterLiveness._get_dst_regs(instr)
+        if dst_regs and dst_regs[0] not in instr_dst_info:
+            instr_dst_info[dst_regs[0]] = instr.opcode
 
     for vname, vtype_idx in variables.items():
         resolved = type_resolver.resolve(vtype_idx)
@@ -1966,10 +1919,11 @@ class ExprBuilder:
             method_name = IRVar(f"meth[{method_idx}]") if method_idx is not None else IRVar("?")
             expr = IRExpr("method_call", [receiver, method_name] + method_args)
 
-        elif op == 31:  # OCallThis: dst, count, args...
-            count = args[1] if len(args) >= 2 else 0
-            this_args = [self._reg_var(args[2 + i])
-                         for i in range(min(count, len(args) - 2))]
+        elif op == 31:  # OCallThis: dst, method_index, count, args...
+            # args[1] is method_index (NOT count), args[2] is count (p3 byte)
+            count = args[2] if len(args) >= 3 else 0
+            this_args = [self._reg_var(args[3 + i])
+                         for i in range(min(count, len(args) - 3))]
             expr = IRExpr("method_call", [IRVar("this")] + this_args)
             return IRStmt("assign", dst=dst, src=expr)
 
@@ -4072,9 +4026,7 @@ class HaxeWriter:
             self._indent -= 1
 
             if len(stmt.blocks) > 1 and stmt.blocks[1]:
-                self._indent -= 1  # cancel the else indent
                 lines.append(self._indent_str() + "} else {")
-                self._indent += 1
                 self._indent += 1
                 for s in stmt.blocks[1]:
                     line = self._stmt_to_line(s)
@@ -4274,25 +4226,12 @@ class Decompiler:
             type_resolver = TypeResolver(parser)
 
         # Build producer map: reg_idx -> instruction that writes it
+        # Delegates to canonical RegisterLiveness._get_dst_regs for opcode semantics
         producer_map: Dict[int, Instruction] = {}
         for instr in instructions:
-            args = instr.args
-            if not args:
-                continue
-            op = instr.opcode
-            dst_reg = None
-            if op in (0, 1, 2, 3, 4, 5, 6):
-                dst_reg = args[0]
-            elif op in _ARITHMETIC_BINARY_OPS or op in _ARITHMETIC_UNARY_OPS:
-                dst_reg = args[0]
-            elif op in _CALL_OPS:
-                dst_reg = args[0]
-            elif op in (33, 34, 35):  # closures
-                dst_reg = args[0]
-            elif op in (36, 38, 40, 42, 82, 83, 84, 85, 86, 87, 88, 90):
-                dst_reg = args[0]
-            if dst_reg is not None and dst_reg not in producer_map:
-                producer_map[dst_reg] = instr
+            dst_regs = RegisterLiveness._get_dst_regs(instr)
+            if dst_regs and dst_regs[0] not in producer_map:
+                producer_map[dst_regs[0]] = instr
 
         result: Dict[str, CallReturnRecord] = {}
 
@@ -4550,57 +4489,13 @@ class Decompiler:
 
     @staticmethod
     def _get_src_regs_instr(instr) -> list:
-        """Get source registers for an instruction (static helper)."""
-        from hl_disasm import Instruction
-        op = instr.opcode
-        a = instr.args
-        if not a:
-            return []
-        # OMov: src is args[1]
-        if op == 1 and len(a) >= 2:
-            return [a[1]]
-        # OInt, OFloat, OBool, etc. have no src registers
-        if op in (0, 2, 3, 4, 5, 6, 7, 8, 82, 84, 85, 86):
-            return []
-        # Arithmetic: src are args[1], args[2]
-        if 7 <= op <= 19 and len(a) >= 3:
-            return [a[1], a[2]]
-        # Unary: src is args[1]
-        if op in (20, 21, 59, 60, 61, 62, 63, 64, 65) and len(a) >= 2:
-            return [a[1]]
-        # Calls: all args after dst are src
-        if op in (24, 25, 26, 27, 28, 29):
-            return list(a[2:]) if len(a) >= 3 else []
-        if op == 30 and len(a) >= 4:  # OCallMethod
-            return list(a[3:])
-        if op == 32 and len(a) >= 3:  # OCallClosure
-            return list(a[2:])
-        # Jumps: src is args[0] for conditional jumps
-        if op in (44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58) and len(a) >= 1:
-            return [a[0]]
-        # OSwitch: val is args[0]
-        if op == 70 and len(a) >= 1:
-            return [a[0]]
-        # OField, OSetField: object reg is args[1] for OField, args[0] for OSetField
-        if op == 38 and len(a) >= 2:
-            return [a[1]]
-        if op == 39 and len(a) >= 2:
-            return [a[0]]
-        # OGetGlobal: no src
-        if op == 36:
-            return []
-        # OGetThis: no src
-        if op == 40:
-            return []
-        # ORef/OUnref: src is args[1]
-        if op in (87, 88) and len(a) >= 2:
-            return [a[1]]
-        # OSetArray: src are args[1], args[2]; dynamic store
-        if op in (81, 91, 92) and len(a) >= 3:
-            return [a[1], a[2]]
-        if op == 83 and len(a) >= 3:
-            return [a[1], a[2]]
-        return []
+        """Get source registers for an instruction (static helper).
+
+        Delegates to RegisterLiveness._get_src_regs, the canonical
+        source-register semantics implementation, to avoid maintaining
+        a divergent copy.
+        """
+        return RegisterLiveness._get_src_regs(instr)
 
     def _classify_null_single(
         self,
@@ -4643,10 +4538,11 @@ class Decompiler:
         # Check consumer patterns
         reg_consumers = consumers.get(reg_idx, [])
         has_field_store = any(i.opcode in (39, 41) for i in reg_consumers)  # OSetField, OSetThis
-        has_global_store = any(i.opcode == 36 for i in reg_consumers)
+        has_global_store = any(i.opcode == 37 for i in reg_consumers)  # OSetGlobal (not OGetGlobal)
         has_array_store = any(i.opcode in (81, 91, 92) for i in reg_consumers)
-        has_omov = any(i.opcode == 1 for i in reg_consumers)
-        has_branch = any(i.opcode in (44, 45, 46, 47, 56, 57, 58) for i in reg_consumers)
+        has_omov = any(i.opcode == 0 for i in reg_consumers)  # OMov (not OInt)
+        # All conditional jumps except OJAlways (58) which has no src regs
+        has_branch = any(i.opcode in range(44, 58) for i in reg_consumers)
 
         if has_field_store:
             return NT_CAT_FIELD_STORE
