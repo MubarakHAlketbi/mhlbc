@@ -6908,8 +6908,110 @@ class TestB52ForwardMergeCleanup:
         )
 
 # ============================================================================
-# Test: B54 -- Null-target classification regression (OSetThis)
+# Test: Session 58 -- return_region_cfg_fallthrough cleanup
 # ============================================================================
+
+class TestReturnRegionCfgFallthroughCleanup:
+    """Verify _cleanup_return_region_jump_gotos() correctly suppresses only
+    provably redundant return_region_cfg_fallthrough gotos.
+
+    The function uses CFG evidence: target must be a merge point (2+ preds),
+    goto block must be a predecessor, and a fallthrough path must exist from
+    non-target successors to the target block.
+    """
+
+    def _make_goto(self, target: str, instr_idx: int = 0) -> IRStmt:
+        """Create a goto statement with the given target."""
+        return IRStmt(op="goto", comment=f"@{target}", index=instr_idx)
+
+    def _make_label(self, target: str, instr_idx: int) -> IRStmt:
+        """Create a label statement."""
+        return IRStmt(op="label", comment=target, index=instr_idx)
+
+    def _make_assign(self, instr_idx: int) -> IRStmt:
+        """Create an assignment statement."""
+        return IRStmt(op="assign", index=instr_idx)
+
+    # --- Without CFG: function must be safe (no-op) ---
+
+    def test_empty_cfg_returns_unchanged(self):
+        """With empty CFG, no cleanup should occur."""
+        from hl_decompile import _cleanup_return_region_jump_gotos
+        body = [self._make_goto("10"), self._make_assign(10)]
+        result = _cleanup_return_region_jump_gotos(body, [], [])
+        assert len(result) == 2
+        assert result[0].op == "goto"
+
+    def test_none_cfg_returns_unchanged(self):
+        """With empty instructions, no cleanup should occur."""
+        from hl_decompile import _cleanup_return_region_jump_gotos
+        body = [self._make_goto("10"), self._make_assign(10)]
+        result = _cleanup_return_region_jump_gotos(body, [], [])
+        assert len(result) == 2
+
+    def test_empty_body_returns_unchanged(self):
+        """Empty body returns unchanged."""
+        from hl_decompile import _cleanup_return_region_jump_gotos
+        result = _cleanup_return_region_jump_gotos([], [], [])
+        assert result == []
+
+    # --- Without CFG block match: must preserve gotos ---
+
+    def test_no_cfg_blocks_preserves_goto(self):
+        """Goto with no matching CFG block is preserved."""
+        from hl_decompile import _cleanup_return_region_jump_gotos
+        from hl_disasm import BasicBlock
+        body = [
+            self._make_goto("20", instr_idx=0),
+            self._make_assign(5),
+            self._make_label("20", instr_idx=20),
+        ]
+        # CFG with a single block that doesn't contain the goto
+        cfg = [BasicBlock(id=0, start_ip=10, end_ip=30, predecessors=[], successors=[],
+                          instructions=[])]
+        result = _cleanup_return_region_jump_gotos(body, [], cfg)
+        assert len([s for s in result if s.op == "goto"]) == 1
+
+    # --- Fixture-based verification ---
+
+    def test_track_a_func62_goto_removed(self):
+        """Verify the known return_region_jump case in func 62 (toLowerCase)
+        is suppressed by the cleanup pipeline."""
+        from pathlib import Path
+        from scripts.decompiler_quality_report import _parse, _decompile
+        p = _parse(str(Path(__file__).resolve().parent.parent
+                       / "tests" / "fixtures" / "hl" / "ControlFlow.hl"))
+        result, _ = _decompile(p)
+        ir_fn = result.functions.get(62)
+        assert ir_fn is not None, "func 62 should exist"
+        gotos = [s for s in ir_fn.body if s.op == "goto"]
+        # The return_region goto @3 should be suppressed
+        suppressed = not any(
+            (s.comment or "").lstrip("@") == "3" and s.op == "goto"
+            for s in ir_fn.body
+        )
+        assert suppressed, "return_region goto @3 should be suppressed"
+
+    def test_user_defined_goto_preserved(self):
+        """Verify a top-level goto that is NOT near a terminal is preserved."""
+        from hl_decompile import _cleanup_return_region_jump_gotos
+        from hl_disasm import BasicBlock, Instruction
+        body = [
+            self._make_assign(1),
+            self._make_goto("99", instr_idx=2),
+            self._make_assign(5),
+            self._make_assign(6),
+            self._make_label("99", instr_idx=99),
+        ]
+        # Single block covering all instructions
+        cfg = [BasicBlock(id=0, start_ip=0, end_ip=100,
+                          predecessors=[], successors=[],
+                          instructions=[])]
+        instrs = []
+        result = _cleanup_return_region_jump_gotos(body, instrs, cfg)
+        # Goto should be preserved: no terminal nearby, cfg doesn't have
+        # fallthrough evidence (single block, no predecessors)
+        assert len([s for s in result if s.op == "goto"]) == 1
 
 class TestB54NullTargetClassification:
     """Verify null-target classification works with OSetThis consumers.

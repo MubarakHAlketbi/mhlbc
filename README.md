@@ -10,16 +10,16 @@ Current scope is **Tier 1: Core Decompiler**. Later modding layers such as bytec
 
 ## Current Snapshot
 
-This README reflects the repository snapshot at Session 56.
+This README reflects the repository snapshot at Session 58.
 
 | Area | Status |
 |------|--------|
 | Branch | `main` |
-| Latest documented milestone | Sessions 54-55B (register-semantics audit), Session 56 (cleanup) |
+| Latest documented milestone | Sessions 57-58 (MEMORY.md refactor, to_if_target/cfg_jump_chain diagnostics) |
 | Test suite | 838 passed, 4 skipped |
 | Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes |
 | Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors |
-| Current next target | B54: to_if_target diagnostic-only milestone (goto frontier, not register semantics) |
+| Current next target | return_region_jump diagnostic (goto frontier) |
 | Later tiers | Frozen |
 
 The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) has closed the opcode source/destination frontier. The remaining active work is controlled ControlStructurer quality improvement, especially classifying and reducing top-level goto patterns with diagnostic-first analysis.
@@ -153,20 +153,18 @@ These require explicit project-owner unlock before broad behavior work:
 
 The register-semantics audit (Sessions 54-55B) is complete. The active remaining quality frontier is ControlStructurer/top-level goto behavior.
 
-B48 classified all top-level gotos by target bucket. The largest bucket is `to_if_target`:
+Session 58 diagnostic work (B57/B57 labels) has classified the `to_if_target` bucket (78.4% of Track A top-level gotos). Finding: 95-100% are genuine branch-entry jumps that provide the ONLY entry path into their target branch -- NOT safe to suppress. The bucket is now considered exhausted.
 
-| Scope | to_if_target | % of top-level gotos |
-|-------|-------------:|--------------------:|
-| Track A | 1190 | 78.4% |
-| Track B 200 | 96 | 42.1% |
-| Track B 500 | 247 | 50.3% |
+Remaining top-level goto buckets in order of size:
+1. `return_region_jump` -- Track A 143, Track B sampled
+2. `backward_jump` -- Track A 29, Track B sampled
+3. `forward_to_common_merge` -- Track A 55 (post-B52), Track B sampled
+4. Other (loop, switch, unreachable, missing, unknown)
 
-B52 and B48 have addressed `forward_to_next_label` and partially classified `forward_to_common_merge`. The next diagnostic-only milestone (B54) should classify `to_if_target` to determine how many are provable merge skips vs genuine cross-boundary jumps.
-
-B52 excluded:
-- `multi_pred_merge`
-- `to_if_target`
+B52 excluded from scope (still open):
 - `return_region_jump`
+- `backward_jump`
+- `to_if_target` (now exhausted)
 - non-immediate `forward_to_next_label`
 - loop/backedge work
 - TypeResolver or field recovery work

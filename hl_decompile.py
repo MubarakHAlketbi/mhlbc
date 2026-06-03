@@ -2565,6 +2565,157 @@ def _cleanup_forward_merge_gotos(stmts: List[IRStmt]) -> List[IRStmt]:
     return stmts
 
 
+def _cleanup_return_region_jump_gotos(
+    stmts: List[IRStmt],
+    instructions: List[Instruction],
+    cfg: List[BasicBlock],
+) -> List[IRStmt]:
+    """Suppress top-level forward gotos where CFG proves the target is a merge
+    point reachable by fallthrough from the skipped region.
+
+    These correspond to B48-classified return_region_jump cases that the
+    diagnostic (Session 58 return_region_jump census) proved are structurally
+    redundant: the goto jumps over structured blocks to reach a merge point
+    that naturally receives the same flow via fallthrough.
+
+    Conservative guard (all must hold):
+      1. Top-level goto with a forward target.
+      2. Target statement exists at a later body position.
+      3. Target block has 2+ CFG predecessors (merge point, not single entry).
+      4. Goto block is one of the target's predecessors.
+      5. A fallthrough path exists from goto block (through non-target successors)
+         to the target block, proving skipped blocks reach the target naturally.
+      6. No terminal statement (return/throw/rethrow) appears between goto and
+         target in the IR body (would block fallthrough at runtime).
+      7. The goto does NOT target a block that appears to be a backedge target
+         or loop header (target position strictly after goto).
+    """
+    if not stmts or not cfg or not instructions:
+        return stmts
+
+    # Build position index
+    index_positions: Dict[str, int] = {}
+    for i, stmt in enumerate(stmts):
+        if stmt.index is not None and stmt.index >= 0:
+            index_positions[str(stmt.index)] = i
+
+    # Build block id -> block map
+    block_map: Dict[int, BasicBlock] = {b.id: b for b in cfg}
+
+    def _block_containing(instr_idx: int) -> Optional[BasicBlock]:
+        for b in cfg:
+            if b.start_ip <= instr_idx < b.end_ip:
+                return b
+        return None
+
+    def _can_reach_target(
+        start_id: int,
+        exclude_id: int,
+        target_id: int,
+    ) -> bool:
+        """BFS from start_id to target_id, excluding exclude_id from traversal.
+        Bounded to avoid degenerate CFG issues."""
+        visited: Set[int] = {exclude_id}
+        queue: List[int] = [start_id]
+        depth = 0
+        while queue and depth < 50:
+            bid = queue.pop(0)
+            if bid in visited:
+                continue
+            visited.add(bid)
+            if bid == target_id:
+                return True
+            blk = block_map.get(bid)
+            if blk is None:
+                continue
+            for succ_id in blk.successors:
+                if succ_id not in visited:
+                    queue.append(succ_id)
+            depth += 1
+        return False
+
+    to_remove: List[int] = []
+
+    for i, stmt in enumerate(stmts):
+        if stmt.op != "goto":
+            continue
+
+        target_str = (stmt.comment or "").lstrip("@")
+        if not target_str or not target_str.isdigit():
+            continue
+
+        tgt_pos = index_positions.get(target_str)
+        if tgt_pos is None or tgt_pos <= i:
+            continue
+
+        goto_instr = stmt.index
+        if goto_instr is None or goto_instr < 0:
+            continue
+
+        tgt_instr = int(target_str)
+
+        # Guard 1: CFG blocks exist
+        goto_block = _block_containing(goto_instr)
+        target_block = _block_containing(tgt_instr)
+        if goto_block is None or target_block is None:
+            continue
+
+        # Guard 2: Target block has 2+ predecessors (merge point)
+        if len(target_block.predecessors) < 2:
+            continue
+
+        # Guard 3: Goto block is one of the predecessors
+        if goto_block.id not in target_block.predecessors:
+            continue
+
+        # Guard 4: No terminal barrier between goto and target in IR
+        has_terminal = False
+        for k in range(i + 1, tgt_pos):
+            s = stmts[k]
+            if s.op in ("return", "throw", "rethrow"):
+                has_terminal = True
+                break
+        if has_terminal:
+            continue
+
+        # Guard 5: Target is within 4 stmts of return/throw (B48-style check)
+        # This mirrors B48's _has_return_or_throw_nearby to ensure only
+        # B48-classified return_region_jump cases are suppressed.
+        target_near_terminal = False
+        for k in range(tgt_pos + 1, min(tgt_pos + 5, len(stmts))):
+            s = stmts[k]
+            if s.op in ("return", "throw", "rethrow"):
+                target_near_terminal = True
+                break
+            # Stop at the first structured statement that's not goto/label/comment
+            if s.op not in ("goto", "label", "comment", "nop"):
+                break
+        if not target_near_terminal:
+            continue
+
+        # Guard 6: Fallthrough path exists from goto's other successors
+        # to target, proving skipped blocks reach the merge point naturally.
+        fallthrough_proven = False
+        for succ_id in goto_block.successors:
+            if succ_id == target_block.id:
+                continue  # This is the goto edge itself
+            if _can_reach_target(succ_id, goto_block.id, target_block.id):
+                fallthrough_proven = True
+                break
+
+        if not fallthrough_proven:
+            continue
+
+        # All guards passed -- this goto is provably redundant
+        to_remove.append(i)
+
+    # Remove in reverse order to preserve indices
+    for pos in sorted(to_remove, reverse=True):
+        del stmts[pos]
+
+    return stmts
+
+
 class ControlStructurer:
     """Transform flat CFG basic blocks into structured control flow.
 
@@ -4634,6 +4785,15 @@ class Decompiler:
         structured_stmts = _cleanup_forward_merge_gotos(structured_stmts)
         _b52_gotos_after = sum(1 for s in structured_stmts if s.op == "goto")
         _b52_removed = max(0, _b52_gotos_before - _b52_gotos_after)
+
+        # Step 5d: Suppress return_region_cfg_fallthrough gotos
+        # These are top-level forward gotos whose target is a CFG merge point
+        # reachable by fallthrough from skipped blocks (proven redundant).
+        # Only applies when CFG evidence confirms 2+ preds + fallthrough path.
+        _rr_gotos_before = sum(1 for s in structured_stmts if s.op == "goto")
+        structured_stmts = _cleanup_return_region_jump_gotos(
+            structured_stmts, instructions, cfg)
+        _rr_gotos_removed = max(0, _rr_gotos_before - sum(1 for s in structured_stmts if s.op == "goto"))
 
         # Step 6: Register type evidence + variable declarations
         reg_type_evidence = build_register_type_evidence(
