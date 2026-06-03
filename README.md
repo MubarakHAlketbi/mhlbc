@@ -191,7 +191,6 @@ mhlbc/
 |-- CONTRIBUTING.md                # Development workflow and process
 |-- requirements.txt               # Test/dev dependencies
 |-- docs/
-|   |-- architecture.html
 |   |-- decompilation_patterns.md
 |   |-- farever_ghidra_hl_code_read.md
 |   |-- function_format.md
@@ -214,26 +213,16 @@ mhlbc/
 |   |-- _varint.py
 |   `-- _version.py
 |-- scripts/
-|   |-- b26_analyze_goto_patterns.py
-|   |-- b27_analyze_switch_cases.py
-|   |-- b28_analyze_structured_block.py
-|   |-- b29_ir_position_analysis.py
-|   |-- b29_preflight.py
-|   |-- b29_report.py
-|   |-- b35_analyze_after_goto_block.py
+|   |-- legacy/                    # Archived milestone scripts
 |   |-- b36_analyze_field_names.py
-|   |-- b43_field_layout_audit.py
-|   |-- b47_analyze_if_gotos.py
 |   |-- b48_analyze_top_level_gotos.py
 |   |-- b50_analyze_backward_jumps.py
 |   |-- b51_analyze_forward_to_common_merge.py
+|   |-- b52_cross_tab.py
+|   |-- b53_frontier_rebaseline.py
 |   |-- decompiler_quality_report.py
 |   |-- extract_b23_null_detail.py
-|   |-- extract_b31_virtual_detail.py
-|   |-- farever_function_boundary_probe.py
-|   |-- farever_runtime_parity_report.py
-|   |-- null_target_audit.py
-|   `-- unknown_callee_audit.py
+|   `-- extract_b31_virtual_detail.py
 `-- tests/
     |-- __init__.py
     |-- hl_helper.py

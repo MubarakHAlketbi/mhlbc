@@ -3,9 +3,9 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-03
-Current accepted project state: Session 55 OEnumField operand resolution accepted
+Current accepted project state: Session 56 cleanup audit completed
 Branch: main
-HEAD: ae078ad
+HEAD: 4965227
 Tests: 838 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 0 errors, 0 unknown opcodes
@@ -19,6 +19,8 @@ Keep this file small. Move details to docs/, reports, tests, or scripts and leav
 ## 1. Current accepted state
 
 mhlbc currently has a stable parser/decompiler validation baseline with Track A zero errors and Track B sample=200/sample=500 zero errors. The dynamic/null/call-return frontier is closed and locked at zero actionable cases. The remaining active quality frontier is ControlStructurer/top-level goto behavior, especially the to_if_target bucket.
+
+Session 56 completed a cleanup audit: removed 6 stale/unreferenced files, moved 9 old milestone scripts to scripts/legacy/, preserved all 3 MEMORY.md evidence-pointer scripts. No behavior changes. Updated README.md directory tree. Tests unchanged (838 passed, 4 skipped).
 
 OEnumField(93) operand layout was resolved in Session 55: args=[dst, enum_val_reg, construct_idx, field_offset_idx]. Both construct_idx and field_offset_idx are integer constants (not registers), confirmed from hashlink/src/jit.c. RegisterLiveness._get_src_regs now returns only the enum value register.
 
@@ -387,6 +389,16 @@ cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q
 ## 14. Latest handoff
 
 Accepted last milestone:
+|- Session 56: cleanup audit
+|- Type: documentation/cleanup only
+|- Scope: removed 6 stale files (docs/architecture.html, README.md.bak, 4 superseded/experimental scripts); moved 9 old milestone scripts to scripts/legacy/ (b26, b27, b28, b29*, b35, b43, b47)
+|- Kept: scripts/b36_analyze_field_names.py, extract_b23_null_detail.py, extract_b31_virtual_detail.py (MEMORY.md evidence pointers)
+|- Preserved: all current frontier scripts (b48, b50, b51, b52, b53, decompiler_quality_report)
+|- Updated: README.md directory tree
+|- Tests: 838 passed, 4 skipped (unchanged); ASCII-safe
+|- No parser/disassembler/decompiler/writer behavior changed; no frontier state changed
+
+Accepted last milestone (previous):
 |- Session 55: OEnumField(93) operand ambiguity resolution
 |- Type: behavior fix (RegisterLiveness source-register correction)
 |- Behavior changes: _get_src_regs for op 93 now returns [args[1]] (enum_val register) instead of [args[1], args[2]]; args[2] (construct_idx) and args[3] (field_offset_idx) are proven constants, not registers
