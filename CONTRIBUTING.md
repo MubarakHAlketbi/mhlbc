@@ -1,751 +1,678 @@
-Here is the `CONTRIBUTING.md` file designed to onboard developers and establish how to maintain the codebase alongside the knowledge base.
-
 # CONTRIBUTING.md
 
-Thank you for contributing to the Modern HashLink Bytecode Decompiler project. This document outlines the project's architecture, development workflow, and guidelines for maintaining our local knowledge base so that contributors can work independently.
+Contributing guide for mhlbc.
 
----
+This guide is for human contributors and AI agents working on the project. It defines the contribution workflow, documentation discipline, testing expectations, validation/reporting rules, and MEMORY.md maintenance framework.
 
-## 1. Project Architecture Overview
+mhlbc is a general-purpose HashLink/Haxe bytecode decompiler. Farever is an important real-world benchmark, but core behavior must not become Farever-specific.
 
-The codebase is strictly separated into three layers to prevent UI deadlocks and maintain a modular design:
+## 1. Contribution principles
 
-```text
-hl_decompiler/
-│
-├── docs/                      # The Knowledge Base (Target-of-truth)
-│   ├── opcodes.md             # Registry of all 103 opcodes (IDs 0-102) and arguments
-│   ├── type_system.md         # Serialization schemas for types (Obj, Virtual, Enum, etc.)
-│   ├── function_format.md     # Function, native, global, constant serialization
-│   ├── version_deltas.md      # HashLink bytecode version variations (v3, v4, v5+)
-│   ├── header_format.md       # Header field layout reference
-│   ├── varint_encoding.md     # Variable-length integer encoding spec
-|   └── decompilation_patterns.md # Bytecode-to-AST reconstruction patterns
-|
-├── hl_parser/                   # Modular parser package (headless)
-|   ├── __init__.py              # Public API re-exports
-|   ├── _parser.py               # HLParser class
-|   ├── _consts.py               # Type constants, opcode table
-|   ├── _version.py              # Version string (git describe)
-|   ├── _varint.py               # VarInt encode/decode
-|   ├── _validator.py            # Post-parse validation
-|   ├── _diagnostics.py          # ParseDiagnostic dataclass
-|   └── _exceptions.py           # HLParserError
-├── hl_disasm.py                 # Disassembly engine (Gate 4)
-├── hl_decompile.py            # Decompilation engine (Gate 5)
-├── hl_worker.py               # PyQt QThread wrapper for background processing
-├── hl_logger.py               # VerboseLogger for byte-level debug logging
-├── logalyzer.py               # SQLite-backed log analysis CLI
-├── app.py                     # Qt Virtual View (UI rendering and model logic)
-├── cli.py                     # CLI entry point (no PyQt6)
-│
-├── docs/                      # Knowledge base
-│
-└── tests/
-    ├── hl_helper.py           # Test helpers: build bytecode programmatically
-    ├── test_varint.py         # VarInt encoding/decoding tests
-    ├── test_parser.py         # Full pipeline tests (422+ tests)
-    ├── test_logger.py         # VerboseLogger write/flush/close tests
-    ├── test_disasm.py         # Opcode decode, CFG builder, CLI disasm tests
-    └── test_decompile.py      # Decompilation engine tests (Gate 5)
-```
+Use evidence-first work.
 
-### Separation Rules
-* **No UI in Parser:** `hl_parser.py` must remain completely headless. It must not import PySide/PyQt modules. Communication back to the UI should only occur via callbacks or basic Python data structures.
-* **No Data Processing in UI:** `app.py` should only handle rendering. Any heavy calculations, search filters, or decompilation operations must be offloaded to the parser or dedicated processing threads via `hl_worker.py`.
-* **Parser is UI-agnostic:** The parser must not depend on any specific output medium — GUI, CLI, or headless automation. Both GUI and CLI entry points consume the same parser output data structures. No `if gui:` / `if cli:` branches anywhere in the parser.
+Default workflow:
 
----
+1. Classify the task.
+2. Read the relevant project documents.
+3. Inspect current code and tests.
+4. Collect direct evidence.
+5. Add or update focused tests or diagnostics when behavior changes.
+6. Make the smallest safe change.
+7. Run targeted validation.
+8. Run broader validation when scope requires it.
+9. Update docs if proven truth changed.
+10. Update MEMORY.md only for compact accepted state or handoff.
+11. Report exact scope, evidence, files, commands, and results.
 
-## 2. Utilizing and Maintaining the Knowledge Base
+Do not guess bytecode semantics, type semantics, opcode layouts, names, fields, ownership, call targets, or control flow.
 
-The files inside `/docs` serve as the technical specifications for this implementation. Every code modification must map to a specification in `/docs`.
+Do not reopen solved or paused frontiers without new evidence.
 
-### `/docs/opcodes.md`
-* **Purpose:** Defines the layout and parameters for every opcode.
-* **Usage:** When implementing the disassembler engine, refer to this file to check how many registers, pool indexes, or jump offsets each instruction consumes.
-* **Maintenance:** If you discover a new opcode argument layout or a mismatch in offset sizes, update the table in this file first before altering `hl_parser.py`.
+Do not hide malformed input silently.
 
-### `/docs/type_system.md`
-* **Purpose:** Explains type serialization layouts and class field resolution.
-* **Usage:** Use this to write the parser sections for types (`ntypes`). Pay attention to how field indices accumulate down class inheritance hierarchies.
-* **Maintenance:** Document newly discovered abstract structures or nullable envelope behaviors here.
+Do not specialize core behavior for one benchmark, one binary, one game, or one observed artifact unless the project owner explicitly requests an isolated compatibility path.
 
-### `/docs/version_deltas.md`
-* **Purpose:** Details structural differences between HashLink version payloads (such as the presence of `nconstants` in v4 or `nbytes` in v5).
-* **Usage:** Refer to this when adding conditional checks in `hl_parser.py` to prevent stream offset desynchronization.
-* **Maintenance:** Document any upcoming variations (e.g., HashLink v6 changes) here.
+## 2. Task classification
 
-### `/docs/decompilation_patterns.md`
-* **Purpose:** A guide for reconstructing high-level control structures (loops, `if/else` statements, variable assignments) from linear bytecode sequences.
-* **Usage:** Use this when writing the AST decompiler pass to match jump offsets to construct blocks.
-* **Maintenance:** Document compiler optimization sugars (e.g., string concatenation replacements) as you discover them.
+Before changing behavior, classify the work as one or more of:
 
----
+- Core correctness
+- Diagnostic/report-only
+- Documentation/test-only
+- Research/investigation
+- Compatibility handling
+- Roadmap expansion
 
-## 3. Testing Framework
+Core correctness changes require tests.
 
-All new code must be accompanied by tests. We use **pytest 9.x** with a test-per-feature approach.
+Diagnostic/report-only changes must not alter parser, disassembler, decompiler, writer, CFG, or resolver behavior unless explicitly stated.
 
-### Test Structure
+Documentation/test-only changes must not alter runtime behavior.
 
-```
-tests/
-  __init__.py            # Package marker
-  hl_helper.py           # Test helpers: build bytecode programmatically
-  test_varint.py         # VarInt encoding/decoding (1-byte, 2-byte, 4-byte, signed)
-  test_parser.py         # Header + pool + types + globals + natives + functions parsing
-  test_logger.py         # VerboseLogger write/flush/close behavior
-```
+Roadmap expansion requires explicit project-owner instruction or current repository documentation marking it active.
 
-### Running Tests
+Compatibility handling must be isolated, clearly labeled, and backed by evidence.
+
+## 3. Repository boundaries
+
+Preserve repository layering.
+
+Parser:
+- Headless Python.
+- No GUI imports.
+- No UI branching.
+- Owns bytecode parsing and parser diagnostics.
+
+Disassembler and decompiler:
+- Disassembly.
+- CFG.
+- Liveness and register analysis.
+- IR.
+- Control-flow structuring.
+- Type, name, field, and call analysis.
+- Haxe-like output.
+
+CLI:
+- Scriptable interface to parser and analysis features.
+- No GUI dependency.
+
+GUI:
+- Presentation and interaction only.
+- Long-running parse or decompile work must run outside the UI thread.
+
+Tests:
+- Unit, integration, regression, and fixture-backed validation.
+
+Reports and scripts:
+- Diagnostic and validation tooling.
+- Must label scope, sample, baseline, and metric definitions.
+
+Docs:
+- Permanent technical truth and workflow.
+
+Prefer backend first, then CLI, then GUI.
+
+## 4. Using docs/
+
+The docs/ directory contains stable, truth-maintained technical specifications and proven implementation rules.
+
+Use the relevant docs before changing affected behavior.
+
+Minimum doc map:
+
+Parser header, pools, versions:
+- docs/header_format.md
+- docs/varint_encoding.md
+- docs/version_deltas.md
+
+Opcode decoding, disassembly, function bodies:
+- docs/opcodes.md
+- docs/function_format.md
+
+Type, name, field, method, class, enum resolution:
+- docs/type_system.md
+
+Decompiler, IR, CFG, ControlStructurer, writer:
+- docs/decompilation_patterns.md
+- docs/opcodes.md
+
+Validation, reports, acceptance gates:
+- docs/validation_matrix.md
+- CONTRIBUTING.md
+- MEMORY.md current accepted state
+
+Performance and scalability:
+- docs/performance_and_scalability.md
+
+This mapping is a floor, not a ceiling. If a task touches multiple subsystems, use all relevant docs.
+
+Milestone reports that touch bytecode semantics, type semantics, opcode semantics, decompiler behavior, CFG/control-flow behavior, writer behavior, or report pipeline behavior must state which docs were consulted and whether discrepancies were found.
+
+## 5. Docs are truth-maintained
+
+Docs are not sacred. They must match proven truth.
+
+If docs conflict with code, tests, fixtures, reference evidence, runtime evidence, or binary evidence, treat it as an evidence problem.
+
+Required process:
+
+1. Inspect actual current code behavior.
+2. Inspect current tests and fixtures.
+3. Inspect relevant docs.
+4. Inspect reference, runtime, or binary evidence when needed.
+5. Decide which source is stale.
+6. If code is wrong, fix code and tests.
+7. If docs are wrong, update docs to match proven truth.
+8. If both are valid for different versions or cases, document the split.
+9. Do not update docs, MEMORY.md, or reports from speculation.
+
+Bytecode format rules, opcode semantics, type-system rules, CFG patterns, validation tracks, and performance guardrails belong in docs/.
+
+Current state, active frontiers, current baselines, and latest handoff belong in MEMORY.md.
+
+## 6. Testing policy
+
+Run the narrowest meaningful validation first.
+
+Common commands:
 
 ```bash
-# From project root:
-pytest                     # All tests, compact output
-pytest -v                  # Verbose (one test per line)
-pytest tests/              # Explicit path
-pytest -x                  # Stop on first failure
-pytest --tb=long           # Full tracebacks
-pytest -k "varint"         # Filter by keyword
-pytest --coverage          # Coverage report (if pytest-cov installed)
-```
-
-### Writing Tests
-
-1. **Put tests in `tests/`** matching the module name: `hl_parser.py` → `test_parser.py`
-2. **Use the `hl_helper.py` builder** to construct bytecode programmatically:
-   ```python
-   from tests.hl_helper import build_minimal_bytecode, stream_from_bytes
-   
-   bc = build_minimal_bytecode(version=5, ints=[1, 2, 3])
-   p = HLParser("/dev/null")
-   p.execute(stream_from_bytes(bc))
-   ```
-3. **Test both valid and invalid input** (edge cases, truncated data, empty pools)
-4. **Test all version branches** (v3, v4, v5) where version-dependent logic exists
-5. **VarInt tests must cover:**
-   - 1-byte values (0-127)
-   - 2-byte values (128-8191)  
-   - 4-byte values (8192 - 2^29-1)
-   - Signed negative values (bit 5 / 0x20)
-   - Round-trip: encode → decode → original value
-   - Truncated stream errors
-6. **No UI dependencies in parser tests** — never import PyQt in test_parser.py
-
-### Test Fixtures
-
-Use `stream_from_bytes()` to wrap constructed bytecode into a `BytesIO` stream that `HLParser` can read:
-
-```python
-from tests.hl_helper import encode_varint, stream_from_bytes, build_header
-
-data = build_header(version=5, nints=2) + encode_ints_pool([10, 20])
-p = HLParser("/dev/null")
-p.parse_header(stream_from_bytes(data))
-```
-
-### Pre-built Bytecode Builder
-
-The `hl_helper.py` module provides functions to construct HL bytecode from Python primitives without needing the Haxe compiler:
-
-| Function | Purpose |
-|----------|---------|
-| `encode_varint(value)` | Encode signed int → VarInt bytes |
-| `build_header(...)` | Build minimal HL file header |
-| `build_ints_pool(vals)` | Build i32 pool |
-| `build_floats_pool(vals)` | Build f64 pool |
-| `build_strings_pool(strs)` | Build string pool |
-| `build_bytes_pool(data, offsets)` | Build v5+ bytes pool |
-| `build_type_*()` | Build individual type definitions (primitive, wrapper, funlike, objlike, etc.) |
-| `build_type_constructors_pool(types)` | Build types pool from type blobs |
-| `build_globals_pool(globals)` | Build globals pool |
-| `build_natives_pool(natives)` | Build natives pool |
-| `build_opcode_sequence(opcodes)` | Build opcode byte sequence with dummy args |
-| `build_function_entry(type, findex, regs, ops)` | Build single function entry |
-| `build_functions_pool(functions)` | Build functions pool from function entries |
-| `build_minimal_bytecode(...)` | Build complete parseable .hl blob |
-| `stream_from_bytes(data)` | Wrap bytes as BytesIO for parsing |
-
-### Test Coverage Requirements
-
-- **Header parsing**: All version variants, all conditions (debug, no debug, empty pools)
-- **VarInt**: All size classes, signed values, round-trip, error handling
-- **Pools**: Each pool type, empty/single/many elements, truncated data
-- **Types**: All 25 type kind IDs (0–24), compound types (Obj fields/protos/bindings, Enum constructors), unknown kinds
-- **Globals**: Empty, non-empty, truncated
-- **Natives**: Empty, non-empty with correct findex/lib/name/type fields
-- **Functions**: Function headers (type/findex/nregs/nops), register types, opcode skipping with _OPCODE_NARGS, multiple functions, truncated data
-- **Name Resolution**: Proto-based naming, binding-based naming, entrypoint="init", priority rules
-- **Integration**: Full execute() cycle with progress callback across v3/v4/v5
-- **Logger**: File creation, message writing, flush behavior, edge cases
-- **Real HLB ratio rule**: For every 10 synthetic tests added, at least 1 real HLB integration test must also be added. Use fixtures in `tests/fixtures/hl/`. This prevents the test suite from drifting away from real-world accuracy.
-
----
-
-## 4. Workspace Targets (`workspace/`)
-
-The `workspace/` directory at the project root holds compiled HashLink binaries used as real-world test targets.
-
-```
-workspace/
-  Farever/              # Source program name
-    hlboot.dat          # Compiled HashLink bytecode (~13 MB)
-  .../
-    hlboot.dat
-```
-
-Each subdirectory is a named program (e.g. `Farever`) containing its `hlboot.dat` file.
-
-### Purpose
-
-- **Benchmarking** — Measure parsing speed, memory usage, and UI responsiveness against large (10+ MB) commercial-scale bytecode.
-- **Regression detection** — A full parse → inspect → decompile pipeline that must complete without errors across all targets.
-- **Edge case discovery** — Real compiler output exposes patterns that hand-crafted test fixtures miss (string encoding variants, unusual type chains, opcode argument layouts).
-
-### Goal
-
-All targets in `workspace/` must be fully parseable, inspectable, and decompilable. A target counts as fully handled when:
-
-1. **Header + pools** parse without errors
-2. **Types, globals, natives, functions** are fully deserialized with correct field counts
-3. **All opcodes** decode to valid instruction objects
-4. **Function names** resolve correctly (via class protos and bindings)
-5. **Control flow graph** reconstructs basic blocks with correct edges
-6. **AST decompilation** produces valid Haxe-like output
-
-Regressions are defined as any target that parsed successfully before a change failing after it.
-
-### Adding a New Target
-
-1. Create `workspace/<program_name>/`
-2. Place the compiled `hlboot.dat` inside
-3. Verify the project can parse it end-to-end
-4. Commit the target (ensure it's not a commercial program without license — prefer free/open-source Haxe programs)
-
-### Farever Target Notes
-
-The **Farever** target (`workspace/Farever/hlboot.dat`) is a real-world HashLink bytecode
-from the Steam game Farever (Haxe/Heaps engine). Two copies exist:
-
-| Source | MD5 | Size | Notes |
-|--------|-----|------|-------|
-| Windows (Steam, current) | `b85480ed23f04f2efc408e4ebdd208a0` | 13,358,488 | Steam copy after May 29 2026 update |
-| Windows (Steam, prior) | `7014abbad2e5c7ebe33c910b659479a1` | 13,311,404 | Pre-update original game file — uses custom shiroTools HL runtime |
-
-**2026-05-29 game update:** The game received an update adding ~98 functions, ~62 types, ~93 globals, ~125 strings. The old workspace hlboot.dat (`7014abbad2e5c7ebe33c910b659479a1`, 13,311,404) is preserved as `hlboot.dat.old_7014abbad2e5c7ebe33c910b659479a1`. The parser handles both versions with 0 errors.
-
-The initial workspace copy was transferred incorrectly (likely via text-mode copy),
-producing a truncated file that caused false "corrupt binary" conclusions.
-Always verify with the Steam copy.
-
-**Function pool analysis (current file, updated Session 37 after May 29 game update):**
-|- Header: v4, flags=1 (has_debug bit set), nfunctions=45463, ntypes=43906, nglobals=28492, nstrings=65775, nconstants=22211
-|- **Debug info is valid** — parser finds 2051 debug files. Debug section is not corrupt in the current file; the earlier 7-byte offset issue was specific to the original release, which the game update may have fixed.
-|- **Current parser status:** **45,463 / 45,463 functions parse with 0 errors, 0 malformed, 0 warnings.** The parser navigation closure (Session 25) applies to both old and updated files.
-|- **libhl.dll** (482,304 bytes, MD5 `68a4f8eeac234491d348fbb46b28bf54`) is unchanged from pre-update.
-|- **Ghidra analysis (Session 21) remains current:** The bytecode reader (`hl_code_read`, `hl_read_type`) lives in **`Farever.exe`**, not `libhl.dll`. Decompilation of `hl_read_type` confirmed it is **identical to open-source HL** — same type kinds, same switch cases, same error handling. **No format extensions exist in the type system.**
-
-|**shiroTools runtime discovery (Session 14–21):** The Farever game's `libhl.dll` (471 KB, 431 exports) was built from `E:\\Projects\\shiroTools\\hashlink\\src\\`, compiled April 9, 2026 with MSVC 14.29. This is a custom HashLink fork maintained by **Shiro Games** (the game's developer). `libhl.dll` is the **runtime** (allocators, debug, objects, dispatch); the bytecode reader is in **`Farever.exe`** directly. Headless Ghidra analysis confirmed the type system matches open-source HL exactly — no extended type kinds, no different VarInt encoding. The function pool layout remains the open question.
-
----
-
-## 5. Recommended Directory Expansions
-
-To ensure reliability, contributors should adopt the following optional directories as the project scales:
-
-* **`/tests`**: Unit tests to verify that `hl_parser.py` parses reference binaries correctly without regressions.
-* **`/samples`**: Small, compiled `.hl` or `hlboot.dat` fixtures used to run regression tests across different versions. Do not upload commercial program binaries; instead, use small Haxe compiled test scripts.
-
----
-
-## 6. Branch Policy
-
-All development work must be done directly on the **`main`** branch. Feature branches may only be created when explicitly requested by the project owner. This ensures a linear history and avoids merge overhead for a project where all contributors are working on the same codebase.
-
-## 7. Development Workflow
-
-1. **Verify the Spec:** Check `/docs` to see if the structure or behavior you want to implement is already documented.
-2. **Implement in Backend:** Write the raw parsing/decoding logic in `hl_parser.py`.
-3. **Expose to Worker:** Ensure `hl_worker.py` passes any new parsed datasets to the UI thread safely.
-4. **Update UI View:** Bind the data to the virtual list model in `app.py` so it renders dynamically.
-5. **Update Docs:** If you discovered a new layout rule or corrected an error in the parser, update the respective `.md` file in `/docs` as part of your Pull Request.
-6. **Keep README.md and CONTRIBUTING.md Accurate:** Before merging, verify that both files reflect the current state of the project:
-   - **`README.md`** — The **"Development Roadmap"** must be true to code (`[x]` only for fully implemented items) and the **"Technical Specifications"** section must match actual parser behavior.
-   - **`CONTRIBUTING.md`** — The **"Project Architecture Overview"** (file layout, separation rules) must match the actual codebase structure, and the **"Utilizing and Maintaining the Knowledge Base"** section must describe how docs are actually organized and used.
-   - If any change to the architecture, file layout, or doc structure was made during implementation, update the corresponding sections in both files.
-7. **Sharpen AGENTS.md When Possible:** The `AGENTS.md` file encodes concise domain knowledge for AI assistants. Keep it lean:
-   - Only modify it if you discovered something that **enhances the domain knowledge** — a new bytecode layout rule, a threading constraint, a parsing pitfall.
-   - Do **not** mix project documentation into it. Project specs (opcode tables, type schemas, version deltas) belong in `docs/`. `AGENTS.md` is a terse persona brief, not a reference manual.
-   - Prefer fewer words over more. If a single sentence can replace a paragraph, rewrite it.
-   - If the discovery is fully covered in `docs/`, reference the doc file rather than duplicating the content in `AGENTS.md`.
-8. **Update MEMORY.md for Durable State:** `MEMORY.md` is the session ledger and canonical frontier tracker. Its structure is designed for rapid lookup of current state:
-
-   | Section | Purpose | When to Read |
-   |---------|---------|--------------|
-   | Quick Reference | Current session, project state, frontier, do-not-do list | Every session start |
-   | Current Accepted Frontier | Definitive closed/paused bucket tables with evidence links | Before proposing any behavior work |
-   | Session Log | Compressed chronological history (3-5 lines per session) | To find artifact/session provenance |
-   | Evidence Catalog | Topic-organized milestone details (compressed) | To verify closure evidence for a specific bucket |
-   | Appendix | Durable evidence tables and regeneration commands | When cross-referencing per-case data |
-
-   **Update rules:**
-   - Session start: add 3-5 line entry to Session Log
-   - Milestone complete: add to Evidence Catalog, update Quick Reference frontier tables
-   - Never duplicate frontier tables across sections -- reference by milestone ID (e.g., "B36 closure")
-   - Quick Reference frontier table is the single source of truth for bucket status
-   - Keep session entries compressed -- detailed B# evidence lives in Evidence Catalog
-
-   **How to find past work:**
-   - Bucket status: read Quick Reference -> Current Accepted Frontier
-   - Which session created a script: search Session Log for milestone ID
-   - Per-case evidence: check Appendix for regeneration commands
-   - Do-not-do list: read Quick Reference -> Locked Guardrails
-
----
-
-## 8. Mandatory Logging & Investigative Features
-
-Every parser, decoder, or analysis component **must** embed verbose logging and investigative instrumentation from the start. Do not add logging after the fact as an afterthought — build it in during initial implementation.
-
-### Rules
-
-1. **Togglable by design.** Every logging/investigative feature must have a runtime toggle (CLI flag, checkbox, or passed logger object). Verbose mode is **off by default** in production use, and **on by default** during development.
-
-2. **Log every VarInt.** Every variable-length integer decode must emit the raw bytes (hex) and the decoded value. This is the single most common source of stream desync bugs.
-
-3. **Log offsets.** Every pool read must log the stream byte offset before and after the read, plus the total bytes consumed. When parsing later sections (types, functions, opcodes), log the byte offset at the start of each section and each element boundary.
-
-4. **Log every header field.** All header counts (`nints`, `ntypes`, `nfunctions`, etc.), conditional fields (`nbytes`/`nconstants`), `flags`, and `entrypoint` must appear in the log with their decoded values.
-
-5. **Log opcode-level disassembly.** When the bytecode decoder is implemented (Gate 4), every decoded instruction must produce a log entry showing its byte offset, opcode mnemonic, arguments, and target jump addresses.
-
-6. **Log errors with context.** When a parse error occurs, the error message must include the stream byte offset, the section being parsed, and the raw bytes that caused the failure. Never throw a bare message — always attach positional context.
-
-7. **Log file paths.** The log file path must be displayed in the UI status bar when verbose mode is active (already implemented via `VerboseLogger.log_path`).
-
-### Why This Rule Exists
-
-HashLink bytecode has no official public spec. All structure is reverse-engineered from the Haxe compiler source and reference C runtime (`hlc`). Without detailed byte-level logs, contributors waste time guessing offsets, re-reading the same binary sections, and debugging silent stream desyncs that shift every subsequent field by one byte. A complete log from a single successful parse run is often enough to diagnose a bug in an entirely different bytecode version.
-
-### Integration Pattern
-
-```python
-# Every new component should accept an optional logger:
-class TypeParser:
-    def __init__(self, stream, logger: VerboseLogger | None = None):
-        self._logger = logger
-        self._log = (lambda tag, msg, level=INFO: logger.log(tag, msg, level=level)
-                     ) if logger else (lambda tag, msg, level=INFO: None)
-```
-
-```python
-# Toggle in the UI — add a QCheckBox for each major subsystem:
-self.cb_verbose_types = QCheckBox("Verbose Type Parsing")
-```
-Existing toggle infrastructure: `VerboseLogger` (hl_logger.py), CLI `--verbose`/`-v`/`--log-level` flags, GUI level dropdown. Reuse these instead of inventing a new mechanism.
-
-### 9. Log Format & Levels
-
-Every log line carries a level, making it possible to filter to just what you need.
-
-### 9.1 Log Levels
-
-| Level | Value | CLI shortcut | Content | Typical lines (Farever parse) |
-|-------|-------|-------------|---------|------------------------------|
-| `ERROR` | 40 | `--quiet` | Binary broken, can't continue | 0 |
-| `WARN` | 30 | | Parser recovered with data loss | ~5 |
-| `INFO` | 20 | *(default)* | Milestones, what happened | ~20 |
-| `DEBUG` | 10 | `-v` | Internal details, type/function entries | ~84K |
-| `TRACE` | 5 | `-vv` | Byte-by-byte: VarInts, opcodes | ~8M |
-
-Default mode (`INFO`) produces ~20 lines — enough to know what happened. Truly deep debugging uses `-v` (DEBUG) or `-vv` (TRACE).
-
-### 9.2 Log File Layout
-
-```
-logs/
-  2026-05-22/                          # Date
-    15-30-53/                          # Start time
-      chunk-000001.log          # Lines 1-10000
-      chunk-000002.log          # Lines 10001-20000
-      ...
-```
-
-Each chunk is capped at 10,000 lines (configurable). Chunk files are numbered sequentially: `chunk-000001.log`, `chunk-000002.log`, etc. The session directory path is stored in `VerboseLogger.log_path`.
-
-**Line format:**
-```
-[15:57:44.153] [INFO ] [HEADER] version=4 flags=1
-[15:57:44.153] [TRACE] [VARINT] offset=4 raw=[04] decoded=4
-[15:57:44.153] [WARN ] [FUNC ] func[2]: nops=-1, skipping
-```
-
-The level field is 5 characters, space-padded for alignment.
-
-### 9.3 Controlling Log Level
-
-**CLI:**
-```bash
-# Default: INFO only (~20 lines)
-cli.py header file.hlb
-
-# Warnings + Errors (~5 lines)
-cli.py header file.hlb --quiet
-
-# Debug: includes type/function details (~84K lines)
-cli.py header file.hlb -v
-
-# Trace: everything (~8M lines)
-cli.py header file.hlb -vv
-
-# Explicit level
-cli.py types file.hlb --log-level warn
-```
-
-**GUI:** The toolbar has a "Verbose" checkbox that enables detailed logging to `logs/`. The log path is shown in the status bar when verbose mode is active. Options: off (no logging) or on (writes to timestamped log files). When the app is launched with `--verbose` / `-v`, verbose mode is pre-enabled and locked.
-
-### 9.4 Log Analysis Tooling
-
-The `logalyzer.py` CLI provides SQLite-backed analysis of verbose logs:
+pytest -q
+pytest -x
+pytest -k "topic"
+````
+
+Full validation when required:
 
 ```bash
-python3 logalyzer.py index logs/2026-05-22/15-30-53/              # Index a chunked session dir
-python3 logalyzer.py index single_file.log                         # Index a single log file (old format)
-python3 logalyzer.py index-dir logs/                               # Index all sessions in a directory
-python3 logalyzer.py stats file.db                                  # Section counts + anomaly detection
-python3 logalyzer.py errors file.db                                 # Extract errors with context
-python3 logalyzer.py errors file.db --level warn                    # Errors + warnings with context
-python3 logalyzer.py query file.db "SELECT tag, COUNT(*) FROM entries GROUP BY tag ORDER BY 2 DESC"
-python3 logalyzer.py query file.db "..." --level debug              # Query filtered by level
+cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q
 ```
 
-The `index` command now auto-detects the log format. Chunked directories, single files, and legacy (pre-level) files all work.
+Expected coverage by change type:
 
-### 9.5 Log Analysis Workflow (AI Agents)
+Parser changes:
 
-**Never grep/pip install raw log files while logalyzer is indexing.** Indexing a 600MB log takes ~30s. Grep/Python on raw logs duplicates work and produces incomplete results.
+* Parser tests.
+* Fixture-backed tests when layout behavior is affected.
 
-**Correct workflow:**
+VarInt or layout changes:
 
-1. **Index first** — `logalyzer.py index <log-path>`
-2. **Wait for it** — if using background mode, poll or block on completion before starting analysis
-3. **Query the DB** — use `logalyzer stats`, `errors`, `query`, `sample` to answer questions from the structured SQLite store
-4. **Use `--level`** to filter: `--level warn` for only actionable messages, or `--level error` for critical failures
+* Edge-case tests.
+* Truncated input tests.
+* Fixture-backed tests.
 
-Rationale: the indexed DB supports instant ad-hoc SQL queries, deduplicated counts, tag/section filtering, level filtering, and anomaly detection. grep/Python on the raw file re-implements what the DB already provides, and produces incomplete results (no cross-section joins, no byte-offset arithmetic, no deduplication).
+Opcode changes:
 
-If indexing is already running in background, do NOT touch the raw file. Wait for the exit code, then use the DB.
+* Parser, disassembler, and decompiler consistency tests.
+* Tests for special layouts and vararg layouts where applicable.
 
-### 10. Versioning & Gate Tags
+Type, name, field, method, class, or enum changes:
 
-All parser output (verbose logs, SQLite databases, GUI title bar) carries a version string in the format:
+* Focused resolver tests.
+* Fixture-backed tests.
 
-```
-g{gate}.{build}.{commit}[-dirty]
-```
+Control-flow changes:
 
-| Component | Meaning | Example |
-|-----------|---------|---------|
-| `g{gate}` | Roadmap gate number (1-5 from README.md) | `g3` |
-| `{build}` | Commits since the latest gate tag | `5` |
-| `{commit}` | Short git hash for precise traceability | `a1fba93` |
-| `-dirty` | Uncommitted changes in working tree | `-dirty` |
+* IR-level checks.
+* Source-visible output checks when applicable.
+* Report metric checks when frontier metrics are affected.
+
+Writer changes:
+
+* Output tests.
+* Source-visible regression checks.
+
+Report or script changes:
+
+* Report artifact validation.
+* ASCII-safety validation.
+* Metric scope labeling checks.
+
+GUI changes:
+
+* Non-blocking behavior checks.
+* Model/view scalability checks when large data is involved.
+* No parser dependency on GUI.
+
+Docs-only changes:
+
+* ASCII-safety check for changed text.
+* Full tests may be skipped if no runtime behavior changed, but the report must say tests were skipped because the change was documentation-only.
+
+If validation is skipped, explain why.
+
+## 7. Validation tracks
+
+Use docs/validation_matrix.md for current validation definitions.
+
+In general:
+
+Track A:
+
+* Fixture-backed deterministic validation.
+* Used for correctness and regression acceptance.
+
+Track B:
+
+* Benchmark/sample validation.
+* Used for frontier and large-real-world behavior tracking.
+* Must label sample size and seed when applicable.
+
+Do not mix Track A and Track B metrics without clear labels.
+
+Do not compare metrics across changed classifier definitions without saying classifier definitions changed.
+
+Do not call an IR-only result source-visible unless the mapping is proven.
+
+## 8. Reports and generated artifacts
+
+Reports must be evidence-backed, scoped, and reproducible.
+
+Every report must include:
+
+* Task or milestone ID when applicable.
+* Complete or incomplete status.
+* Diagnostic-only or behavior-changing status.
+* Exact behavior changed, if any.
+* Exact scope limitation.
+* Explicit exclusions.
+* Whether the work is general-purpose or risks benchmark-specific behavior.
+* Files changed.
+* Tests changed.
+* Docs or MEMORY.md changed.
+* Generated canonical artifacts.
+* Scratch or temporary artifacts clearly labeled non-canonical.
+* Exact validation commands.
+* Exact validation results.
+* Skipped validation and reason.
+* ASCII-safety result when report artifacts or docs are changed.
+* Evidence-backed conclusion.
+* Safest next recommendation.
+
+When relevant, explicitly state what was not touched, such as:
+
+* ControlStructurer behavior
+* goto cleanup
+* HaxeWriter
+* parser/disassembler
+* field/type recovery
+* loop/backedge work
+* report-only plumbing
+
+Report output must avoid overclaiming.
 
 Examples:
 
-| `git describe` output | Version string | Meaning |
-|----------------------|----------------|---------|
-| `g3.0` | `g3.0.0` | Gate 3 start, clean tag |
-| `g3.0-5-ga1fba93` | `g3.5.a1fba93` | 5 commits since Gate 3 tag |
-| `g3.0-5-ga1fba93-dirty` | `g3.5.a1fba93-dirty` | Same, with uncommitted changes |
-| (no tags, hash only) | `g0.0.a1fba93` | No gate tag exists yet |
-| Legacy `p3.0` | `g3.0.0` | Legacy phase tag, parsed as gate 3 |
+* Do not say a frontier is solved if only one sub-bucket was analyzed.
+* Do not say source-visible behavior changed if only IR counters were measured.
+* Do not say a metric is unchanged if the measurement method changed.
+* Do not compare pre-change and post-change numbers without naming the baseline.
 
-#### Tagging Workflow
+## 9. Metric scope labeling
 
-Create a gate tag when crossing a README roadmap milestone:
+Every metric table must label:
+
+* Track A vs Track B.
+* Track B sample size and seed.
+* Full binary vs sample, if used.
+* IR-level vs source-visible metric.
+* Pre-change vs post-change.
+* Accepted baseline used for delta.
+* Direct delta vs recomputed classifier count.
+* Whether classifier definitions changed since baseline.
+
+Full-binary metrics are optional unless explicitly requested. If included, label them optional or non-acceptance unless they are part of the requested validation scope.
+
+## 10. ASCII-safety rule
+
+Generated reports, markdown reports, JSON summaries, logs intended for reports, and handoff text must be ASCII-safe unless a task explicitly requires otherwise.
+
+Use ASCII alternatives:
+
+* "--" instead of em dash.
+* "->" instead of arrows.
+* Plain quotes instead of smart quotes.
+* Simple ASCII tables instead of box drawing characters.
+
+If a report claims ASCII safety, state exactly which paths were checked.
+
+Recommended check:
 
 ```bash
-# When Gate 3 work is complete and stable:
-git tag g3.0 -m "Gate 3 complete: function parsing, name resolution, opcode skipping"
+python3 - <<'PY'
+from pathlib import Path
 
-# After a major sub-milestone within Gate 3:
-git tag g3.1 -m "Gate 3: opcode decoder, disassembly engine"
+paths = [
+    Path("CONTRIBUTING.md"),
+]
 
-# When moving to Gate 4:
-git tag g4.0 -m "Gate 4 starts: opcode decoding, CFG visualizer"
+bad = False
+for path in paths:
+    data = path.read_text(encoding="utf-8")
+    for i, ch in enumerate(data):
+        if ord(ch) > 127:
+            line = data.count("\n", 0, i) + 1
+            col = i - data.rfind("\n", 0, i)
+            print(f"{path}:{line}:{col}: non-ASCII U+{ord(ch):04X}")
+            bad = True
+
+raise SystemExit(1 if bad else 0)
+PY
 ```
 
-Rules:
+Adjust the paths list to include every changed report, doc, JSON summary, or handoff file.
 
-1. **Validate output on real bytecode before tagging.** A Gate is not complete until the output has been manually verified on at least one real `.hlb` file — not just synthetic test fixtures. "N tests pass" does not mean the parser works on real game binaries. Check types produce valid kinds (0-22), functions have reasonable register/opcode counts, opcodes decode in range 0-102, and decompiled output resembles the original Haxe source.
-2. **Tag at Gate 0 only when the repository has no tags yet.** Once any `p*` or `g*` tag exists, the version scheme is active.
-3. **Always push tags when pushing commits:**
-   ```bash
-   git push --tags origin main
-   ```
-4. **The `{build}` counter resets at each new gate tag.** `g4.0` starts at build 0.
-5. **`-dirty` alerts you that the working tree has uncommitted changes.** Only index dumps and DBs from clean working trees should be treated as reference baselines.
-6. **Do not delete or move gate tags.** They establish a stable reference for the build counter. If a tag points to the wrong commit, create a new tag with a sub-number (`g3.1`) rather than moving `g3.0`. Legacy `p*` tags remain valid and are matched for backward compatibility.
+## 11. MEMORY.md purpose
 
-#### Where versions appear
+MEMORY.md stores compact current accepted state. It is not a transcript and not a technical specification.
 
-- **Verbose log header:** `[APP] Parser version: g3.5.a1fba93-dirty`
-- **SQLite DB** (via `logalyzer info`): `"parser_version": "g3.5.a1fba93-dirty"`
-- **SQLite DB** (via `logalyzer stats`): meta block includes `parser_version`
-- **GUI window title:** `HashLink Bytecode Inspector — g3.5.a1fba93-dirty`
-- **GUI status bar:** `Version: g3.5.a1fba93-dirty | File: ...`
+MEMORY.md should contain:
 
-This ensures every artifact can be traced back to a specific parser build, even when comparing across development sessions.
+* Current accepted state.
+* Active unlocked frontier.
+* Closed or paused frontiers.
+* Latest validation baseline.
+* Current handoff.
+* Compact evidence pointers.
 
-### 11. CLI Support Requirements
+MEMORY.md should not contain:
 
-The application must function as both a GUI desktop tool and a CLI pipeline tool with identical parse behavior. The GUI is a convenience layer — the CLI is the automation backbone.
+* Full transcripts.
+* Long reports.
+* Repeated milestone history.
+* Raw logs.
+* Obsolete theories.
+* Large tables that belong in reports.
+* Bytecode specifications that belong in docs/.
+* Static standing behavior that belongs in AGENTS.md.
+* Public overview material that belongs in README.md.
 
-#### 11.1 Architecture
+MEMORY.md records current accepted state, but it is not proof by itself. Verify important claims against code, tests, docs, reports, fixtures, or direct evidence before changing behavior.
 
-```
-                  ┌─────────────────┐
-                  │   hl_parser.py  │  (headless, no UI deps)
-                  │   hl_worker.py  │  (QThread wrapper)
-                  │   hl_logger.py  │  (shared verbose logger)
-                  └────────┬────────┘
-                           │
-              ┌────────────┼────────────┐
-              ▼            ▼            ▼
-         app.py       cli.py      (headless automation)
-        (PyQt6 GUI)  (argparse)   (import hl_parser directly)
-```
+## 12. MEMORY.md update discipline
 
-* **Single parser, many consumers.** No parse logic differences between modes. The same file produces the same output data regardless of entry point.
-* **`hl_worker.py` is GUI-only.** The CLI does not import PyQt or QThread. It runs the parser directly on the calling thread or with a plain `threading.Thread` for progress reporting.
-* **`hl_logger.py` is universal.** Verbose logging works identically in both modes. The log output format is unchanged.
+Update MEMORY.md only when the accepted current state or handoff changes.
 
-#### 11.2 Entry Point Design
+Keep entries compact.
 
-* **`cli.py`** is the CLI entry point. It imports only `hl_parser` and standard library modules. It must not import PyQt6.
-* **`app.py`** remains the GUI entry point. It imports PyQt6 and `hl_parser`.
-* Both share the same argument conventions where possible (e.g., `--verbose`).
-* The CLI must support `--help` for every (sub)command.
+Do not paste full milestone reports into MEMORY.md. Store detailed evidence in canonical reports or docs, then add a short pointer in MEMORY.md.
 
-#### 11.3 Output Formats
+Do not duplicate large frontier tables across sections. Prefer one compact current table plus report references.
 
-* **Default: human-readable text** — tables, summaries, disassembly listings suitable for terminal display.
-* **`--json` flag: machine-readable JSON** — structured output for piping to `jq`, other scripts, or LLM ingestion.
-* **`--csv` / `--tsv` flag: tabular data** — for spreadsheet import or `awk` processing.
-* The data payload is identical across formats; only the serialization differs.
-* Format selection must not change parse behavior.
+Do not preserve obsolete theories unless they are needed as a warning. If kept, clearly label them obsolete or rejected.
 
-#### 11.4 Exit Codes
+When a milestone completes, update only the relevant current-state fields:
 
-| Exit Code | Meaning |
-|-----------|---------|
-| `0` | Success — file parsed completely, all requested operations finished |
-| `1` | Parse error — bytecode is corrupt, truncated, or structurally invalid |
-| `2` | Input error — file not found, permission denied, invalid arguments |
-| `3` | Tool error — internal assertion, unexpected exception, unhandled edge case |
+* Active frontier.
+* Closed or paused frontier status.
+* Validation baseline.
+* Latest handoff.
+* Compact evidence pointer.
 
-* The CLI must never exit `0` if the parser emitted errors or warnings that the caller asked to treat as fatal.
-* Warnings alone do not cause non-zero exit unless `--warnings-as-errors` is set.
+When work is incomplete, record the next actionable handoff, not a transcript.
 
-#### 11.5 Feature Parity
+## 13. MEMORY.md framework
 
-* **Every feature available in GUI must be accessible via CLI.** This includes: header inspection, pool dumps, type listing, global/native listing, function listing, and (when implemented) disassembly, CFG export, and decompilation output.
-* **The reverse is not required.** CLI-specific features (batch processing, JSON streaming, output redirection) may have no GUI equivalent.
-* **Subcommand structure mirrors the GUI tabs:**
-  ```
-  cli.py header    <file>      → Header tab equivalent
-  cli.py pools     <file>      → Pools tab equivalent
-  cli.py types     <file>      → Types tab equivalent
-  cli.py globals   <file>      → Globals tab equivalent
-  cli.py natives   <file>      → Natives tab equivalent
-  cli.py functions <file>      → Functions tab equivalent
-  cli.py disasm    <file>      → Disassembly tab (Gate 4)
-  cli.py decompile <file>      → Decompilation output (Gate 5)
-  ```
+Use this general structure unless the project owner requests a different one:
 
-#### 11.6 Logging Parity
+```markdown
+# MEMORY.md
 
-* `--verbose` / `-v` (count) sets verbosity: `-v` = DEBUG, `-vv` = TRACE.
-* `--quiet` sets level to ERROR (only critical failures printed).
-* `--log-level {error,warn,info,debug,trace}` explicitly sets the minimum log level.
-* `--verbose-stdout` redirects verbose log to stdout (for piping, debugging).
-* `--log-path <dir>` overrides the default log directory. The logger creates a `{date}/{time}/` subdirectory inside it.
-* CLI-produced logs must be indexable by `logalyzer.py` with identical schema.
+Current accepted state for mhlbc.
 
-#### 11.7 Testing CLI
+Last updated: YYYY-MM-DD
+Current session: N
 
-* CLI tests live in `tests/test_cli.py`. They must **not** import PyQt6.
-* Test categories:
-  - **Exit codes:** verify correct codes for success, parse errors, missing files, invalid args.
-  - **Output format:** verify `--json` produces valid JSON with correct structure; `--csv` produces valid CSV.
-  - **Flag combinations:** test `--verbose`, `--json`, `--output`, and other flags together.
-  - **Subcommand routing:** verify each subcommand produces expected output sections.
-  - **Data parity:** parse the same file via CLI and GUI (programmatically), assert identical parsed data.
-  - **Edge cases:** empty pools, truncated files, files with debug info, version variants (v3/v4/v5).
-* Use `subprocess.run()` to invoke `cli.py` in tests, capturing stdout/stderr and exit code.
-* CLI test fixtures should reuse `hl_helper.py` builders (same as parser tests).
+## 1. Current project state
 
-#### 11.8 CLI-First Design Principle
+- One compact paragraph or short bullet list describing the current accepted state.
+- Include only facts needed by the next contributor.
 
-New features must expose their core logic through the headless parser first, then add a CLI subcommand, and only then wire a GUI tab. This ensures:
+## 2. Active unlocked frontier
 
-* The feature is testable without a display.
-* The feature is scriptable from day one.
-* The GUI is never the bottleneck for feature availability.
-* The CLI is the automation backbone; the GUI is a convenience layer.
+- Frontier ID or title:
+- Status:
+- Scope:
+- Current baseline:
+- Next safe action:
 
----
+## 3. Closed or paused frontiers
 
-## 12. Investigating Parsing Failures — Evidence-First Protocol
+| Frontier | Status | Evidence pointer | Notes |
+|---|---|---|---|
+| Example | Closed | reports/... | Short note |
 
-When a known-good binary (the game runs) fails to parse, the problem is **always the parser's model**, not the binary. This protocol replaces guessing with evidence.
+## 4. Current validation baseline
 
-### 12.1 Core Principle
+- Track A:
+- Track B:
+- Guardrails:
+- ASCII safety:
+- Last full validation command:
+- Last full validation result:
 
-A shipping game binary is valid by definition. The parser's assumptions about bytecode layout — sequential function bodies, signed/unsigned fields, alignment, padding, index tables — are hypotheses, not facts. Each hypothesis must be testable against evidence.
+## 5. Latest handoff
 
-### 12.2 The Five Evidence Tools
+- What was done:
+- What remains:
+- Recommended next step:
+- Explicit exclusions:
 
-| # | Tool | What It Answers | Cost |
-|---|------|-----------------|------|
-| 1 | HL Reference Source (`hashlink/src/code.c`) | How does the *actual* runtime navigate this data structure? | 1h (read) |
-| 2 | Hex dump at problem boundaries | What bytes exist at the desync point? Is the gap between headers what nops says it should be? | 5 min |
-| 3 | Heuristic header scan | Where are valid 4-VarInt headers actually located in the suspect region? | 10 min (script) |
-| 4 | Compiled test HLB | Does our parser correctly parse a binary we *know* the structure of? | 2h (compile + verify) |
-| 5 | Assumption isolation | Which specific assumption (sequential, signed, aligned, padded) fails? Test each independently. | Varies |
+## 6. Compact evidence pointers
 
-### 12.3 Investigation Workflow
-
-```
-  Parse fails on a shipping game binary
-            │
-            ▼
-     Is the binary verified clean?
-     (md5sum against origin, binary cp)
-            │
-      ┌─────┴─────┐
-      │ No        │ Yes
-      ▼           ▼
-  Re-copy in   ┌──────────────────────────────┐
-  binary mode  │ Read HL reference runtime     │
-  (cp, not     │ source for function pool nav  │
-  text mode)   └──────────┬───────────────────┘
-                          ▼
-              ┌──────────────────────────────┐
-              │ Hex dump 100 bytes around     │
-              │ the failure boundary.         │
-              │ Compare actual gap between    │
-              │ consecutive valid 4-varint    │
-              │ headers to what nops claims.  │
-              └──────────┬───────────────────┘
-                          ▼
-              ┌──────────────────────────────┐
-              │ Heuristic scan: at every byte │
-              │ offset in the suspect region, │
-              │ try to decode 4 valid         │
-              │ VarInts. Map all valid header │
-              │ positions.                    │
-              └──────────┬───────────────────┘
-                          ▼
-         ┌──────────────────────────────────┐
-         │ For each violated assumption:    │
-         │ (sequential, signed/unsigned,    │
-         │  alignment, padding, index table)│
-         │ write a minimal test that        │
-         │ isolates it.                     │
-         └──────────┬───────────────────┘
-                    ▼
-         ┌──────────────────────────────────┐
-         │ Fix the parser model. Re-run     │
-         │ on the binary. All earlier passes│
-         │ (hex, scan, assumptions) are now │
-         │ the regression test suite.       │
-         └──────────────────────────────────┘
+- reports/...: one-line description
+- docs/...: one-line description
+- tests/...: one-line description
 ```
 
-### 12.4 Tool Recipes
+Keep this framework compact. If a section grows too large, move detail into a report or docs file and leave a pointer.
 
-**Hex dump at offset:**
+## 14. What belongs where
+
+AGENTS.md:
+
+* Permanent agent behavior.
+* Permanent architecture boundaries.
+* Permanent evidence rules.
+* Permanent report requirements.
+* Permanent rules that force agents to use correct project documents.
+* No volatile state.
+
+docs/:
+
+* Bytecode format truth.
+* Opcode semantics.
+* Type-system rules.
+* Decompiler and CFG patterns.
+* Validation matrix.
+* Performance and scalability guidance.
+* Proven pitfalls and version splits.
+
+CONTRIBUTING.md:
+
+* Human and AI contribution workflow.
+* Test policy.
+* Report workflow.
+* Branch/release policy.
+* MEMORY.md maintenance framework.
+
+MEMORY.md:
+
+* Current accepted state.
+* Active unlocked frontier.
+* Closed or paused frontiers.
+* Latest validation baseline.
+* Current handoff.
+* Compact evidence pointers.
+
+README.md:
+
+* Public overview.
+* Usage.
+* Roadmap.
+* High-level project status.
+
+reports/:
+
+* Canonical milestone reports.
+* Validation reports.
+* Metric tables.
+* Detailed evidence that would bloat MEMORY.md.
+
+scratch or /tmp:
+
+* Temporary probes.
+* Non-canonical experiments.
+* Must not be treated as accepted evidence unless promoted into reports, tests, docs, or committed artifacts.
+
+## 15. Handling old reports and artifacts
+
+Preserve old reports when they are needed for continuity.
+
+Do not rewrite old reports just to match current wording.
+
+When old reports use stale metrics or old classifier definitions, do not silently compare them to current results. Label the difference.
+
+When an old artifact is superseded, leave a pointer to the replacement if useful.
+
+When a scratch artifact becomes important, promote it to a canonical location or recreate its result in a committed test, report, or script.
+
+## 16. Skipped validation
+
+Skipped validation must be explicit.
+
+State:
+
+* What was skipped.
+* Why it was skipped.
+* Why the skip is safe for this scope.
+* What validation should be run later if the scope expands.
+
+Examples:
+
+* "Full pytest skipped because this was a docs-only change. ASCII safety was checked for CONTRIBUTING.md."
+* "Track B sample=500 skipped because classifier definitions were not touched. Targeted report-generation tests passed."
+* "GUI validation skipped because no GUI files or UI-thread behavior changed."
+
+Do not omit skipped validation from final reports.
+
+## 17. Branch, tag, and release expectations
+
+Default branch policy:
+
+* Work on main unless the project owner requests a branch.
+* Keep changes narrow and reviewable.
+* Avoid unrelated cleanup in behavior-changing milestones.
+* Do not move or delete existing tags unless explicitly instructed.
+
+Tag or release work must be explicit. Do not create release claims from passing tests alone.
+
+Before tagging or release-style reporting, verify:
+
+* Relevant tests pass.
+* Relevant docs match behavior.
+* README.md status is accurate.
+* MEMORY.md current state is compact and current.
+* Generated reports are ASCII-safe where required.
+* Any benchmark status is clearly labeled and not overgeneralized.
+
+## 18. Tool-use and escalation
+
+Use available local, project, and automated tools before asking for manual inspection.
+
+This includes, when available and relevant:
+
+* Repository search.
+* Tests.
+* Parser output.
+* Disassembler output.
+* Decompiler diagnostics.
+* Generated reports.
+* Logs.
+* Scripts.
+* Fixtures.
+* Reference source.
+* Headless or automated binary/source analysis tools.
+* Small focused probes.
+* Agent-powered tools.
+
+Ask for manual visual inspection only after available automated or local evidence has been exhausted, or when human judgment is genuinely required.
+
+Do not ask for GUI/manual work when a non-interactive tool can collect the needed evidence.
+
+## 19. Large bytecode and benchmark discipline
+
+Large real-world bytecode is useful for finding gaps, but it is not a license to hard-code behavior.
+
+When benchmark evidence reveals a problem:
+
+1. Classify the failing pattern.
+2. Find or create the smallest reproducible fixture if possible.
+3. Prove the relevant bytecode, type, opcode, or CFG rule.
+4. Change general behavior only when evidence supports it.
+5. Keep benchmark-specific handling isolated if unavoidable.
+6. Report benchmark metrics separately from fixture correctness.
+
+Farever may guide priorities, but mhlbc must remain a general-purpose HashLink/Haxe bytecode decompiler.
+
+## 20. Documentation-change validation
+
+When changing AGENTS.md, CONTRIBUTING.md, MEMORY.md, docs/, reports, or report-generation rules:
+
+1. Check changed text is ASCII-safe.
+2. Check MEMORY.md is ASCII-safe if modified.
+3. Run the full test suite unless there is a clear reason not to.
+4. If full tests are skipped, explain why.
+5. If only docs changed and tests are skipped, state that no runtime behavior changed.
+
+Preferred full validation command:
+
 ```bash
-# Dump 50 bytes before and after a known offset
-xxd -s $((OFFSET - 50)) -l 100 hlboot.dat
-
-# Or with Python for offset arithmetic
-python3 -c "
-data = open('hlboot.dat', 'rb').read()
-offset = 3025297
-# Show 20 bytes before, header bytes, 20 bytes after nops body
-print(' '.join(f'{b:02x}' for b in data[offset-20:offset+50]))
-"
+cd /home/mubarak/mhlbc && /home/mubarak/.local/bin/uv run pytest --tb=no -q
 ```
 
-**Heuristic header scan:**
-```bash
-python3 -c "
-import sys
-data = open('hlboot.dat', 'rb').read()
-# Walk every byte position, attempt 4 VarInts
-for i in range(2981430, min(len(data), 2981430+500)):
-    pos = i
-    valid = True
-    vals = []
-    for _ in range(4):
-        if pos >= len(data):
-            valid = False; break
-        b1 = data[pos]; pos += 1
-        if b1 & 0x80 == 0:
-            vals.append(b1)
-        elif b1 & 0x40 == 0:
-            if pos >= len(data): valid = False; break
-            b2 = data[pos]; pos += 1
-            vals.append(((b1 & 0x1F) << 8) | b2)
-        else:
-            if pos+3 > len(data): valid = False; break
-            b2,b3,b4 = data[pos:pos+3]; pos += 3
-            vals.append(((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4)
-    if valid:
-        print(f'offset={i} type={vals[0]} findex={vals[1]} nregs={vals[2]} nops={vals[3]}')
-" | head -30
+## 21. Final report template
+
+Use this compact structure for final milestone reports when applicable:
+
+```text
+Status:
+- Milestone:
+- Complete/incomplete:
+- Diagnostic-only or behavior-changing:
+- Scope:
+- Explicit exclusions:
+- General-purpose or benchmark-specific risk:
+
+Docs consulted:
+- docs/...:
+- Discrepancies found:
+
+Files changed:
+- Source:
+- Tests:
+- Docs:
+- MEMORY.md:
+- Reports/artifacts:
+
+Behavior changed:
+- ...
+
+Validation:
+- Command:
+- Result:
+- Track A:
+- Track B:
+- Guardrails:
+- ASCII safety:
+- Skipped validation:
+
+Metrics:
+- Baseline:
+- Classifier definitions changed: yes/no
+- IR-level:
+- Source-visible:
+
+Conclusion:
+- Solved:
+- Not solved:
+- Safest next step:
+- Next milestone should be diagnostic or behavior-changing:
 ```
 
-**Compile a test HLB:**
-```bash
-# Requires Haxe compiler with HashLink target
-cat > test.hx << 'EOF'
-class Test {
-    static function main() {
-        var x = 1 + 2;
-        trace(x);
-    }
-}
-EOF
-haxe -hl test.hlb test.hx
-# Now compare our parser output against known structure
-```
+Use only applicable fields. Do not pad reports with irrelevant sections, but do not omit required scope, validation, or evidence details.
 
-**Assumption isolation checklist:**
+## 22. Success criteria
 
-| Assumption | Test | If False |
-|------------|------|----------|
-| Functions are sequential (no index table) | Hex dump: is the gap between func[N] end and func[N+1] start == 0? | Look for an offset table before the pool |
-| nops is the exact body size | Does valid header appear exactly `nops` bytes after header start? | nops includes padding, or is something else |
-| nops is signed | Raw `a001` → unsigned = 8193. Does hex gap match? | Parser should read unsigned |
-| No alignment padding | Compare func[N] end offset to func[N+1] start offset | Add padding detection |
-| Function pool is monolithic after globals | Verify pool start offset against nglobals/ nnatives calc | Pool may interleave with other data |
+A good contribution:
 
-### 12.5 Real-World Example: Farever func[2]
-
-**Symptom:** func[2] type=15037, nops=15038. Body read of 96,658 bytes corrupts subsequent functions.
-
-**Assumption violated (unconfirmed):** Either nops is unsigned (15038 vs -1 under signed) or functions are not purely sequential.
-
-**Next evidence step:** Hex dump at func[2] body end + heuristic scan to map where the next valid header actually appears. Compare the gap to nops=15038 and nops=-1 values. The answer determines whether the pool has padding, an offset table, or a different navigation model.
-
-### 12.6 When to Use This Protocol
-
-- **Always** before declaring a binary "corrupt"
-- **Always** before adding heuristic robustness layers that work around a misunderstanding
-- **Always** when the parser disagrees with a shipping game binary
-- **Never** skip steps — each evidence tool eliminates one class of wrong assumption
+* Uses relevant docs instead of relying on memory.
+* Proves before changing.
+* Keeps volatile state out of AGENTS.md.
+* Keeps bytecode truth in docs/.
+* Keeps current handoff compact in MEMORY.md.
+* Preserves architecture boundaries.
+* Keeps reports scoped and measurable.
+* Separates IR metrics from source-visible metrics.
+* Avoids benchmark-specific core behavior.
+* Leaves clearer evidence for the next contributor.
