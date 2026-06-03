@@ -10,19 +10,19 @@ Current scope is **Tier 1: Core Decompiler**. Later modding layers such as bytec
 
 ## Current Snapshot
 
-This README reflects the repository snapshot at Session 51.
+This README reflects the repository snapshot at Session 56.
 
 | Area | Status |
 |------|--------|
 | Branch | `main` |
-| Latest documented milestone | B51, diagnostic-only forward-to-common-merge analysis |
-| Test suite | 730 passed, 4 skipped |
+| Latest documented milestone | Sessions 54-55B (register-semantics audit), Session 56 (cleanup) |
+| Test suite | 838 passed, 4 skipped |
 | Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes |
 | Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors |
-| Current next target | B52: narrow ControlStructurer behavior for `fallthrough_target` suppression and `jump_chain` collapse |
+| Current next target | B54: to_if_target diagnostic-only milestone (goto frontier, not register semantics) |
 | Later tiers | Frozen |
 
-The project is past basic parsing and decompilation bring-up. The active work is now controlled decompiler-quality improvement, especially ControlStructurer reductions that are proven by CFG evidence before implementation.
+The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) has closed the opcode source/destination frontier. The remaining active work is controlled ControlStructurer quality improvement, especially classifying and reducing top-level goto patterns with diagnostic-first analysis.
 
 ---
 
@@ -151,27 +151,25 @@ These require explicit project-owner unlock before broad behavior work:
 
 ### Active next target
 
-B51 classified only the B48 `forward_to_common_merge` top-level goto bucket.
+The register-semantics audit (Sessions 54-55B) is complete. The active remaining quality frontier is ControlStructurer/top-level goto behavior.
 
-| Scope | Total | fallthrough_target | jump_chain | multi_pred_merge |
-|-------|-------|--------------------|------------|------------------|
-| Track A | 270 | 144 | 54 | 72 |
-| Track B 200 | 51 | 35 | 7 | 9 |
-| Track B 500 | 119 | 86 | 10 | 23 |
+B48 classified all top-level gotos by target bucket. The largest bucket is `to_if_target`:
 
-B52 should target only:
+| Scope | to_if_target | % of top-level gotos |
+|-------|-------------:|--------------------:|
+| Track A | 1190 | 78.4% |
+| Track B 200 | 96 | 42.1% |
+| Track B 500 | 247 | 50.3% |
 
-- `fallthrough_target` suppression.
-- `jump_chain` collapse.
+B52 and B48 have addressed `forward_to_next_label` and partially classified `forward_to_common_merge`. The next diagnostic-only milestone (B54) should classify `to_if_target` to determine how many are provable merge skips vs genuine cross-boundary jumps.
 
-B52 should explicitly exclude:
-
-- `multi_pred_merge`.
-- `to_if_target`.
-- `return_region_jump`.
-- non-immediate `forward_to_next_label`.
-- loop/backedge work.
-- TypeResolver or field recovery work.
+B52 excluded:
+- `multi_pred_merge`
+- `to_if_target`
+- `return_region_jump`
+- non-immediate `forward_to_next_label`
+- loop/backedge work
+- TypeResolver or field recovery work
 
 ---
 
@@ -425,16 +423,16 @@ pytest tests/test_decompile.py -k "B51"
 Current full-suite snapshot:
 
 ```text
-730 passed, 4 skipped
+838 passed, 4 skipped
 ```
 
 Useful validation commands:
 
 ```bash
 uv run python3 scripts/decompiler_quality_report.py --track both --farever workspace/Farever/hlboot.dat --sample 200
-uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track A
-uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track B --farever workspace/Farever/hlboot.dat --sample 200
-uv run python3 scripts/b51_analyze_forward_to_common_merge.py --track B --farever workspace/Farever/hlboot.dat --sample 500
+uv run python3 scripts/b53_frontier_rebaseline.py --track A
+uv run python3 scripts/b53_frontier_rebaseline.py --track B --farever workspace/Farever/hlboot.dat --sample 200
+uv run python3 scripts/b53_frontier_rebaseline.py --track B --farever workspace/Farever/hlboot.dat --sample 500
 ```
 
 Generated reports and diagnostic artifacts should remain ASCII-safe.
@@ -462,6 +460,11 @@ Recent relevant milestones:
 | B49 | Verified immediate goto-to-label cleanup already existed and added guardrail tests. |
 | B50 | Proved sampled backward_jump cases are IR-position artifacts, not true bytecode loop backedges. |
 | B51 | Classified forward_to_common_merge by CFG evidence and selected B52 target. |
+| B52 | Narrow forward merge cleanup: removed forward_to_next_label cases under conservative syntactic guard. |
+| B53 | Post-B52 frontier rebaseline and metric reconciliation. |
+| B54 | Fixed null-target classification regression (OSetThis consumer delegation). |
+| B55 | Fixed HaxeWriter if/else indentation. |
+| B56 | Completed opcode register-semantics audit (src/dst/call-operand, idx-not-reg patterns, OEnumField). |
 
 ---
 
@@ -482,7 +485,7 @@ Implemented and under refinement:
 
 Current Tier 1 focus:
 
-- B52: narrow ControlStructurer behavior for `fallthrough_target` and `jump_chain` cases proven by B51.
+- B54: to_if_target diagnostic-only milestone (goto frontier).
 - Preserve Track A 9/9 zero-error status.
 - Preserve Track B sampled zero-error status.
 - Do not reopen paused frontiers without new evidence.

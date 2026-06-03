@@ -35,7 +35,7 @@ Useful Farever progress indicators (updated each investigation session):
 | Types parsed | 43,844 / 43,844 |
 | Globals parsed | 28,399 / 28,399 |
 | Natives parsed | 723 / 723 |
-| Functions parsed (valid / malformed / total) | 190 / 4 / 45,365 |
+| Functions parsed (valid / malformed / total) | 45,461 / 2 / 45,463 |
 | Opcodes decoded (known / unknown) | partial |
 | Named functions | partial |
 | Classes emitted | partial |
