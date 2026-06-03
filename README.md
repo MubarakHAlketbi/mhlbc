@@ -15,14 +15,14 @@ This README reflects the repository snapshot at Session 59.
 | Area | Status |
 |------|--------|
 | Branch | `main` |
-| Latest documented milestones | Sessions 58-59 (return_region_jump suppression, backward_jump exhaustion, all goto buckets now exhausted) |
+| Latest documented milestones | Session 60 (field-name/TypeResolver diagnostic refresh -- all fallbacks structural, zero recoverable) |
 | Test suite | 844 passed, 4 skipped |
-| Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes |
-| Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors |
-| Current next target | Awaiting project-owner direction -- all goto-frontier diagnostics exhausted |
+| Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes. 2084 field fallbacks across 11616 refs (82% resolved). All structural/expected. |
+| Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors. TB200: 58 fallbacks (96% resolved). TB500: 356 fallbacks (91% resolved). All structural/expected. |
+| Current next target | Awaiting project-owner direction -- all diagnostic frontiers exhausted |
 | Later tiers | Frozen |
 
-The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) closed the opcode source/destination frontier. The goto-frontier diagnostic pipeline (Sessions 58-59) has now exhausted all top-level goto buckets: forward_to_next_label and return_region_jump are suppressed, backward_jump and to_if_target are diagnosed as non-actionable, and structural crosses remain as-is. No remaining goto-frontier work exists without project-owner direction.
+The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) closed the opcode source/destination frontier. The goto-frontier diagnostic pipeline (Sessions 58-59) exhausted all top-level goto buckets. Session 60 completed the field-name / TypeResolver diagnostic refresh: **zero recoverable field-name fallbacks exist** -- every remaining fN fallback across all tracks is structural (field-index-OOB), expected (Dynamic/unknown receiver), or an enum/abstract interaction. No remaining diagnostic work exists without project-owner direction.
 
 ---
 
