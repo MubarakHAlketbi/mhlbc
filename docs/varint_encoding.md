@@ -47,9 +47,29 @@ This is the single most important difference from naive VarInt implementations t
 - Jump offsets (backward branches)
 - Debug line number deltas
 - Field index offsets
-- Some internal representations
+| - Some internal representations
 
 If you ignore the sign bit, ALL backward jumps will decode to incorrect positive values, breaking control flow reconstruction.
+
+---
+
+## UINDEX Semantics
+
+UINDEX uses the same byte encoding as INDEX but rejects negative decoded values.
+
+Use UINDEX semantics for inherently non-negative fields:
+
+- pool counts (nints, nfloats, nstrings, nbytes, ntypes, nglobals, nnatives, nfunctions, nconstants)
+- entrypoint
+- findex
+- nregs
+- nops
+- ndebugfiles
+- OSwitch case count
+- OSwitch case offsets
+- OSwitch default offset
+
+**Guardrail:** Do not silently accept a negative value for a UINDEX field. Emit diagnostics or fail/recover according to the parser recovery policy.
 
 ---
 
@@ -63,7 +83,7 @@ def read_varint(stream: BinaryIO) -> int:
     """
     b1_bytes = stream.read(1)
     if not b1_bytes:
-        raise EOFError("Unexpected EOF reading VarInt")
+        raise HLParserError("Unexpected EOF while reading VarInt.")
     b1 = b1_bytes[0]
 
     if (b1 & 0x80) == 0:
@@ -74,7 +94,7 @@ def read_varint(stream: BinaryIO) -> int:
         # 2 bytes
         b2_bytes = stream.read(1)
         if not b2_bytes:
-            raise EOFError("Unexpected EOF reading 2-byte VarInt")
+            raise HLParserError("Unexpected EOF reading 2-byte VarInt.")
         b2 = b2_bytes[0]
         value = ((b1 & 0x1F) << 8) | b2
         return -value if (b1 & 0x20) else value
@@ -82,7 +102,7 @@ def read_varint(stream: BinaryIO) -> int:
     # 4 bytes
     rest = stream.read(3)
     if len(rest) < 3:
-        raise EOFError("Unexpected EOF reading 4-byte VarInt")
+        raise HLParserError("Unexpected EOF reading 4-byte VarInt.")
     b2, b3, b4 = rest
     value = ((b1 & 0x1F) << 24) | (b2 << 16) | (b3 << 8) | b4
     return -value if (b1 & 0x20) else value

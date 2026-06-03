@@ -5,7 +5,7 @@ Current accepted state for mhlbc.
 Last updated: 2026-06-03
 Current accepted project state: Session 53 close
 Branch: main
-HEAD: 049b07a
+HEAD: (commit after push)
 Tests: 746 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 0 errors, 0 unknown opcodes
@@ -393,8 +393,27 @@ Accepted last milestone:
 - Track B sample=200/sample=500 remained 0 errors
 - Guardrails remained 86/86
 
+Session 53 docs-audit:
+- Removed work.md
+- Verified all 12 docs/ files against ground-truth code
+- Found and fixed 10 mismatches across 5 docs (see below)
+- All changes are docs-only; no runtime behavior changed
+
+Mismatches found and corrected:
+1. docs/varint_encoding.md: Python example raised EOFError instead of HLParserError
+2. docs/header_format.md: Claimed v2 as supported (code warns for v<3)
+3. docs/header_format.md: Debug files format said "VarInt string indices" instead of string-table format
+4. docs/header_format.md: Debug info listed as separate pool section (actually per-function)
+5. docs/version_deltas.md: Debug files format listed wrong encoding
+6. docs/version_deltas.md: v2 listed as "Legacy" (code treats as deprecated)
+7. docs/decompilation_patterns.md: Pattern 12 missing K_DYNOBJ, global store, OSetThis, OOB checks
+8. docs/validation_matrix.md: Only 7 of 9 Track A fixtures listed; wrong HL versions
+9. docs/getting_started.md: Used .hlb extension (CLI uses .hl)
+10. docs/opcodes.md: Instruction format said "VarInt: opcode_index" (should be single byte)
+    (pre-existing bug found during audit)
+
 Current next recommendation:
-- B54 to_if_target diagnostic-only milestone.
+- B54 to_if_target diagnostic-only milestone
 
 B54 should:
 - Classify to_if_target cases across Track A, Track B sample=200, and Track B sample=500.

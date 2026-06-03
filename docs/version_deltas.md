@@ -11,7 +11,7 @@
 | Version | Status | Key Changes |
 |---------|--------|-------------|
 | 1 | Rejected | Never produced in practice; VM rejects files <= v1 |
-| 2 | Legacy | Baseline format. Identical pool structure to v3. No debug assign lists. |
+| 2 | Deprecated | Baseline format. Identical pool structure to v3. No debug assign lists. Parser warns for v2 files. |
 | 3 | Stable | Added debug assign lists (variable-to-register mapping per function). |
 | 4 | Common | Added `nconstants` header field. Constant definitions section after functions. |
 | 5 | Current | Added `nbytes` header field. Bytes pool (raw binary data). |
@@ -73,8 +73,12 @@ In v2-v4, `nbytes` is implicitly 0 and no bytes pool is read.
 **All versions (if has_debug):**
 ```
 VarInt: ndebugfiles
-ndebugfiles × VarInt: string pool indices for source filenames
+4-byte LE: string_table_size
+string_table_size bytes: null-terminated UTF-8 filenames
+ndebugfiles × VarInt: string length markers
 ```
+
+The debug files use their own string table (4-byte LE size header, then null-terminated UTF-8 strings, then trailing UINDEX length markers) -- the same format as the main string pool but stored separately. NOT VarInt string pool indices.
 
 ### Constants Section (v4+ only)
 

@@ -270,4 +270,33 @@ if( c->version >= 4 ) {
 }
 ```
 
+## Function Pool Guardrails
+
+There is no separate function byte-length field. `nops` is the only body-size signal.
+
+If `nregs` or `nops` is negative, enormous, or impossible, one of these is likely true:
+
+- stream desynchronization happened earlier
+- the binary is non-standard
+- the parser model is incomplete
+
+**Guardrails:**
+
+- Never silently skip impossible `nregs` or `nops`.
+- Emit diagnostics with offsets and decoded values.
+- Preserve enough stream context to reproduce the issue.
+- Recovery must be bounded and tested.
+- Recovery must not hide parser bugs in standard HLB fixtures.
+
+### Debug Info
+
+Function debug info is RLE encoded per opcode, not a flat array.
+
+Decode by walking control bytes until source locations for `nops` instructions are produced or the section is exhausted.
+
+- Log malformed RLE.
+- Recover without shifting subsequent function reads incorrectly.
+
+---
+
 All three sources agree on the exact serialization order and field types.

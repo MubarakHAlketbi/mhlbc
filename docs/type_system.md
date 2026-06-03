@@ -41,6 +41,28 @@ typedef enum {
 
 **HLAST (24)** is defined as a sentinel in the enum but **can appear in real-world compiled bytecode** from some Haxe/HashLink compiler versions. The parser must handle it gracefully — treat it as a primitive with no serialized payload (same as `HVOID`). See `hl_parser.py:PRIMITIVE_KINDS` which includes `K_HLAST`.
 
+### Type-Kind Change Guardrails
+
+Before changing any type-kind acceptance check (`t.kind`):
+
+1. Inspect the actual constant values in current code (mhlbc constants, not external reference numbering).
+2. Verify actual parsed `TypeDef.kind` values from at least one real fixture.
+3. Confirm the structural shape of the type (fields, protos, bindings, super_idx).
+4. Check whether the kind is already accepted by the current code.
+5. If changing behavior, add guardrail tests for the constant value and acceptance rule.
+6. Document proven numbering mismatches in MEMORY.md only when they affect current project state or prevent repeated mistakes.
+
+**Guardrail:** Do not patch type acceptance by symbol name alone. Reconcile symbol name, numeric value, and parsed `TypeDef.kind` evidence before changing type behavior.
+
+**High-risk type rules:**
+
+- `HFUN` and `HMETHOD` argument count is a single raw byte, not a VarInt.
+- Function and method type arguments are type indices.
+- Function and method return type is a type index.
+- Obj prototype format is exactly name, findex, pindex. Do not parse Obj protos as name, type, findex.
+- Class field indices accumulate through inheritance.
+- Unknown type kinds require diagnostics and bounded recovery, not silent acceptance.
+
 **Kinds beyond 24** (unofficial/compiler-private extensions) may also appear in shipping games. Our parser logs a warning and treats them as primitives (1-byte kind, no payload) to maximise parseability of real-world targets.
 
 **HGUID (23)** was added in a later version for GUID support (see version deltas).
@@ -299,3 +321,25 @@ for t in types.iter_mut() {
 ```
 
 This flattening is needed because field indices in bytecode point into this linearized field list, not into individual class-level field arrays.
+
+---
+
+## Function and Method Name Recovery
+
+Functions are anonymous until post-processing links them to type metadata.
+
+### Name Recovery Sources
+
+- **Obj protos** map method names to global findex.
+- **Obj bindings** map static field names to global findex.
+- **Constructor detection** may infer `new` from function type shape and owning class.
+- **Class and metadata wrapper types** must not override real implementation names.
+
+### Conflict Resolution Priority
+
+When multiple possible names exist:
+
+1. Prefer concrete class ownership evidence.
+2. Prefer binding/prototype context.
+3. Avoid generic standard-library wrapper names when they conflict with concrete class methods.
+4. Do not invent names without evidence.

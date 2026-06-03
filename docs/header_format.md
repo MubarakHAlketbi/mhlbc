@@ -21,10 +21,11 @@ The canonical VM loader (`hl_code_read`) checks these 3 bytes and exits with `"I
 ## Version
 
 ```
-Offset 3: 1 byte — Version number (unsigned 8-bit)
-  Supported: 2, 3, 4, 5
-  Current maximum: 5 (defined as max_version in code.c)
-  Version 1 is explicitly rejected.
+| Offset 3: 1 byte — Version number (unsigned 8-bit)
+  | Supported: 3, 4, 5
+  | Current maximum: 5 (defined as max_version in code.c)
+  | Version 1 is explicitly rejected.
+  | Version 2 is not formally supported by the parser.
 ```
 
 All subsequent parsing decisions branch on this version byte to prevent stream desynchronization.
@@ -140,13 +141,53 @@ Immediately following the header, data pools are read in this exact order:
 2. **Floats pool**: `nfloats × 8` bytes (little-endian f64)
 3. **Strings pool**: 4-byte size header (i32) + `size` bytes of UTF-8 data, zero-terminated
 4. **Bytes pool** (v5+): 4-byte size header (i32) + `size` raw bytes + `nbytes` VarInt offsets
-5. **Debug files** (if has_debug): VarInt count + `count` VarInt string indices
+5. **Debug files** (if has_debug): VarInt count + string-table format (4-byte LE size, null-terminated UTF-8 strings, then count UINDEX length markers)
 6. **Types**: `ntypes` type definitions (see [type_system.md](type_system.md))
 7. **Globals**: `nglobals` VarInt type references
 8. **Natives**: `nnatives` native definitions (lib name, fun name, type, findex)
-9. **Functions**: `nfunctions` function definitions (type, findex, reg count, op count, reg types, opcodes)
-10. **Debug info** (if has_debug): per-function debug tables
-11. **Constants** (v4+): `nconstants` constant definitions (global index + field indices)
+9. **Functions**: `nfunctions` function definitions (type, findex, reg count, op count, reg types, opcodes). Debug info (RLE) and assign lists are embedded per-function, not a separate section after the functions pool.
+10. **Constants** (v4+): `nconstants` constant definitions (global index + field indices)
+
+### Int Pool
+
+- `nints` entries
+- Each entry is 4 little-endian bytes (i32)
+
+### Float Pool
+
+- `nfloats` entries
+- Each entry is 8 little-endian bytes (f64)
+
+### String Pool
+
+1. 4-byte little-endian payload size
+2. raw null-terminated UTF-8 string payload
+3. `nstrings` UINDEX length markers after the payload
+
+**String-pool guardrail:** Do not skip the trailing length markers. Missing them is a known cause of type-pool corruption.
+
+### Bytes Pool (version >= 5)
+
+1. 4-byte little-endian payload size
+2. raw bytes payload
+3. `nbytes` UINDEX offsets into the payload
+
+### Debug File Section
+
+- `flags & 1` means debug may be present. It does not prove debug is valid.
+- Debug file names use the same string-table pattern as the main string pool.
+- Sanity-check debug table sizes against remaining bytes.
+- If the debug table is impossible, recover without corrupting the stream.
+
+### Pool Diagnostics Recommendations
+
+When implementing or debugging pool parsing, record:
+
+- pool start offset
+- expected count
+- decoded size where applicable
+- pool end offset
+- recovery decisions
 
 ---
 
@@ -200,5 +241,20 @@ let nfunctions = read_varu(r)? as usize;
 let nconstants = if version >= 4 { Some(read_varu(r)? as usize) } else { None };
 let entrypoint = RefFun::read(r)?;
 ```
+
+---
+
+## Header Diagnostics Recommendations
+
+When implementing or debugging header parsing, record:
+
+- stream offset before the header
+- each decoded header field
+- stream offset after the header
+- which version-gated fields (`nbytes`, `nconstants`) were present or skipped
+
+This makes stream-desynchronization bugs easier to diagnose because the header boundaries are available for comparison against expected pool starts.
+
+---
 
 Both implementations agree exactly.

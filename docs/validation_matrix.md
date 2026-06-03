@@ -7,13 +7,15 @@ Validates that mhlbc correctly parses, disassembles, and decompiles standard Hax
 
 | Fixture | Source Type | HL Version | Debug | Parser | Disasm | CFG | Decompile | HaxeWriter Syntax | Notes |
 |---------|-------------|------------|-------|--------|--------|-----|-----------|-------------------|-------|
-| hello.hl | standard fixture | v5 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
-| classes.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 36 .hx files, brace-balanced |
-| Enums.hl | standard fixture | v5 | yes | pass | pass | pass | pass | pass | 33 .hx files, brace-balanced |
-| Main.hl | standard fixture | v5 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
+| hello.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
 | types.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
-| Natives.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 33 .hx files, brace-balanced |
+| classes.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 36 .hx files, brace-balanced |
+| Main.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 32 .hx files, brace-balanced |
 | Shapes.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 35 .hx files, brace-balanced |
+| Enums.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 33 .hx files, brace-balanced |
+| Natives.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 33 .hx files, brace-balanced |
+| Switch.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 53 .hx files, brace-balanced |
+| ControlFlow.hl | standard fixture | v4 | yes | pass | pass | pass | pass | pass | 103 .hx files, brace-balanced |
 
 ### Track B — Farever Progress
 Separate benchmark. Tracks how close we are to decompiling Farever enough to understand and repair it. This does **not** define Gate 6.
@@ -92,6 +94,29 @@ sys.exit(1 if bad else 0)
 | fail | Operation fails or produces invalid output |
 | not applicable | Operation does not apply to this fixture |
 | not tested | Not yet verified |
+
+## Benchmark Classification Policy
+
+When a benchmark reveals a failure, classify it before changing code:
+
+1. **General HashLink format bug** -- parser/decompiler is wrong for standard bytecode.
+2. **Missing standard compiler pattern** -- valid Haxe/HashLink output is not yet handled.
+3. **Robustness/recovery issue** -- malformed data, bounds checks, diagnostics, or safe recovery.
+4. **Benchmark-specific/custom-runtime quirk** -- isolate behind explicit compatibility handling.
+5. **Future-tier concern** -- out of current scope unless explicitly unlocked.
+
+Only categories 1-3 may change core behavior by default.
+Category 4 requires isolated compatibility handling.
+Category 5 requires explicit project-owner unlock.
+
+### Benchmark Policy
+
+- A real-world benchmark can reveal parser, decompiler, robustness, or report problems.
+- Do not generalize benchmark-specific recovery into standard parser behavior without standard fixture evidence.
+- Keep standard HLB parsing strict and verified.
+- Keep malformed or custom-binary recovery explicit, diagnosable, and isolated.
+
+---
 
 ## Gate 6 Criteria
 

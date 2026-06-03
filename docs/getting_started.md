@@ -32,19 +32,19 @@ python -c "from hl_parser import HLParser; print('OK')"
 
 ```bash
 # Inspect a bytecode file header
-python cli.py header path/to/your.hlb
+python cli.py header path/to/your.hl
 
 # List all types
-python cli.py types path/to/your.hlb
+python cli.py types path/to/your.hl
 
 # Dump all functions
-python cli.py functions path/to/your.hlb
+python cli.py functions path/to/your.hl
 
 # Decompile to Haxe-like source
-python cli.py decompile path/to/your.hlb --output-dir ./output
+python cli.py decompile path/to/your.hl --output-dir ./output
 
 # JSON output for scripting
-python cli.py header path/to/your.hlb --json | python -m json.tool
+python cli.py header path/to/your.hl --json | python -m json.tool
 ```
 
 The CLI supports these subcommands:

@@ -374,3 +374,69 @@ The decompilation patterns documented here are derived from reading how the Haxe
 - **Closures**: `genhl.ml` — `TFunction` handling, capture environment
 
 The HashLink InDepth blog post by Nicolas Cannasse provides an additional verified walkthrough of bytecode disassembly with concrete examples.
+
+---
+
+## Pattern 11: OCall0-4 Type-Indexed Call Resolution
+
+For `OCall0-4` instructions (opcodes 24-28), `args[1]` is either:
+
+1. **A function index** when `0 <= args[1] < len(parser.functions)`.
+   - Direct call to a specific function.
+
+2. **A type index** when:
+   - `args[1] >= len(parser.functions)` AND
+   - `0 <= args[1] < len(parser.types)` AND
+   - `parser.types[args[1]].kind` is `K_FUN` or `K_METHOD`.
+
+   For type-indexed calls, the function type return field gives the callee return type directly. This is bytecode evidence and does not require producer tracing.
+
+### Resolution Rules
+
+- In register type evidence, when `args[1]` is a type index with `K_FUN`/`K_METHOD` kind, use the function type return field for the call result type.
+- In call-return analysis, the same condition may set `callee_func_type_idx` to `args[1]` and `callee_return_type_idx` to the function type return field.
+- The guard `args[1] >= len(parser.functions)` prevents overlapping valid function indices from being misread as type indices.
+- `K_OBJ` or other non-function kinds remain unresolved unless other direct evidence exists.
+
+### Testing Rule
+
+Use a fixture or synthetic test where the `K_FUN`/`K_METHOD` type index is greater than or equal to the number of functions.
+
+---
+
+## Pattern 12: Null Target Subcategory Classification
+
+`null_analysis` is attached to `IRFunction` as a mapping from variable name to null subcategory.
+
+It is populated by decompiler null-target analysis.
+
+### Classification Priority
+
+1. **Register bounds check:**
+   - OOB register -> `null_target_reg_type_missing`
+   - Invalid type index -> `null_target_reg_type_invalid`
+
+2. **Register type kind:**
+   - `K_DYN` -> `null_target_declared_dynamic`
+   - `K_DYNOBJ` -> `null_target_declared_dynobj`
+   - `K_VOID` -> `null_target_void_or_invalid_context`
+   - `K_VIRTUAL` -> `null_target_virtual_unsupported`
+   - `K_FUN` or `K_METHOD` -> `null_target_fun_or_method_type`
+   - `K_NULL` -> `null_target_nullable_type`
+
+3. **Consumer pattern:**
+   - `OSetField` (39) or `OSetThis` (41) -> field store
+   - `OSetGlobal` (36) -> global store
+   - `OSetArray` (81), `OSetEnumField` (94), or `OEnumAlloc` (91) -> array/dynamic store
+   - `OMov` (1) -> mov chain
+   - conditional jumps (44-47, 56-58) -> phi/branch merge
+
+4. **Fallback:**
+   - `null_target_unknown`
+
+### Report Behavior
+
+- `null_analysis` is included in quality report fixture details as `null_target_analysis`.
+- Aggregate reporting includes null-without-target-type subcategory breakdown.
+
+**Guardrail:** Do not treat `null_target_unknown` as automatically actionable. First check whether direct bytecode evidence exists.

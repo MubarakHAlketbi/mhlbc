@@ -280,8 +280,8 @@ static int hl_op_nargs[] = {
 Each instruction in a function's opcode stream is encoded as:
 
 ```
-VarInt: opcode_index (0-102)
-VarInt * nargs: arguments (registers, constants, jumps)
+single byte: opcode_index (0-102)
+signed VarInt * nargs: arguments (registers, constants, jumps)
 ```
 
 The exact number of VarInts to read for each instruction is determined by looking up its opcode index in `hl_op_nargs[]`. For variable-arg opcodes (nargs = -1), an additional VarInt count is read first, followed by that many register VarInts.
