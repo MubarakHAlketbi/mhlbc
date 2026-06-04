@@ -2487,6 +2487,122 @@ def _is_switch_break_ojalways(blk: BasicBlock,
     return False
 
 
+def _forward_reachable_blocks(start_ip: int,
+                               block_map: Dict[int, BasicBlock]) -> Set[int]:
+    """Compute the set of block IDs forward-reachable from *start_ip*.
+
+    Only follows edges where the successor starts at or after the
+    current block (no back-edges).  This gives a conservative
+    approximation of the forward region reachable from a given
+    instruction.
+    """
+    visited: Set[int] = set()
+    stack: List[int] = []
+    for bid, blk in block_map.items():
+        if blk.start_ip <= start_ip < blk.end_ip:
+            stack.append(bid)
+            break
+    while stack:
+        bid = stack.pop()
+        if bid in visited:
+            continue
+        visited.add(bid)
+        blk = block_map[bid]
+        for sid in blk.successors:
+            if sid not in block_map:
+                continue
+            sblk = block_map[sid]
+            # Only follow forward edges (not back-edges)
+            if sblk.start_ip >= blk.start_ip:
+                if sid not in visited:
+                    stack.append(sid)
+    return visited
+
+
+def _is_indirect_switch_break_ojalways(
+        blk: BasicBlock,
+        block_map: Dict[int, BasicBlock]) -> bool:
+    """Check if an OJAlways block is an *indirect* switch case-break.
+
+    Unlike :func:`_is_switch_break_ojalways` (which requires a direct
+    OSwitch predecessor), this handles the case where the OJAlways sits
+    behind an internal conditional split inside the case body (e.g. an
+    ``if/else`` before the break).
+
+    Criteria (all must hold):
+
+    1. Block ends with OJAlways (opcode 58), forward target.
+    2. Some block in the function is an OSwitch whose *jump_default*
+       equals the OJAlways target.
+    3. The OJAlways block is forward-reachable from EXACTLY ONE of
+       that OSwitch's case jump targets (exclusive case membership).
+    4. The case region contains no OTHER OSwitch (no nested switch
+       ambiguity).
+
+    This is a narrow general-purpose guard: it only suppresses the
+    redundant ``goto`` comment when the evidence that the block is a
+    switch case-break is mechanically provable from the CFG alone.
+    """
+    if not blk.instructions:
+        return False
+    last = blk.instructions[-1]
+    if last.opcode != 58:          # not OJAlways
+        return False
+    target = last.jump_target
+    if target is None or target <= last.index:   # not forward
+        return False
+
+    # Find every OSwitch instruction in the function whose
+    # jump_default matches the OJAlways target.
+    for sw_bid, sw_blk in block_map.items():
+        if not sw_blk.instructions:
+            continue
+        sw = sw_blk.instructions[-1]
+        if sw.opcode != 70:
+            continue
+        if sw.jump_default is None or sw.jump_default != target:
+            continue
+
+        cases = sw.jump_cases or []
+        if not cases:
+            continue
+
+        # Compute forward-reachable region for each case entry.
+        case_regions: List[Set[int]] = []
+        for case_ip in cases:
+            region = _forward_reachable_blocks(case_ip, block_map)
+            case_regions.append(region)
+
+        # The OJAlways block must be inside exactly one case region.
+        membership_count = sum(1 for r in case_regions if blk.id in r)
+        if membership_count != 1:
+            continue
+
+        # No nested OSwitch inside the case region that contains us.
+        our_region = None
+        for r in case_regions:
+            if blk.id in r:
+                our_region = r
+                break
+        if our_region is None:
+            continue
+
+        has_nested = False
+        for bid2, b2 in block_map.items():
+            if bid2 == sw_bid:
+                continue
+            if b2.instructions and b2.instructions[-1].opcode == 70:
+                if bid2 in our_region:
+                    has_nested = True
+                    break
+        if has_nested:
+            continue
+
+        return True
+
+    return False
+
+
 def _cleanup_goto_labels(stmts: List[IRStmt]) -> List[IRStmt]:
     """Remove provably no-op goto-to-next-label comment pairs.
 
@@ -3025,10 +3141,12 @@ class ControlStructurer:
 
         if last and last.opcode == 58:  # OJAlways
             # Session 67: Suppress OJAlways goto if it is a direct switch case-break
-            # to a post-switch merge block. The structured switch output already
-            # captures the case boundary, so the goto comment is redundant.
+            # to a post-switch merge block.
+            # Session 68: Also suppress indirect case-breaks (where the OJAlways
+            # sits behind an internal if/else split inside the case body).
             if (result and result[-1].op == "goto"
-                    and _is_switch_break_ojalways(blk, block_map)):
+                    and (_is_switch_break_ojalways(blk, block_map)
+                         or _is_indirect_switch_break_ojalways(blk, block_map))):
                 result.pop()
             # Unconditional jump -- follow if not back-edge
             target = last.jump_target

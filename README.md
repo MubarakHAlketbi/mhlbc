@@ -10,23 +10,23 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 65 (B65), which closed the conditional-jump no-merge goto subset, reducing ControlStructurer top-level gotos by 99.5% (Track A).
+This README reflects the accepted state after Session 68, which closed the OJAlways switch-case-break goto frontier, achieving 0 top-level gotos across all measured scopes (Track A, TB200, TB500).
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 846 passed, 4 skipped |
+| Full pytest baseline | 859 passed, 4 skipped |
 | Guardrails | 88 (B38-B55 + B63) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer top-level gotos | Track A: 3, TB200: 22, TB500: 91 |
-| Current recommendation | Stable checkpoint / release-hardening before opening new behavior work |
+| ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
+| Current recommendation | Release-hardening / milestone checkpoint |
 
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Remaining gotos (3/22/91) are exclusively OJAlways (unconditional): switch case breaks and bridge blocks requiring broader ControlStructurer design. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
 
 ---
 
@@ -86,7 +86,7 @@ Accepted status:
 | Errors | 0 |
 | Unknown opcodes | 0 |
 | Field-name fallbacks | 2084 |
-| ControlStructurer top-level gotos | 3 |
+| ControlStructurer top-level gotos | 0 |
 
 ### Track B: Farever benchmark
 
@@ -127,9 +127,9 @@ Do not reopen these without new evidence.
 | Frontier | Status | Accepted conclusion |
 |----------|--------|---------------------|
 | Register source/destination semantics | Closed | Opcode register roles were audited; OEnumField operands were resolved as constants where appropriate. |
-| Goto and switch diagnostic frontier | Exhausted | Conditional-jump gotos were eliminated by B63+B65. Remaining 3/22/91 top-level gotos are OJAlways (switch breaks, bridge blocks). |
+| Goto and switch diagnostic frontier | Closed | Conditional-jump gotos eliminated by B63+B65. OJAlways switch-case-break gotos eliminated by Sessions 67+68. All measured scopes at 0 top-level gotos. |
 | Field-name / TypeResolver diagnostic | Exhausted | Zero recoverable field-name fallbacks were found. Remaining `fN` names are structural or expected. |
-| ControlStructurer feasibility map | Complete | Session 60 feasibility map documented pre-B63 frontier. B63 suppressed header conditional-jump gotos. B65 suppressed no-merge conditional-jump gotos. Remaining OJAlways gotos require broader ControlStructurer design. |
+| ControlStructurer feasibility map | Complete | Session 60 feasibility map documented pre-B63 frontier. B63 suppressed header conditional-jump gotos. B65 suppressed no-merge conditional-jump gotos. Sessions 67+68 closed the OJAlways switch-case-break frontier (0 gotos across all scopes). |
 | Conditional-jump header goto suppression (B63) | Complete | 7-line fix; 62-75% reduction. |
 | Conditional-jump no-merge goto suppression (B65) | Complete | 6-line fix; 100% conditional-jump elimination. Track A: 553 -> 3 (-99.5%). |
 | Reproducibility audit | Complete | Session 61 commands reproduced the accepted baseline exactly. |
@@ -155,7 +155,7 @@ Conditional-jump goto frontier is closed (B63 + B65: 1463 -> 3, -99.8% from Sess
 Why:
 
 - It requires no tier unlock.
-- It preserves the accepted baseline before the next ControlStructurer frontier (OJAlways switch breaks and bridge blocks).
+- It preserves the accepted baseline after the ControlStructurer frontier closure (0 top-level gotos across all measured scopes).
 - It creates a durable git-taggable checkpoint against regression creep.
 - It does not block later ControlStructurer, TypeResolver, or tier expansion work.
 
@@ -304,7 +304,7 @@ Accepted report results:
 | Track B sample=200 | 200 decompiled, 0 errors |
 | Track B sample=500 | 500 decompiled, 0 errors |
 | Field-name diagnostic | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer feasibility | Track A: 3, TB200: 22, TB500: 91 (post-B65) |
+| ControlStructurer feasibility | Track A: 0, TB200: 0, TB500: 0 (post-Session 68) |
 
 Reports and handoff artifacts should remain ASCII-safe.
 
