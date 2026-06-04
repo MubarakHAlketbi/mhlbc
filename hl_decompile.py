@@ -3010,6 +3010,12 @@ class ControlStructurer:
                                                  stop_at_merge)
                 if merge_bid is not None:
                     # Provable merge exists -- structure if/else cleanly
+                    # B63: suppress the conditional jump's goto IRStmt that was
+                    # added by result.extend(block_stmts) at line 2989.  The if/else
+                    # we are about to create already captures the branch decision,
+                    # so the goto comment is redundant in source output.
+                    if result and result[-1].op == "goto":
+                        result.pop()
                     if_res = IRStmt("if", src=condition, blocks=[[], []])
                     merge_block = block_map.get(merge_bid)
                     merge_first_idx = None
