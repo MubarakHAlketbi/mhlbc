@@ -3052,7 +3052,13 @@ class ControlStructurer:
                                          visited, result, loop_info,
                                          stop_at_merge=stop_at_merge)
                 else:
-                    # No provable merge -- fall back to inline walk
+                    # No provable merge -- fall back to inline walk.
+                    # B65: suppress the conditional jump's goto IRStmt, same as B63
+                    # for the merge-found path.  The if/else we are about to create
+                    # already captures the branch decision regardless of whether a
+                    # common merge exists.
+                    if result and result[-1].op == "goto":
+                        result.pop()
                     if_res = IRStmt("if", src=condition, blocks=[[], []])
                     if succs:
                         then_stmts: List[IRStmt] = []

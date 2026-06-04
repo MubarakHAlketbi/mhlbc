@@ -10,7 +10,7 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after the Session 64 closeout consistency audit, which repaired Session 63 closeout artifacts and restored Session 60 historical continuity.
+This README reflects the accepted state after Session 65 (B65), which closed the conditional-jump no-merge goto subset, reducing ControlStructurer top-level gotos by 99.5% (Track A).
 
 | Area | Accepted state |
 |------|----------------|
@@ -18,15 +18,15 @@ This README reflects the accepted state after the Session 64 closeout consistenc
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
 | Full pytest baseline | 846 passed, 4 skipped |
-| Guardrails | 86 B38-B55 tests collected |
+| Guardrails | 88 (B38-B55 + B63) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer top-level gotos | Track A: 553, TB200: 41, TB500: 104 |
+| ControlStructurer top-level gotos | Track A: 3, TB200: 22, TB500: 91 |
 | Current recommendation | Stable checkpoint / release-hardening before opening new behavior work |
 
-All reproduced Session 61 metrics matched the accepted baseline. Session 63 (nested-if merge goto suppression) closed the conditional-jump header-goto subset, reducing ControlStructurer top-level gotos by 62-75% across all scopes. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Remaining gotos (3/22/91) are exclusively OJAlways (unconditional): switch case breaks and bridge blocks requiring broader ControlStructurer design. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
 
 ---
 
@@ -86,7 +86,7 @@ Accepted status:
 | Errors | 0 |
 | Unknown opcodes | 0 |
 | Field-name fallbacks | 2084 |
-| ControlStructurer top-level gotos | 553 |
+| ControlStructurer top-level gotos | 3 |
 
 ### Track B: Farever benchmark
 
@@ -113,8 +113,8 @@ Accepted sampled status:
 
 | Sample | Seed | Decompiled | Errors | Field-name fallbacks | ControlStructurer top-level gotos |
 |--------|------|------------|--------|----------------------|-----------------------------------|
-| 200 | 42 | 200 | 0 | 58 | 41 |
-| 500 | 42 | 500 | 0 | 356 | 104 |
+| 200 | 42 | 200 | 0 | 58 | 22 |
+| 500 | 42 | 500 | 0 | 356 | 91 |
 
 ---
 
@@ -127,10 +127,11 @@ Do not reopen these without new evidence.
 | Frontier | Status | Accepted conclusion |
 |----------|--------|---------------------|
 | Register source/destination semantics | Closed | Opcode register roles were audited; OEnumField operands were resolved as constants where appropriate. |
-| Goto and switch diagnostic frontier | Exhausted | Conditional-jump header gotos were suppressed by B63. Remaining top-level gotos are OJAlways unconditional gotos for which no narrow fix remains. |
+| Goto and switch diagnostic frontier | Exhausted | Conditional-jump gotos were eliminated by B63+B65. Remaining 3/22/91 top-level gotos are OJAlways (switch breaks, bridge blocks). |
 | Field-name / TypeResolver diagnostic | Exhausted | Zero recoverable field-name fallbacks were found. Remaining `fN` names are structural or expected. |
-| ControlStructurer feasibility map | Complete | Session 60 feasibility map documented pre-B63 frontier. B63 suppressed the conditional-jump subset (62-75% reduction). Remaining OJAlways gotos require broad ControlStructurer design. |
-| Nested-if merge goto suppression (B63) | Complete | 7-line fix eliminated 62-75% of top-level gotos. Remaining 553/41/104 are OJAlways to-merge gotos. |
+| ControlStructurer feasibility map | Complete | Session 60 feasibility map documented pre-B63 frontier. B63 suppressed header conditional-jump gotos. B65 suppressed no-merge conditional-jump gotos. Remaining OJAlways gotos require broader ControlStructurer design. |
+| Conditional-jump header goto suppression (B63) | Complete | 7-line fix; 62-75% reduction. |
+| Conditional-jump no-merge goto suppression (B65) | Complete | 6-line fix; 100% conditional-jump elimination. Track A: 553 -> 3 (-99.5%). |
 | Reproducibility audit | Complete | Session 61 commands reproduced the accepted baseline exactly. |
 
 ### Paused work
@@ -149,13 +150,12 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ## Recommended next step
 
-The safest next step is **Path 1: Stable checkpoint / release-hardening**.
+Conditional-jump goto frontier is closed (B63 + B65: 1463 -> 3, -99.8% from Session 60 baseline). The safest next step is **Path 1: Stable checkpoint / release-hardening**.
 
 Why:
 
 - It requires no tier unlock.
-- It does not change behavior.
-- It preserves the accepted baseline before harder work begins.
+- It preserves the accepted baseline before the next ControlStructurer frontier (OJAlways switch breaks and bridge blocks).
 - It creates a durable git-taggable checkpoint against regression creep.
 - It does not block later ControlStructurer, TypeResolver, or tier expansion work.
 
@@ -265,18 +265,18 @@ cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 Expected accepted result:
 
 ```text
-844 passed, 4 skipped
+846 passed, 4 skipped
 ```
 
 ```bash
-# Guardrails (86 B-number tests: B38-B55)
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55"
+# Guardrails (88 tests: B38-B55 + B63)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63"
 ```
 
 Expected accepted result:
 
 ```text
-86 tests collected
+88 passed
 ```
 
 ```bash
@@ -304,7 +304,7 @@ Accepted report results:
 | Track B sample=200 | 200 decompiled, 0 errors |
 | Track B sample=500 | 500 decompiled, 0 errors |
 | Field-name diagnostic | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer feasibility | Track A: 553, TB200: 41, TB500: 104 (post-B63) |
+| ControlStructurer feasibility | Track A: 3, TB200: 22, TB500: 91 (post-B65) |
 
 Reports and handoff artifacts should remain ASCII-safe.
 
