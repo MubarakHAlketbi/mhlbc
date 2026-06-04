@@ -18,11 +18,11 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 - Session 64: Closeout consistency audit.
 - Session 65: Conditional-jump no-merge fallback gotos suppressed (behavior-changing, B65).
 - Session 66: Diagnostic OJAlways frontier map (diagnostic-only).
-- Session 67: Narrow OJAlways switch case-break absorption — direct predSW cases (behavior-changing).
-- Session 68: Indirect OJAlways switch case-break absorption — forward-reachability guard (behavior-changing).
+- Session 67: Narrow OJAlways switch case-break absorption -- direct predSW cases (behavior-changing).
+- Session 68: Indirect OJAlways switch case-break absorption -- forward-reachability guard (behavior-changing).
   - Extended the switch case-break guard to handle cases where the OJAlways sits
     behind an internal conditional split (e.g., if/else) inside the case body.
-  - New guard: `_is_indirect_switch_break_ojalways()` — proves that the OJAlways
+  - New guard: `_is_indirect_switch_break_ojalways()` -- proves that the OJAlways
     block is forward-reachable from exactly one OSwitch case entry (exclusive
     membership), the target matches OSwitch.jump_default, and no nested OSwitch
     exists in the region.
@@ -88,9 +88,9 @@ Do not reopen without explicit project-owner unlock.
   - Function: writeParam, fidx=38661, nops=21.
   - OSwitch at instr 0: cases=[3, 13, 19], default=20.
   - OJAlways at instr 12 -> @20 (opcode 58) in Block 5, which is forward-reachable only from case entry @3 (Case 0).
-  - The case body has an if/else (OJFalse at 4 -> @7) — hence the indirect check was needed.
-- **Files changed:** hl_decompile.py (+136 lines), tests/test_decompile.py (+236 lines). Diagnostic probes under /tmp/ (non-canonical, not committed).
-- **Tests added:** 6 new tests in TestSession68IndirectSwitchBreakOJAlways (1 positive, 4 negative, 1 integration — all pass).
+  - The case body has an if/else (OJFalse at 4 -> @7) -- hence the indirect check was needed.
+- **Files changed:** hl_decompile.py (+122 raw insertions), tests/test_decompile.py (+237 raw insertions). Diagnostic probes under /tmp/ (non-canonical, not committed).
+- **Tests added:** 6 new tests in TestSession68IndirectSwitchBreakOJAlways (1 positive, 4 negative, 1 integration -- all pass).
 - **No parser/disassembler/TypeResolver/CLI/GUI/Tier 2-5 changes.**
 - **No Farever-specific logic.** The guard uses only CFG-level evidence (OSwitch, OJAlways, forward reachability).
 - **CSfeas:** Track A 0, TB200 0, TB500 0 top-level gotos. All scopes at zero.
