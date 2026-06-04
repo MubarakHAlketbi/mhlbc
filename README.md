@@ -583,6 +583,7 @@ The original gate list is no longer the clearest way to understand current statu
 | Session 62 | Closeout checkpoint, MEMORY.md handoff update. |
 | Session 63 / B63 | Bounded ControlStructurer behavior change: suppressed conditional-jump header gotos (62-75% reduction). 846p+4s, 86 guardrails, 0 errors. |
 | Session 64 | Closeout consistency audit: restored Session 60 historical continuity, fixed report/MEMORY/README staleness. |
+| Session 65 | Bounded ControlStructurer behavior change: suppressed conditional-jump no-merge fallback gotos (100% conditional-jump elimination across all scopes). 846p+4s, 88 guardrails, 0 errors. |
 
 ---
 
@@ -607,7 +608,7 @@ Current Tier 1 state:
 - Track A is locked at 9/9 fixtures with 0 errors.
 - Track B samples 200 and 500 decompile with 0 errors.
 - Diagnostic frontiers are exhausted.
-- Session 63 / B63 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
+- Session 63 and Session 65 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
 - Recommended next step is stable checkpoint / release-hardening.
 
 ### Tier 2: Bytecode manipulation, frozen
