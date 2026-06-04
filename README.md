@@ -1,56 +1,71 @@
-# Modern HashLink Bytecode Decompiler (mhlbc)
+# mhlbc - Modern HashLink Bytecode Decompiler
 
-mhlbc is a general-purpose Haxe/HashLink bytecode toolkit. It parses, inspects, disassembles, analyzes, and decompiles HashLink bytecode files such as `.hl` files and game `hlboot.dat` files into readable Haxe-like pseudocode.
+mhlbc is a general-purpose Haxe/HashLink bytecode toolkit. It can parse, inspect, disassemble, analyze, and decompile HashLink bytecode files such as `.hl` fixtures and game `hlboot.dat` files into readable Haxe-like pseudocode.
 
-The immediate real-world benchmark is **Farever**, a Haxe/Heaps game whose source is unavailable. Farever drives priority and stress testing, but it does not define the format. mhlbc targets standard HashLink bytecode first and keeps Farever-specific discoveries isolated, classified, and evidence-backed.
+The project is currently focused on **Tier 1: Core Decompiler**. The real-world benchmark is **Farever**, a Haxe/Heaps game with unavailable source code. Farever is used as a stress test and prioritization target, but mhlbc remains a general HashLink/Haxe tool. Core behavior must be backed by standard bytecode evidence, fixtures, tests, or diagnostics, not by Farever-only assumptions.
 
-Current scope is **Tier 1: Core Decompiler**. Later modding layers such as bytecode patching, asset extraction, engine binding analysis, and a full SDK remain frozen unless explicitly unlocked by the project owner.
+mhlbc does **not** promise recompilable Haxe source today. Its current output target is readable, evidence-backed Haxe-like pseudocode for inspection, preservation, and reverse engineering.
 
 ---
 
-## Current Snapshot
+## Current project status
 
-This README reflects the repository snapshot at Session 61.
+This README reflects the accepted state at the start of Session 62, after the Session 61 reproducibility audit and next-phase decision map.
 
-| Area | Status |
-|------|--------|
+| Area | Accepted state |
+|------|----------------|
 | Branch | `main` |
-| Latest documented milestones | Session 60 (field-name/TypeResolver diagnostic refresh -- all fallbacks structural, zero recoverable) |
-| Test suite | 844 passed, 4 skipped |
-| Track A | 9/9 standard fixtures, 0 errors, 0 unknown opcodes. 2084 field fallbacks across 11616 refs (82% resolved). All structural/expected. |
-| Track B | Farever samples of 200 and 500 functions, seed=42, 0 errors. TB200: 58 fallbacks (96% resolved). TB500: 356 fallbacks (91% resolved). All structural/expected. |
-| Current next target | Awaiting project-owner direction -- all diagnostic frontiers exhausted |
-| Later tiers | Frozen |
+| Active tier | Tier 1: Core Decompiler |
+| Later tiers | Frozen unless explicitly unlocked |
+| Full pytest baseline | 844 passed, 4 skipped |
+| Guardrails | 86 B38-B55 tests collected |
+| Track A | 9/9 fixtures, 3014 functions, 0 errors |
+| Track B sample=200 | 200 functions decompiled, 0 errors |
+| Track B sample=500 | 500 functions decompiled, 0 errors |
+| Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
+| ControlStructurer top-level gotos | Track A: 1463, TB200: 165, TB500: 394 |
+| Current recommendation | Stable checkpoint / release-hardening before opening new behavior work |
 
-The project is past basic parsing and decompilation bring-up. The register-semantics audit (Sessions 54-55B) closed the opcode source/destination frontier. The goto-frontier diagnostic pipeline (Sessions 58-59) exhausted all top-level goto buckets. Session 60 completed the field-name / TypeResolver diagnostic refresh: **zero recoverable field-name fallbacks exist** -- every remaining fN fallback across all tracks is structural (field-index-OOB), expected (Dynamic/unknown receiver), or an enum/abstract interaction. No remaining diagnostic work exists without project-owner direction.
+All reproduced Session 61 metrics matched the accepted baseline. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
 
 ---
 
-## What mhlbc Does
+## What mhlbc currently does
 
 mhlbc currently supports:
 
-- Parsing HashLink bytecode header, pools, types, globals, natives, functions, constants, and debug data.
-- Handling supported bytecode versions v3, v4, and v5 where the parser has version-specific field branches.
-- Decoding opcodes and building instruction listings.
-- Building CFG information, jump targets, basic blocks, and control-flow diagnostics.
-- Building decompiler IR, expression trees, function signatures, class/enumeration groupings, and Haxe-like output.
-- Running as both a GUI application and a headless CLI pipeline.
-- Producing quality reports and diagnostic artifacts for Track A and Track B.
+- HashLink bytecode header parsing.
+- Constant pool parsing for ints, floats, strings, and versioned bytes.
+- Type, global, native, function, constant, and debug-data parsing.
+- Bytecode versions v3, v4, and v5 where version-specific branches are implemented.
+- Opcode decoding and instruction listings.
+- CFG construction, jump-target recovery, basic-block analysis, and diagnostics.
+- IR construction, register naming, expression reconstruction, function signatures, class grouping, enum grouping, and Haxe-like output.
+- Headless CLI usage.
+- PyQt6 GUI inspection.
+- Track A fixture validation.
+- Track B Farever sampled validation.
+- Quality reports and diagnostic artifacts.
 
-mhlbc does **not** currently promise recompilable Haxe source. Output is Haxe-like pseudocode intended for reading, inspection, preservation, and reverse engineering.
+mhlbc intentionally avoids:
+
+- Guessing names, types, fields, ownership, call targets, or control flow.
+- Hiding malformed input silently.
+- Specializing core behavior for Farever.
+- Treating `MEMORY.md` as bytecode documentation.
+- Starting Tier 2-5 work without an explicit unlock.
 
 ---
 
-## Validation Tracks
+## Validation tracks
 
-mhlbc uses two separate validation tracks.
+mhlbc uses two validation tracks so that real-world progress does not corrupt general bytecode correctness.
 
-### Track A: General Haxe/HashLink correctness
+### Track A: standard Haxe/HashLink fixtures
 
-Track A is the correctness baseline. It uses standard compiled Haxe/HL fixtures and protects the project from becoming Farever-specific.
+Track A is the correctness baseline. It uses compiled Haxe/HL fixtures and protects the project from becoming benchmark-specific.
 
-Current Track A fixture set:
+Current fixture set:
 
 - `hello.hl`
 - `types.hl`
@@ -62,23 +77,28 @@ Current Track A fixture set:
 - `Switch.hl`
 - `ControlFlow.hl`
 
-Current Track A status:
+Accepted status:
 
-- 9/9 fixtures pass.
-- 0 parser/decompiler errors.
-- 0 unknown opcodes.
-- Actionable Dynamic/null/call-return frontier is locked at 0.
+| Metric | Value |
+|--------|-------|
+| Fixtures | 9/9 |
+| Functions | 3014 |
+| Errors | 0 |
+| Unknown opcodes | 0 |
+| Field-name fallbacks | 2084 |
+| ControlStructurer top-level gotos | 1463 |
 
 ### Track B: Farever benchmark
 
-Track B is the real-world stress benchmark. It measures progress on Farever without letting Farever redefine standard HashLink behavior.
+Track B is the large real-world benchmark. It measures behavior on Farever without allowing Farever to redefine standard HashLink semantics.
 
-Current Farever baseline:
+Accepted Farever bytecode identity:
 
 | Property | Value |
 |----------|-------|
-| `hlboot.dat` MD5 | `b85480ed23f04f2efc408e4ebdd208a0` |
-| File size | 13,358,488 bytes |
+| File | `workspace/Farever/hlboot.dat` |
+| MD5 | `b85480ed23f04f2efc408e4ebdd208a0` |
+| Size | 13,358,488 bytes |
 | Bytecode version | v4 |
 | Functions | 45,463 |
 | Types | 43,906 |
@@ -89,224 +109,88 @@ Current Farever baseline:
 | Debug files | 2,051 |
 | Entrypoint | 46,044 (`init`) |
 
-Current Track B sampled status:
+Accepted sampled status:
 
-- Sample size 200, seed=42: 0 errors.
-- Sample size 500, seed=42: 0 errors.
-- Remaining work is readability and high-level reconstruction quality, not parser navigation.
-
----
-
-## Farever Policy
-
-Farever is the lighthouse, not the map.
-
-When Farever exposes a failure or odd pattern, classify it before changing code:
-
-1. General HashLink format bug.
-2. Standard Haxe compiler pattern not yet handled.
-3. Robustness or recovery issue.
-4. Farever/shiroTools-specific quirk.
-5. Future patching/modding concern outside Tier 1.
-
-Only categories 1 through 3 may change the core parser, disassembler, decompiler, or writer by default. Category 4 must stay isolated behind explicit compatibility logic, diagnostics, or documentation. Category 5 remains frozen.
-
-Known Farever facts:
-
-- Farever uses a Shiro Games `shiroTools` HashLink fork.
-- The bytecode reader is in `Farever.exe`, not in `libhl.dll`.
-- Prior Ghidra work found `hl_read_type` matched open-source HashLink behavior.
-- No extra type kinds are currently known.
-- Current parser navigation is resolved for the current Farever `hlboot.dat`.
+| Sample | Seed | Decompiled | Errors | Field-name fallbacks | ControlStructurer top-level gotos |
+|--------|------|------------|--------|----------------------|-----------------------------------|
+| 200 | 42 | 200 | 0 | 58 | 165 |
+| 500 | 42 | 500 | 0 | 356 | 394 |
 
 ---
 
-## Current Decompiler Frontier
+## Current frontiers
 
-All diagnostic frontiers are exhausted as of Session 61.
+### Closed diagnostic frontiers
 
-### Exhausted/closed areas (do not reopen without new evidence)
+Do not reopen these without new evidence.
 
-- **Register source/destination semantics** -- closed in Sessions 54-55B. OEnumField(93) resolved (args[2,3] are constants, not registers).
-- **Goto/switch diagnostic frontier** -- exhausted in Sessions 58-59. 100% of remaining top-level gotos across all scopes are a single homogeneous shape: forward jumps past structured if/else blocks to unlabeled merge instruction positions.
-- **Field-name / TypeResolver diagnostic** -- exhausted in Session 60. All 2498 fallbacks across Track A, TB200, and TB500 are structural/expected (field-OOB, Dynamic/unknown receiver, enum/abstract interaction). **Zero recoverable cases exist.**
-- **ControlStructurer feasibility map** -- completed in Session 60 (diagnostic-only). No narrow safe cleanup subproblem exists. All remaining 1463 (Track A) / 165 (TB200) / 394 (TB500) top-level gotos are `forward_to_unlabeled_instruction` / `nested_if_merge_limitation` -- broad ControlStructurer work requires a separate design milestone.
+| Frontier | Status | Accepted conclusion |
+|----------|--------|---------------------|
+| Register source/destination semantics | Closed | Opcode register roles were audited; OEnumField operands were resolved as constants where appropriate. |
+| Goto and switch diagnostic frontier | Exhausted | Remaining top-level gotos are a homogeneous forward-merge limitation, not a narrow cleanup target. |
+| Field-name / TypeResolver diagnostic | Exhausted | Zero recoverable field-name fallbacks were found. Remaining `fN` names are structural or expected. |
+| ControlStructurer feasibility map | Complete | No narrow safe cleanup subproblem remains. Broad ControlStructurer work needs a design milestone. |
+| Reproducibility audit | Complete | Session 61 commands reproduced the accepted baseline exactly. |
 
-### Paused areas (require explicit project-owner unlock)
+### Paused work
 
-- TypeResolver/type-system invention.
+The following require explicit project-owner approval before implementation:
+
+- Broad ControlStructurer behavior changes.
+- TypeResolver or type-system invention.
 - Virtual structural typedef invention.
-- Broad ControlStructurer behavior work.
-- Any goto/label cleanup not backed by a narrow, proven CFG class.
-- Tiers 2-5 (frozen).
+- Goto/label cleanup not backed by a narrow proven CFG class.
+- Tier 2, Tier 3, Tier 4, or Tier 5 work.
 
-### Current status
-
-- No active behavior-changing frontier.
-- No remaining diagnostic work.
-- Awaiting project-owner direction.
+Design-only planning for ControlStructurer or TypeResolver can proceed without unlocking implementation, but behavior changes need explicit approval.
 
 ---
 
-## Architecture
+## Recommended next step
 
-```text
-mhlbc/
-|-- app.py                         # PyQt6 GUI, rendering and user interaction
-|-- cli.py                         # Headless CLI entry point
-|-- hl_decompile.py                # IR, decompiler, ControlStructurer, Haxe writer
-|-- hl_disasm.py                   # Opcode decoder, disassembly, CFG support
-|-- hl_logger.py                   # VerboseLogger and chunked logs
-|-- hl_worker.py                   # GUI worker threads
-|-- logalyzer.py                   # SQLite-backed log indexing and querying
-|-- MEMORY.md                      # Session ledger and accepted frontier
-|-- AGENTS.md                      # Agent guardrails and bytecode rules
-|-- CONTRIBUTING.md                # Development workflow and process
-|-- requirements.txt               # Test/dev dependencies
-|-- docs/
-|   |-- decompilation_patterns.md
-|   |-- farever_ghidra_hl_code_read.md
-|   |-- function_format.md
-|   |-- getting_started.md
-|   |-- haxe_compilers.md
-|   |-- header_format.md
-|   |-- opcodes.md
-|   |-- type_system.md
-|   |-- validation_matrix.md
-|   |-- varint_encoding.md
-|   `-- version_deltas.md
-|-- hl_parser/
-|   |-- __init__.py
-|   |-- _consts.py
-|   |-- _diagnostics.py
-|   |-- _exceptions.py
-|   |-- _parser.py
-|   |-- _types.py
-|   |-- _validator.py
-|   |-- _varint.py
-|   `-- _version.py
-|-- scripts/
-|   |-- legacy/                    # Archived milestone scripts
-|   |-- b36_analyze_field_names.py
-|   |-- b48_analyze_top_level_gotos.py
-|   |-- b50_analyze_backward_jumps.py
-|   |-- b51_analyze_forward_to_common_merge.py
-|   |-- b52_cross_tab.py
-|   |-- b53_frontier_rebaseline.py
-|   |-- analyze_field_name_fallbacks.py      # Session 60 field-name diagnostic
-|   |-- analyze_controlstructurer_feasibility.py  # Session 60 ControlStructurer feasibility
-|   |-- decompiler_quality_report.py
-|   |-- extract_b23_null_detail.py
-|   `-- extract_b31_virtual_detail.py
-`-- tests/
-    |-- __init__.py
-    |-- hl_helper.py
-    |-- test_cli.py
-    |-- test_decompile.py
-    |-- test_disasm.py
-    |-- test_field_diag_b6.py
-    |-- test_fixtures.py
-    |-- test_logger.py
-    |-- test_parser.py
-    |-- test_varint.py
-    `-- fixtures/src/
-        |-- Classes.hx
-        |-- ControlFlow.hx
-        |-- Enums.hx
-        |-- Hello.hx
-        |-- Main.hx
-        |-- Natives.hx
-        |-- Shapes.hx
-        |-- Switch.hx
-        `-- Types.hx
+The safest next step is **Path 1: Stable checkpoint / release-hardening**.
+
+Why:
+
+- It requires no tier unlock.
+- It does not change behavior.
+- It preserves the accepted baseline before harder work begins.
+- It creates a durable git-taggable checkpoint against regression creep.
+- It does not block later ControlStructurer, TypeResolver, or tier expansion work.
+
+Recommended scope for the checkpoint:
+
+1. Confirm README, `MEMORY.md`, `CONTRIBUTING.md`, `AGENTS.md`, and `docs/validation_matrix.md` are consistent.
+2. Run the full documented validation block.
+3. Confirm report output remains ASCII-safe.
+4. Record exact command results.
+5. Create a release-hardening report or tag only if explicitly requested.
+
+No Tier 2-5 unlock is recommended before this checkpoint.
+
+---
+
+## Installation
+
+Parser, CLI, scripts, and tests use Python. Install the repository dependencies first:
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
-Layering rules:
+For GUI usage, install PyQt6 separately:
 
-- `hl_parser/` is headless and must not import PyQt.
-- `cli.py` must remain headless and scriptable.
-- `app.py` handles UI rendering, not heavy bytecode analysis.
-- Long-running GUI parsing/decompilation runs through worker threads.
-- Backend first, CLI second, GUI third.
-- Bytecode semantics belong in code, tests, `docs/`, and diagnostic evidence, not guesses.
+```bash
+python -m pip install PyQt6
+```
 
----
-
-## Technical Model
-
-### Header order
-
-HashLink bytecode headers are read in this order:
-
-1. `magic`, 3 bytes, must be `HLB`.
-2. `version`, 1 byte.
-3. `flags`, VarInt.
-4. `nints`, VarInt.
-5. `nfloats`, VarInt.
-6. `nstrings`, VarInt.
-7. `nbytes`, VarInt, only for version >= 5.
-8. `ntypes`, VarInt.
-9. `nglobals`, VarInt.
-10. `nnatives`, VarInt.
-11. `nfunctions`, VarInt.
-12. `nconstants`, VarInt, only for version >= 4.
-13. `entrypoint`, VarInt.
-
-Version-conditional fields must never be read unconditionally.
-
-### Pool order
-
-After the header, pools are read in this order:
-
-1. Int pool.
-2. Float pool.
-3. String pool.
-4. Bytes pool for version >= 5.
-5. Debug files if valid debug data exists.
-6. Types.
-7. Globals.
-8. Natives.
-9. Functions.
-10. Constants for version >= 4.
-
-The string pool includes trailing UINDEX length markers after the raw string payload. Skipping them causes stream desynchronization.
-
-### VarInt and UINDEX
-
-HashLink uses variable-length integer encodings with 1-byte, 2-byte, and 4-byte forms. Multi-byte forms use bit 5 (`0x20`) as the sign bit for signed INDEX values.
-
-UINDEX uses the same byte layout but rejects negative decoded values. Counts, function indices, register counts, opcode counts, debug-file counts, and OSwitch counts/offsets use unsigned semantics.
-
-### Opcodes
-
-- Opcode ID is one raw byte, not a VarInt.
-- The opcode table has 103 slots, IDs 0 through 102.
-- Fixed-argument opcodes use the synchronized opcode argument table.
-- OCallN, OCallMethod, OCallThis, OCallClosure, and OMakeEnum are vararg opcodes.
-- OSwitch has its own layout and must not be decoded like OCall-style varargs.
-- Function debug info is RLE-encoded per opcode.
-
-### Type constants
-
-mhlbc uses its own source-of-truth constants from `hl_decompile.py` and `hl_parser/_consts.py`. Do not assume external HashLink reference numbering matches local constants.
-
-Important field-resolution constants:
-
-| Symbol | Value | Meaning |
-|--------|-------|---------|
-| `K_FUN` | 10 | Function type |
-| `K_OBJ` | 11 | Object/class-like field-bearing type |
-| `K_VIRTUAL` | 15 | Virtual/anonymous structural type |
-| `K_METHOD` | 20 | Method function type, not object field metadata |
-| `K_STRUCT` | 21 | Struct field-bearing type |
-
-B43/B44 verified that `K_OBJ=11` is already accepted by field resolution. Do not reopen field-kind acceptance without new evidence.
+Haxe is only needed when regenerating compiled `.hl` fixtures from `tests/fixtures/src/*.hx`.
 
 ---
 
-## CLI Usage
+## CLI usage
 
-The CLI mirrors the main inspection and decompilation pipeline.
+The CLI is headless and does not require PyQt6.
 
 ```bash
 python cli.py --version
@@ -346,97 +230,329 @@ CLI exit codes:
 
 ---
 
-## GUI Usage
+## GUI usage
 
-Install PyQt6 separately if using the GUI:
+The GUI is optional.
 
 ```bash
-python -m pip install PyQt6
 python app.py
 ```
 
-The GUI provides:
+Current GUI capabilities:
 
 - Overview tab.
 - Strings, Types, Globals, Natives, and Functions browsers.
 - CFG view.
 - Decompilation view.
 - Dark UI.
-- Background parsing/decompilation using worker threads.
+- Background parsing and decompilation through worker threads.
 - Virtualized list views for large files.
 
-The parser and CLI do not require PyQt6.
+Architecture rule: the parser and CLI must remain headless. GUI code must not become a dependency of parser or CLI behavior.
 
 ---
 
-## Development Setup
+## Reproducible validation
 
-Parser, CLI, scripts, and tests require Python. The snapshot `requirements.txt` contains test/dev dependencies only:
-
-```bash
-python -m pip install -r requirements.txt
-```
-
-For GUI work, also install PyQt6:
+Use these commands for the accepted Session 61 / Session 62-start baseline.
 
 ```bash
-python -m pip install PyQt6
+# Full pytest baseline
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 ```
 
-Haxe is only needed when regenerating compiled fixture `.hl` files from `tests/fixtures/src/*.hx`.
-
----
-
-## Running Tests
-
-```bash
-pytest
-pytest -v
-pytest -x
-pytest -k "varint"
-pytest tests/test_decompile.py -k "B51"
-```
-
-Current full-suite snapshot:
+Expected accepted result:
 
 ```text
 844 passed, 4 skipped
 ```
 
-Useful validation commands:
-
 ```bash
-# Full pytest baseline
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
-
 # Guardrails (86 B-number tests: B38-B55)
 cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55"
+```
 
+Expected accepted result:
+
+```text
+86 tests collected
+```
+
+```bash
 # Track A quality report
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track A
 
-# Track B quality report (sample=200)
+# Track B quality report (sample=200, seed=42)
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track B --farever workspace/Farever/hlboot.dat --sample 200
 
-# Track B quality report (sample=500)
+# Track B quality report (sample=500, seed=42)
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track B --farever workspace/Farever/hlboot.dat --sample 500
 
-# Session 60: field-name/TypeResolver fallback diagnostic (self-contained, hardcoded paths)
+# Field-name / TypeResolver fallback diagnostic
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/analyze_field_name_fallbacks.py
 
-# Session 60: ControlStructurer feasibility map (self-contained, hardcoded paths)
+# ControlStructurer feasibility diagnostic
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/analyze_controlstructurer_feasibility.py
 ```
 
-Generated reports and diagnostic artifacts should remain ASCII-safe.
+Accepted report results:
+
+| Command | Accepted result |
+|---------|-----------------|
+| Track A quality report | 9 fixtures, 3014 functions, 0 errors |
+| Track B sample=200 | 200 decompiled, 0 errors |
+| Track B sample=500 | 500 decompiled, 0 errors |
+| Field-name diagnostic | Track A: 2084, TB200: 58, TB500: 356 |
+| ControlStructurer feasibility | Track A: 1463, TB200: 165, TB500: 394 |
+
+Reports and handoff artifacts should remain ASCII-safe.
+
+Example ASCII check:
+
+```bash
+python3 - <<'PY'
+from pathlib import Path
+
+paths = [
+    Path("README.md"),
+    Path("MEMORY.md"),
+    Path("CONTRIBUTING.md"),
+    Path("AGENTS.md"),
+]
+
+bad = False
+for path in paths:
+    data = path.read_text(encoding="utf-8")
+    for i, ch in enumerate(data):
+        if ord(ch) > 127:
+            line = data.count("\n", 0, i) + 1
+            col = i - data.rfind("\n", 0, i)
+            print(f"{path}:{line}:{col}: non-ASCII U+{ord(ch):04X}")
+            bad = True
+
+raise SystemExit(1 if bad else 0)
+PY
+```
 
 ---
 
-## Milestone History Summary
+## Repository layout
 
-The old gate list is no longer the most useful way to understand current status. Gates 1 through 6 are effectively complete for the original parser/disassembler/decompiler validation path, and the project is now in named frontier milestones.
+```text
+mhlbc/
+|-- app.py
+|-- cli.py
+|-- hl_decompile.py
+|-- hl_disasm.py
+|-- hl_logger.py
+|-- hl_worker.py
+|-- logalyzer.py
+|-- AGENTS.md
+|-- CONTRIBUTING.md
+|-- MEMORY.md
+|-- README.md
+|-- pytest.ini
+|-- requirements.txt
+|-- docs/
+|   |-- decompilation_patterns.md
+|   |-- farever_ghidra_hl_code_read.md
+|   |-- function_format.md
+|   |-- getting_started.md
+|   |-- haxe_compilers.md
+|   |-- header_format.md
+|   |-- opcodes.md
+|   |-- performance_and_scalability.md
+|   |-- type_system.md
+|   |-- validation_matrix.md
+|   |-- varint_encoding.md
+|   `-- version_deltas.md
+|-- hl_parser/
+|   |-- __init__.py
+|   |-- _consts.py
+|   |-- _diagnostics.py
+|   |-- _exceptions.py
+|   |-- _parser.py
+|   |-- _types.py
+|   |-- _validator.py
+|   |-- _varint.py
+|   `-- _version.py
+|-- scripts/
+|   |-- legacy/
+|   |-- b36_analyze_field_names.py
+|   |-- b48_analyze_top_level_gotos.py
+|   |-- b50_analyze_backward_jumps.py
+|   |-- b51_analyze_forward_to_common_merge.py
+|   |-- b52_cross_tab.py
+|   |-- b53_frontier_rebaseline.py
+|   |-- analyze_field_name_fallbacks.py
+|   |-- analyze_controlstructurer_feasibility.py
+|   |-- decompiler_quality_report.py
+|   |-- extract_b23_null_detail.py
+|   `-- extract_b31_virtual_detail.py
+`-- tests/
+    |-- __init__.py
+    |-- hl_helper.py
+    |-- test_cli.py
+    |-- test_decompile.py
+    |-- test_disasm.py
+    |-- test_field_diag_b6.py
+    |-- test_fixtures.py
+    |-- test_logger.py
+    |-- test_parser.py
+    |-- test_varint.py
+    `-- fixtures/src/
+        |-- Classes.hx
+        |-- ControlFlow.hx
+        |-- Enums.hx
+        |-- Hello.hx
+        |-- Main.hx
+        |-- Natives.hx
+        |-- Shapes.hx
+        |-- Switch.hx
+        `-- Types.hx
+```
 
-Recent relevant milestones:
+Layering rules:
+
+- `hl_parser/` is headless and must not import PyQt.
+- `cli.py` must remain headless and scriptable.
+- `app.py` handles UI rendering and interaction, not heavy bytecode analysis.
+- Long-running GUI parsing and decompilation must run through worker threads.
+- Backend comes first, CLI second, GUI third.
+- Bytecode truth belongs in code, tests, `docs/`, and diagnostic evidence.
+
+---
+
+## Important technical rules
+
+The full technical specifications live in `docs/`. This section is only a quick reference.
+
+### Header and pool order
+
+HashLink bytecode headers are versioned. Version-conditional fields must never be read unconditionally.
+
+Header fields are read in this order:
+
+1. `magic`
+2. `version`
+3. `flags`
+4. `nints`
+5. `nfloats`
+6. `nstrings`
+7. `nbytes` for version >= 5
+8. `ntypes`
+9. `nglobals`
+10. `nnatives`
+11. `nfunctions`
+12. `nconstants` for version >= 4
+13. `entrypoint`
+
+Pools are read in this order:
+
+1. Int pool.
+2. Float pool.
+3. String pool.
+4. Bytes pool for version >= 5.
+5. Debug files when valid debug data exists.
+6. Types.
+7. Globals.
+8. Natives.
+9. Functions.
+10. Constants for version >= 4.
+
+The string pool includes trailing UINDEX length markers after the raw string payload. Skipping them desynchronizes the stream.
+
+### VarInt and UINDEX
+
+HashLink uses variable-length integer encodings with 1-byte, 2-byte, and 4-byte forms. Multi-byte signed INDEX values use bit 5 (`0x20`) as the sign bit.
+
+UINDEX uses the same byte layout but rejects negative decoded values. Counts, function indices, register counts, opcode counts, debug-file counts, and OSwitch counts/offsets use unsigned semantics.
+
+### Opcode decoding
+
+- Opcode ID is one raw byte, not a VarInt.
+- The opcode table has 103 slots, IDs 0 through 102.
+- Fixed-argument opcodes use the synchronized opcode argument table.
+- OCallN, OCallMethod, OCallThis, OCallClosure, and OMakeEnum are vararg opcodes.
+- OSwitch has its own layout and must not be decoded like OCall-style varargs.
+- Function debug info is RLE-encoded per opcode.
+
+### Type constants
+
+mhlbc uses local source-of-truth constants from `hl_decompile.py` and `hl_parser/_consts.py`. Do not assume external HashLink reference numbering matches local constants.
+
+Important field-resolution constants:
+
+| Symbol | Value | Meaning |
+|--------|-------|---------|
+| `K_FUN` | 10 | Function type |
+| `K_OBJ` | 11 | Object/class-like field-bearing type |
+| `K_VIRTUAL` | 15 | Virtual/anonymous structural type |
+| `K_METHOD` | 20 | Method function type, not object field metadata |
+| `K_STRUCT` | 21 | Struct field-bearing type |
+
+`K_OBJ=11` is already accepted by field resolution. Do not reopen field-kind acceptance without new evidence.
+
+---
+
+## Development workflow
+
+Use evidence-first work.
+
+Before behavior-changing work:
+
+1. Classify the task.
+2. Read the relevant docs for the affected subsystem.
+3. Inspect current code and tests.
+4. Inspect fixtures and reports when relevant.
+5. Collect direct evidence.
+6. Add or update focused tests or diagnostics.
+7. Make the smallest safe change.
+8. Run targeted validation.
+9. Run broader validation when scope requires it.
+10. Update docs if proven truth changed.
+11. Update `MEMORY.md` only with compact accepted state or handoff.
+12. Report exact scope, files, commands, results, and skipped validation.
+
+Do not:
+
+- Guess bytecode semantics.
+- Guess names, types, fields, ownership, call targets, or control flow.
+- Reopen solved frontiers without new evidence.
+- Mix unrelated cleanup into behavior work.
+- Compare metrics across changed classifier definitions without saying so.
+- Claim source-visible behavior changed when only IR counters were measured.
+- Put volatile project state in `AGENTS.md`.
+- Put long bytecode specifications in `MEMORY.md`.
+- Expand into frozen tiers without explicit approval.
+
+For the full contributor workflow, see `CONTRIBUTING.md`.
+
+For standing agent behavior, see `AGENTS.md`.
+
+---
+
+## Documentation map
+
+Use the project documents as the source of truth for the subsystem you are touching.
+
+| Task area | Read first |
+|-----------|------------|
+| Parser header, pools, versions | `docs/header_format.md`, `docs/varint_encoding.md`, `docs/version_deltas.md` |
+| Opcode decoding and function bodies | `docs/opcodes.md`, `docs/function_format.md` |
+| Types, fields, methods, classes, enums | `docs/type_system.md` |
+| Decompiler, IR, CFG, writer | `docs/decompilation_patterns.md`, `docs/opcodes.md` |
+| Validation and reports | `docs/validation_matrix.md`, `MEMORY.md` |
+| Performance and scalability | `docs/performance_and_scalability.md` |
+| Contribution workflow | `AGENTS.md`, `CONTRIBUTING.md` |
+
+`MEMORY.md` records current accepted state and handoff. It is not proof by itself and is not a technical specification.
+
+---
+
+## Milestone summary
+
+The original gate list is no longer the clearest way to understand current status. The project is now in named frontier milestones. Recent accepted milestones:
 
 | Milestone | Result |
 |-----------|--------|
@@ -444,7 +560,7 @@ Recent relevant milestones:
 | B39 | Expanded standard fixture coverage to 9 Track A fixtures. |
 | B40 | Added if/else merge-boundary handling. |
 | B41 | Refined natural-loop handling and unary expression parentheses. |
-| B42 | Reconciled Track A vs Track B metric scopes. |
+| B42 | Reconciled Track A and Track B metric scopes. |
 | B43/B44 | Audited field layout and corrected constant-numbering interpretation; no field behavior fix needed. |
 | B45 | Hardened docs/process around type-kind constants. |
 | B46 | Added recursive ControlStructurer frontier census. |
@@ -453,15 +569,16 @@ Recent relevant milestones:
 | B49 | Verified immediate goto-to-label cleanup already existed and added guardrail tests. |
 | B50 | Proved sampled backward_jump cases are IR-position artifacts, not true bytecode loop backedges. |
 | B51 | Classified forward_to_common_merge by CFG evidence and selected B52 target. |
-| B52 | Narrow forward merge cleanup: removed forward_to_next_label cases under conservative syntactic guard. |
-| B53 | Post-B52 frontier rebaseline and metric reconciliation. |
-| B54 | Fixed null-target classification regression (OSetThis consumer delegation). |
+| B52 | Removed forward_to_next_label cases under conservative syntactic guard. |
+| B53 | Rebaselined the post-B52 frontier and reconciled metrics. |
+| B54 | Fixed null-target classification regression through OSetThis consumer delegation. |
 | B55 | Fixed HaxeWriter if/else indentation. |
-|| B56 | Completed opcode register-semantics audit (src/dst/call-operand, idx-not-reg patterns, OEnumField). |
-|| B57 | Null-target OSetThis consumer delegation fix (behavior-changing). |
-|| B58 | Return-region CFG fallthrough cleanup + to_if_target exhaustive diagnostic. |
-|| B59 | Goto-frontier exhaustion + switch-case gap diagnostic disproven. |
-|| B60 | Field-name/TypeResolver diagnostic refresh (zero recoverable) + ControlStructurer feasibility map (single homogeneous shape, no narrow subproblem). |
+| B56 | Completed opcode register-semantics audit. |
+| B57 | Fixed null-target OSetThis consumer delegation behavior. |
+| B58 | Completed return-region CFG fallthrough cleanup and to_if_target diagnostic. |
+| B59 | Exhausted goto-frontier diagnostics and disproved the switch-case gap target. |
+| B60 | Completed field-name/TypeResolver diagnostic refresh and ControlStructurer feasibility map. |
+| Session 61 | Reproduced the accepted validation baseline, fixed README reproducibility gaps, and produced the next-phase decision map. |
 
 ---
 
@@ -472,7 +589,7 @@ Recent relevant milestones:
 Implemented and under refinement:
 
 - Header and pool parsing.
-- Type/global/native/function parsing.
+- Type, global, native, function, and constant parsing.
 - Opcode decoding and disassembly.
 - CFG construction.
 - IR and Haxe-like output.
@@ -480,13 +597,14 @@ Implemented and under refinement:
 - Track A and Track B validation.
 - Diagnostic reporting and frontier classification.
 
-Current Tier 1 status:
+Current Tier 1 state:
 
-- All diagnostic frontiers exhausted.
-- No active behavior-changing work.
-- All planned diagnostic milestones complete.
-- Track A 9/9 locked. Track B 0 errors.
-- Awaiting project-owner direction for next unlock.
+- Parser navigation is stable for current fixtures and the accepted Farever benchmark.
+- Track A is locked at 9/9 fixtures with 0 errors.
+- Track B samples 200 and 500 decompile with 0 errors.
+- Diagnostic frontiers are exhausted.
+- No behavior-changing work is active.
+- Recommended next step is stable checkpoint / release-hardening.
 
 ### Tier 2: Bytecode manipulation, frozen
 
@@ -517,7 +635,7 @@ Possible future scope:
 
 - `.hdll` native library analysis.
 - Native binding mapping.
-- Heaps/shiroTools runtime interface documentation.
+- Heaps and shiroTools runtime interface documentation.
 
 ### Tier 5: Full modding SDK, vision only
 
@@ -532,32 +650,58 @@ Possible future scope:
 
 ---
 
-## Known Limitations
+## Known limitations
 
-- Output is readable Haxe-like pseudocode, not guaranteed recompilable Haxe.
+- Output is Haxe-like pseudocode, not guaranteed recompilable Haxe.
 - Some control flow is intentionally emitted as `goto`/`label` comments until a safe structuring proof exists.
-- Field names may fall back to `fN` where type metadata has no direct evidence.
-- K_VIRTUAL anonymous structs are conservatively represented rather than inventing typedefs.
-- TypeResolver and broad field recovery are paused.
+- Field names may fall back to `fN` when bytecode metadata does not provide a recoverable name.
+- K_VIRTUAL anonymous structs are represented conservatively.
+- TypeResolver invention is paused.
+- Broad field recovery is paused.
+- Broad ControlStructurer behavior work is paused.
 - Try/catch and advanced irreducible control-flow structuring are not broadly solved.
-- LLM-based naming, annotation, or semantic invention is out of scope for the deterministic decompiler path.
+- LLM-based naming, annotation, or semantic invention is outside the deterministic decompiler path.
+
+---
+
+## Farever policy
+
+Farever is the lighthouse, not the map.
+
+When Farever exposes a failure or odd pattern, classify it before changing code:
+
+1. General HashLink format bug.
+2. Standard Haxe compiler pattern not yet handled.
+3. Robustness or recovery issue.
+4. Farever/shiroTools-specific quirk.
+5. Future patching or modding concern outside Tier 1.
+
+Only categories 1 through 3 may change the core parser, disassembler, decompiler, or writer by default. Category 4 must stay isolated behind explicit compatibility logic, diagnostics, or documentation. Category 5 remains frozen.
+
+Known Farever facts:
+
+- Farever uses a Shiro Games `shiroTools` HashLink fork.
+- The bytecode reader is in `Farever.exe`, not in `libhl.dll`.
+- Prior Ghidra work found `hl_read_type` matched open-source HashLink behavior.
+- No extra type kinds are currently known.
+- Current parser navigation is resolved for the accepted Farever `hlboot.dat`.
 
 ---
 
 ## Contributing
 
-See `CONTRIBUTING.md` for development workflow, testing rules, logging rules, and CLI/GUI expectations.
+See `CONTRIBUTING.md` for contributor workflow, testing rules, validation/reporting requirements, and release discipline.
 
-Before behavior-changing work:
+Minimum expectations:
 
-1. Read `MEMORY.md` Quick Reference and Current Accepted Frontier.
-2. Read the relevant `docs/` files for the subsystem.
-3. Prove the issue with code, fixtures, report artifacts, or binary evidence.
-4. Add narrow tests.
-5. Make the smallest safe change.
-6. Regenerate relevant reports.
-7. Preserve ASCII-safe report output.
-8. Do not expand into frozen tiers without explicit unlock.
+- Keep milestones narrow.
+- Prove before changing behavior.
+- Add or preserve tests.
+- Keep reports scoped and reproducible.
+- Label Track A and Track B metrics separately.
+- Keep generated reports and handoff artifacts ASCII-safe.
+- Preserve existing reports and legacy metrics for continuity.
+- Avoid Tier 2-5 work unless explicitly unlocked.
 
 ---
 
