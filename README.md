@@ -10,23 +10,23 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state at the start of Session 62, after the Session 61 reproducibility audit and next-phase decision map.
+This README reflects the accepted state after the Session 64 closeout consistency audit, which repaired Session 63 closeout artifacts and restored Session 60 historical continuity.
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 844 passed, 4 skipped |
+| Full pytest baseline | 846 passed, 4 skipped |
 | Guardrails | 86 B38-B55 tests collected |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer top-level gotos | Track A: 1463, TB200: 165, TB500: 394 |
+| ControlStructurer top-level gotos | Track A: 553, TB200: 41, TB500: 104 |
 | Current recommendation | Stable checkpoint / release-hardening before opening new behavior work |
 
-All reproduced Session 61 metrics matched the accepted baseline. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
+All reproduced Session 61 metrics matched the accepted baseline. Session 63 (nested-if merge goto suppression) closed the conditional-jump header-goto subset, reducing ControlStructurer top-level gotos by 62-75% across all scopes. The project has no active behavior-changing frontier unless the project owner explicitly opens one.
 
 ---
 
@@ -86,7 +86,7 @@ Accepted status:
 | Errors | 0 |
 | Unknown opcodes | 0 |
 | Field-name fallbacks | 2084 |
-| ControlStructurer top-level gotos | 1463 |
+| ControlStructurer top-level gotos | 553 |
 
 ### Track B: Farever benchmark
 
@@ -113,8 +113,8 @@ Accepted sampled status:
 
 | Sample | Seed | Decompiled | Errors | Field-name fallbacks | ControlStructurer top-level gotos |
 |--------|------|------------|--------|----------------------|-----------------------------------|
-| 200 | 42 | 200 | 0 | 58 | 165 |
-| 500 | 42 | 500 | 0 | 356 | 394 |
+| 200 | 42 | 200 | 0 | 58 | 41 |
+| 500 | 42 | 500 | 0 | 356 | 104 |
 
 ---
 
@@ -127,9 +127,10 @@ Do not reopen these without new evidence.
 | Frontier | Status | Accepted conclusion |
 |----------|--------|---------------------|
 | Register source/destination semantics | Closed | Opcode register roles were audited; OEnumField operands were resolved as constants where appropriate. |
-| Goto and switch diagnostic frontier | Exhausted | Remaining top-level gotos are a homogeneous forward-merge limitation, not a narrow cleanup target. |
+| Goto and switch diagnostic frontier | Exhausted | Conditional-jump header gotos were suppressed by B63. Remaining top-level gotos are OJAlways unconditional gotos for which no narrow fix remains. |
 | Field-name / TypeResolver diagnostic | Exhausted | Zero recoverable field-name fallbacks were found. Remaining `fN` names are structural or expected. |
-| ControlStructurer feasibility map | Complete | No narrow safe cleanup subproblem remains. Broad ControlStructurer work needs a design milestone. |
+| ControlStructurer feasibility map | Complete | Session 60 feasibility map documented pre-B63 frontier. B63 suppressed the conditional-jump subset (62-75% reduction). Remaining OJAlways gotos require broad ControlStructurer design. |
+| Nested-if merge goto suppression (B63) | Complete | 7-line fix eliminated 62-75% of top-level gotos. Remaining 553/41/104 are OJAlways to-merge gotos. |
 | Reproducibility audit | Complete | Session 61 commands reproduced the accepted baseline exactly. |
 
 ### Paused work
@@ -303,7 +304,7 @@ Accepted report results:
 | Track B sample=200 | 200 decompiled, 0 errors |
 | Track B sample=500 | 500 decompiled, 0 errors |
 | Field-name diagnostic | Track A: 2084, TB200: 58, TB500: 356 |
-| ControlStructurer feasibility | Track A: 1463, TB200: 165, TB500: 394 |
+| ControlStructurer feasibility | Track A: 553, TB200: 41, TB500: 104 (post-B63) |
 
 Reports and handoff artifacts should remain ASCII-safe.
 
@@ -579,6 +580,9 @@ The original gate list is no longer the clearest way to understand current statu
 | B59 | Exhausted goto-frontier diagnostics and disproved the switch-case gap target. |
 | B60 | Completed field-name/TypeResolver diagnostic refresh and ControlStructurer feasibility map. |
 | Session 61 | Reproduced the accepted validation baseline, fixed README reproducibility gaps, and produced the next-phase decision map. |
+| Session 62 | Closeout checkpoint, MEMORY.md handoff update. |
+| Session 63 / B63 | Bounded ControlStructurer behavior change: suppressed conditional-jump header gotos (62-75% reduction). 846p+4s, 86 guardrails, 0 errors. |
+| Session 64 | Closeout consistency audit: restored Session 60 historical continuity, fixed report/MEMORY/README staleness. |
 
 ---
 
@@ -603,7 +607,7 @@ Current Tier 1 state:
 - Track A is locked at 9/9 fixtures with 0 errors.
 - Track B samples 200 and 500 decompile with 0 errors.
 - Diagnostic frontiers are exhausted.
-- No behavior-changing work is active.
+- Session 63 / B63 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
 - Recommended next step is stable checkpoint / release-hardening.
 
 ### Tier 2: Bytecode manipulation, frozen

@@ -3,10 +3,10 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-04
-Current session: 63
+Current session: 64
 Branch: main
-HEAD: 4140f8f
-Tests: 844 passed, 4 skipped
+HEAD: 97e40b9
+Tests: 846 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -21,6 +21,7 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - TB500 CSfeas: 394 -> 104 (-73.6%).
   - No errors introduced. All 86 guardrails preserved.
 - Remaining 553/41/104 top-level gotos are now OJAlways (unconditional) gotos inside then/else blocks targeting merge points -- a different structural shape from the suppressed ones.
+- Session 64: Closeout consistency audit completed. Historical continuity restored: Session 60 feasibility artifacts returned to pre-B63 state (1463/165/394), Session 63 post-B63 feasibility data moved to session63_* names. Session 63 report pytest count corrected (844->846). MEMORY.md and README.md updated.
 - Field-name frontier remains paused (zero recoverable cases).
 - Broad ControlStructurer work remains paused.
 
@@ -57,20 +58,17 @@ Do not reopen without explicit project-owner unlock.
 
 ## 5. Latest handoff
 
-- Session 63: Bounded ControlStructurer implementation (behavior-changing):
-  - Added 7-line fix in ControlStructurer._walk_block to pop conditional-jump gotos when merge is found.
-  - Added 2 B63 regression tests (TestB63NestedIfMergeGotoSuppression).
-  - Updated 3 B51 tests for post-B63 baseline.
-  - Created decompiler_quality_report/session63_controlstructurer_implementation.{md,json}.
-  - Top-level goto reduction: Track A -62%, TB200 -75%, TB500 -74%.
-  - All validation commands reproduced: 844p+4s, 86 guardrails, 0 errors all scopes.
-  - ASCII safety confirmed.
-  - AGENTS.md untouched.
-  - No TypeResolver/field-name work.
-  - No Tier 2-5 work.
-  - No release tag.
+### Session 64 (closeout consistency audit)
 
-- Recommended next: Project-owner direction on remaining OJAlways gotos or next subsystem.
+- Audited Session 63 closeout for historical continuity, report accuracy, stale docs.
+- Inconsistencies found and repaired:
+  - **Session 60 feasibility artifacts overwritten with post-B63 data** (Session 63 report admitted overwriting them). Fixed: restored Session 60 files to pre-B63 state (1463/165/394) by regenerating from commit 26a422b; created new Session 63 feasibility files with post-B63 data (553/41/104).
+  - **Session 63 report pytest count was 844 (stale baseline)** -- should be 846 (B63 added 2 tests). Fixed report.md and report.json.
+  - **MEMORY.md listed stale HEAD (4140f8f vs 97e40b9), stale session (63 vs 64), stale test count (844 vs 846).** Fixed.
+  - **README.md had stale ControlStructurer numbers (1463/165/394) and no Session 63 entry.** Fixed.
+  - **No historical continuity issue found in B51/B63 test logic.** Test comments are clear and correct.
+- ASCII safety confirmed on all changed files.
+- No runtime behavior changed. No new B-number created. No tiers unlocked.
 
 ## 6. Compact evidence pointers
 
