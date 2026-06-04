@@ -2,10 +2,10 @@
 
 Current accepted state for mhlbc.
 
-Last updated: 2026-06-03
-Current session: 60 (closed)
+Last updated: 2026-06-04
+Current session: 61 (closed)
 Branch: main
-HEAD: a2c4b53
+HEAD: 228215d
 Tests: 844 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
@@ -93,11 +93,45 @@ Do not reopen without explicit project-owner unlock.
     - session60_controlstructurer_feasibility_summary.md
   - Key finding: **100% of remaining top-level gotos are forward-to-common-merge** past structured blocks to unlabeled instruction positions. Single homogeneous shape across all scopes.
   - No narrow subproblem exists. Broad ControlStructurer work would require a design milestone.
-  - Recommended: ControlStructurer broad cleanup remains locked unless Sato explicitly unlocks a design milestone.
   - pytest: 844 passed, 4 skipped (unchanged -- diagnostic-only).
   - No B-number created. No behavior changes.
 - Session 60 closure: all diagnostic frontiers now exhausted (field-name, TypeResolver, ControlStructurer feasibility). No remaining diagnostic work without project-owner unlock.
-- Recommended next: project-owner direction on (1) TypeResolver/type-system improvement, (2) ControlStructurer design milestone, (3) Tier 2-5 unlock.
+- Session 61: documentation/state-consistency consolidation (this session).
+  - Documentation-only milestone.
+  - No behavior changes. No B-number.
+  - Performed consistency audit across MEMORY.md, README.md, CONTRIBUTING.md, AGENTS.md, docs/decompilation_patterns.md, docs/validation_matrix.md.
+  - Fixed stale claims in README.md (frontier section, test count, milestone table, tier 1 status).
+  - Updated MEMORY.md for Session 61 startup and handoff.
+  - docs/validation_matrix.md Track B metrics noted as slightly stale (framework doc, cosmetic only -- not updated).
+  - AGENTS.md, CONTRIBUTING.md, docs/decompilation_patterns.md: no stale claims found.
+  - Created decompiler_quality_report/session61_state_consistency_audit.md and .json.
+  - ASCII safety confirmed on all changed and generated files.
+  - Validation: ASCII safety checks passed. Full pytest skipped (documentation-only change).
+- Session 61 continuation: validation and reproducibility audit (this session).
+  - Documentation/report-only milestone. No behavior changes. No B-number.
+  - Executed all 5 validation commands and full pytest: 844 passed, 4 skipped.
+  - Track A: 9/9 fixtures, 3014 funcs, 0 errors -- reproduced.
+  - Track B sample=200: 0 errors -- reproduced.
+  - Track B sample=500: 0 errors -- reproduced.
+  - Session 60 field-name diagnostic: Track A 2084, TB200 58, TB500 356 -- all match accepted report.
+  - Session 60 ControlStructurer feasibility: Track A 1463 gotos, TB200 165, TB500 394 -- all match accepted report.
+  - Guardrails: 86 B38-B55 tests collected (verified command now documented in README.md).
+  - Fixed reproducibility gaps: added Session 60 scripts to scripts listing, replaced stale b53 commands with current commands in README.md.
+  - Reproducibility gaps left open: (1) naming inconsistency across report artifacts (sample=200 vs sample_200 vs (sample=200)) -- cosmetic only, fixing would break historical refs. (2) guardrail breakdown not programmatically tracked -- MEMORY.md currently owns it.
+  - Created decompiler_quality_report/session61_reproducibility_audit.md and .json.
+  - ASCII safety confirmed on all changed/generated files.
+  - AGENTS.md untouched.
+- Session 61 continuation: strategic decision map created (this session).
+  - Documentation/report-only. No behavior changes. No B-number.
+  - Created decompiler_quality_report/session61_next_phase_decision_map.md and .json.
+  - Evaluated 5 viable paths: stable checkpoint, ControlStructurer design, TypeResolver/field-name design, Tier 2-5 unlock, stop/hold.
+  - Recommended: Path 1 (stable checkpoint/release-hardening) -- zero risk, proceeds immediately without unlock.
+  - All other paths require Sato's explicit project-owner direction.
+  - MEMORY.md updated with continuation handoff. AGENTS.md untouched. README.md unchanged (no stale claims found).
+  - ASCII safety confirmed on all changed/generated files.
+  - Full pytest skipped (documentation-only change).
+  - Session 61 remains active; not closed.
+- Recommended next: Path 1 (stable checkpoint) -- or project-owner direction on Paths 2-5.
 
 ## 6. Compact evidence pointers
 

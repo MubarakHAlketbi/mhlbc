@@ -10,7 +10,7 @@ Current scope is **Tier 1: Core Decompiler**. Later modding layers such as bytec
 
 ## Current Snapshot
 
-This README reflects the repository snapshot at Session 59.
+This README reflects the repository snapshot at Session 61.
 
 | Area | Status |
 |------|--------|
@@ -123,51 +123,28 @@ Known Farever facts:
 
 ## Current Decompiler Frontier
 
-The current open work is narrow and evidence-first.
+All diagnostic frontiers are exhausted as of Session 61.
 
-### Closed or locked areas
+### Exhausted/closed areas (do not reopen without new evidence)
 
-The following areas are considered closed unless new evidence appears:
+- **Register source/destination semantics** -- closed in Sessions 54-55B. OEnumField(93) resolved (args[2,3] are constants, not registers).
+- **Goto/switch diagnostic frontier** -- exhausted in Sessions 58-59. 100% of remaining top-level gotos across all scopes are a single homogeneous shape: forward jumps past structured if/else blocks to unlabeled merge instruction positions.
+- **Field-name / TypeResolver diagnostic** -- exhausted in Session 60. All 2498 fallbacks across Track A, TB200, and TB500 are structural/expected (field-OOB, Dynamic/unknown receiver, enum/abstract interaction). **Zero recoverable cases exist.**
+- **ControlStructurer feasibility map** -- completed in Session 60 (diagnostic-only). No narrow safe cleanup subproblem exists. All remaining 1463 (Track A) / 165 (TB200) / 394 (TB500) top-level gotos are `forward_to_unlabeled_instruction` / `nested_if_merge_limitation` -- broad ControlStructurer work requires a separate design milestone.
 
-- Nullcheck comments: structured nullchecks are emitted.
-- Syntax balance issues: identifier sanitization fixed known brace/paren failures.
-- Function-index callee fallback: fixed by resolved callee naming.
-- Comment-only body metric: proven to be a regex artifact.
-- Dynamic type reference rollup: all cases explained by other buckets.
-- Call-return unresolved: all known cases are expected or non-actionable.
-- Null-without-target-type: all known cases are expected or non-actionable.
-- Virtual type unsupported: K_VIRTUAL anonymous structs are intentionally mapped conservatively.
-- After-goto-block: B35 found 100% structurally required in the sampled evidence.
-- Field-name direct evidence: B36/B44 found no safe missed type-pool evidence path.
+### Paused areas (require explicit project-owner unlock)
 
-### Paused areas
-
-These require explicit project-owner unlock before broad behavior work:
-
-- TypeResolver and field-name recovery.
+- TypeResolver/type-system invention.
 - Virtual structural typedef invention.
-- Later-tier patching/modding work.
-- Any broad goto/label cleanup not backed by a narrow, proven CFG class.
+- Broad ControlStructurer behavior work.
+- Any goto/label cleanup not backed by a narrow, proven CFG class.
+- Tiers 2-5 (frozen).
 
-### Active next target
+### Current status
 
-The register-semantics audit (Sessions 54-55B) is complete. The active remaining quality frontier is ControlStructurer/top-level goto behavior.
-
-Session 58 diagnostic work (B57/B57 labels) has classified the `to_if_target` bucket (78.4% of Track A top-level gotos). Finding: 95-100% are genuine branch-entry jumps that provide the ONLY entry path into their target branch -- NOT safe to suppress. The bucket is now considered exhausted.
-
-Remaining top-level goto buckets in order of size:
-1. `return_region_jump` -- Track A 143, Track B sampled
-2. `backward_jump` -- Track A 29, Track B sampled
-3. `forward_to_common_merge` -- Track A 55 (post-B52), Track B sampled
-4. Other (loop, switch, unreachable, missing, unknown)
-
-B52 excluded from scope (still open):
-- `return_region_jump`
-- `backward_jump`
-- `to_if_target` (now exhausted)
-- non-immediate `forward_to_next_label`
-- loop/backedge work
-- TypeResolver or field recovery work
+- No active behavior-changing frontier.
+- No remaining diagnostic work.
+- Awaiting project-owner direction.
 
 ---
 
@@ -216,6 +193,8 @@ mhlbc/
 |   |-- b51_analyze_forward_to_common_merge.py
 |   |-- b52_cross_tab.py
 |   |-- b53_frontier_rebaseline.py
+|   |-- analyze_field_name_fallbacks.py      # Session 60 field-name diagnostic
+|   |-- analyze_controlstructurer_feasibility.py  # Session 60 ControlStructurer feasibility
 |   |-- decompiler_quality_report.py
 |   |-- extract_b23_null_detail.py
 |   `-- extract_b31_virtual_detail.py
@@ -421,16 +400,32 @@ pytest tests/test_decompile.py -k "B51"
 Current full-suite snapshot:
 
 ```text
-838 passed, 4 skipped
+844 passed, 4 skipped
 ```
 
 Useful validation commands:
 
 ```bash
-uv run python3 scripts/decompiler_quality_report.py --track both --farever workspace/Farever/hlboot.dat --sample 200
-uv run python3 scripts/b53_frontier_rebaseline.py --track A
-uv run python3 scripts/b53_frontier_rebaseline.py --track B --farever workspace/Farever/hlboot.dat --sample 200
-uv run python3 scripts/b53_frontier_rebaseline.py --track B --farever workspace/Farever/hlboot.dat --sample 500
+# Full pytest baseline
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
+
+# Guardrails (86 B-number tests: B38-B55)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55"
+
+# Track A quality report
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track A
+
+# Track B quality report (sample=200)
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track B --farever workspace/Farever/hlboot.dat --sample 200
+
+# Track B quality report (sample=500)
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/decompiler_quality_report.py --track B --farever workspace/Farever/hlboot.dat --sample 500
+
+# Session 60: field-name/TypeResolver fallback diagnostic (self-contained, hardcoded paths)
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/analyze_field_name_fallbacks.py
+
+# Session 60: ControlStructurer feasibility map (self-contained, hardcoded paths)
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/analyze_controlstructurer_feasibility.py
 ```
 
 Generated reports and diagnostic artifacts should remain ASCII-safe.
@@ -462,7 +457,11 @@ Recent relevant milestones:
 | B53 | Post-B52 frontier rebaseline and metric reconciliation. |
 | B54 | Fixed null-target classification regression (OSetThis consumer delegation). |
 | B55 | Fixed HaxeWriter if/else indentation. |
-| B56 | Completed opcode register-semantics audit (src/dst/call-operand, idx-not-reg patterns, OEnumField). |
+|| B56 | Completed opcode register-semantics audit (src/dst/call-operand, idx-not-reg patterns, OEnumField). |
+|| B57 | Null-target OSetThis consumer delegation fix (behavior-changing). |
+|| B58 | Return-region CFG fallthrough cleanup + to_if_target exhaustive diagnostic. |
+|| B59 | Goto-frontier exhaustion + switch-case gap diagnostic disproven. |
+|| B60 | Field-name/TypeResolver diagnostic refresh (zero recoverable) + ControlStructurer feasibility map (single homogeneous shape, no narrow subproblem). |
 
 ---
 
@@ -481,12 +480,13 @@ Implemented and under refinement:
 - Track A and Track B validation.
 - Diagnostic reporting and frontier classification.
 
-Current Tier 1 focus:
+Current Tier 1 status:
 
-- B54: to_if_target diagnostic-only milestone (goto frontier).
-- Preserve Track A 9/9 zero-error status.
-- Preserve Track B sampled zero-error status.
-- Do not reopen paused frontiers without new evidence.
+- All diagnostic frontiers exhausted.
+- No active behavior-changing work.
+- All planned diagnostic milestones complete.
+- Track A 9/9 locked. Track B 0 errors.
+- Awaiting project-owner direction for next unlock.
 
 ### Tier 2: Bytecode manipulation, frozen
 
