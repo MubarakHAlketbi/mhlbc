@@ -3,9 +3,9 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-04
-Current session: 61 (closed)
+Current session: 62
 Branch: main
-HEAD: 228215d
+HEAD: a82956b
 Tests: 844 passed, 4 skipped
 Guardrails: 86/86
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
@@ -37,11 +37,13 @@ B-number convention: B57 and B58 were historical labels for diagnostic artifacts
 
 No behavior-changing frontier is currently unlocked.
 
-Sessions 58-59 exhausted all goto/switch diagnostic work.
-Session 60 exhausted the field-name/TypeResolver diagnostic refresh.
-
-All currently achievable diagnostic frontiers are complete. No remaining
-diagnostic work can proceed without project-owner direction or new evidence.
+Session 62 completed the stable checkpoint / release-hardening milestone:
+- README.md rewritten and committed for Session 62 start state.
+- All 7 validation commands reproduced the accepted baseline exactly (844p+4s, 86 guardrails, Track A/TB200/TB500 zero errors, 2084/58/356 fallbacks, 1463/165/394 CSfeas).
+- Checkpoint artifacts created at decompiler_quality_report/stable_checkpoint_release_hardening.{md,json}.
+- Repository is clean, ready for optional tag.
+- No behavior code changed. No B-number created. No tier unlocked.
+- AGENTS.md untouched.
 
 ## 3. Closed or paused frontiers
 
@@ -121,20 +123,20 @@ Do not reopen without explicit project-owner unlock.
   - Created decompiler_quality_report/session61_reproducibility_audit.md and .json.
   - ASCII safety confirmed on all changed/generated files.
   - AGENTS.md untouched.
-- Session 61 continuation: strategic decision map created (this session).
-  - Documentation/report-only. No behavior changes. No B-number.
-  - Created decompiler_quality_report/session61_next_phase_decision_map.md and .json.
-  - Evaluated 5 viable paths: stable checkpoint, ControlStructurer design, TypeResolver/field-name design, Tier 2-5 unlock, stop/hold.
-  - Recommended: Path 1 (stable checkpoint/release-hardening) -- zero risk, proceeds immediately without unlock.
-  - All other paths require Sato's explicit project-owner direction.
-  - MEMORY.md updated with continuation handoff. AGENTS.md untouched. README.md unchanged (no stale claims found).
-  - ASCII safety confirmed on all changed/generated files.
-  - Full pytest skipped (documentation-only change).
-  - Session 61 remains active; not closed.
-- Recommended next: Path 1 (stable checkpoint) -- or project-owner direction on Paths 2-5.
+- Session 62: Stable checkpoint / release-hardening (documentation-only). No behavior changes. No B-number.
+  - Rewrote README.md for Session 62 start state (committed as a82956b).
+  - Ran all 7 validation commands: all matched accepted baseline.
+  - Created checkpoint artifacts at decompiler_quality_report/stable_checkpoint_release_hardening.{md,json}.
+  - AGENTS.md untouched.
+  - Working tree clean. Repository ready for optional tag.
+  - All previous diagnostic frontier conclusions remain valid.
+  - Next safe step: ControlStructurer design-only planning (requires project-owner direction).
+- Recommended next: Project-owner direction on next path (design-only, TypeResolver, or tier expansion).
 
 ## 6. Compact evidence pointers
 
+- decompiler_quality_report/stable_checkpoint_release_hardening.md -- Session 62 stable checkpoint report
+- decompiler_quality_report/stable_checkpoint_release_hardening.json -- Session 62 stable checkpoint report (JSON)
 - decompiler_quality_report/report.md -- main quality report
 - decompiler_quality_report/report.json -- machine-readable quality report
 - decompiler_quality_report/session60_field_name_fallbacks_*.{json,md} -- Session 60 field-name fallback census reports
