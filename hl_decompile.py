@@ -3362,17 +3362,27 @@ class ControlStructurer:
                                stop_at_merge: Optional[int] = None) -> bool:
         """Attempt to structure a simple OSwitch region.
 
+        Session 69 extends the original simple-linear-case-body criteria to
+        also accept case bodies with internal structured if/else (the pattern
+        proven in Sessions 68 and 69 — e.g. writeParam fidx=38661).
+
         Returns True if the switch was successfully structured.
         Falls back (returns False) for complex / ambiguous cases.
 
-        Criteria for a "simple" switch:
+        Criteria:
         - At least 2 case targets
         - Each case entry block has the switch header as its sole predecessor
-        - Each case body is a strictly linear chain (no internal if/else/loop)
-        - Each case body ends with OJAlways break to the post-switch block
-          or is a terminal dead-end (ORet)
-        - Post-switch block exists (fall-through after OSwitch)
-        - No case entry is a loop header
+        - Each case body is either:
+          (a) a strictly linear chain (no internal if/else/loop) ending with
+              OJAlways break to the post-switch block or ORet dead-end; OR
+          (b) a region with internal structured if/else where all paths
+              reconverge before the break and the region is exclusive
+        - Default block, when present, is included only if it is NOT the
+          merge point of all cases (i.e. its sole predecessor is the OSwitch
+          block itself).
+        - Post-switch block exists (fall-through or default-target merge).
+        - No case entry is a loop header.
+        - No nested OSwitch in any case region.
         """
         last = blk.instructions[-1]
         if last.opcode != 70:
@@ -3385,22 +3395,39 @@ class ControlStructurer:
             return False
 
         # ── Map case targets to block IDs ──
-        case_order: List[int] = []   # block IDs in case order
+        case_order: List[int] = []   # block IDs in case order (explicit cases only)
         for t in cases:
             bid = self._ip_to_block.get(t)
-            if bid is not None and bid != blk.id:
-                case_order.append(bid)
-        if default_target is not None:
-            bid = self._ip_to_block.get(default_target)
             if bid is not None and bid != blk.id:
                 case_order.append(bid)
 
         if not case_order:
             return False
 
-        # ── Post-switch block (fall-through) ──
+        # ── Post-switch block ──
+        # Try the fall-through instruction first.
         fall_through = last.index + 1
         post_switch_bid = self._ip_to_block.get(fall_through)
+
+        # If the default target is distinct from fall-through AND is the
+        # actual merge point (all case breaks converge there), use it as
+        # the post-switch block instead.
+        if default_target is not None:
+            default_bid = self._ip_to_block.get(default_target)
+            if default_bid is not None and default_bid != blk.id:
+                # Default block IS a merge point if it has multiple predecessors
+                # (the OSwitch itself plus one or more case-break paths).
+                db = block_map.get(default_bid)
+                if db is not None and len(db.predecessors) > 1:
+                    # Default block is a merge point → use as post-switch.
+                    # Skip adding it to case_order.
+                    post_switch_bid = default_bid
+                else:
+                    # Default block has sole predecessor (the OSwitch) →
+                    # it's a real case body. Add to case_order.
+                    if default_bid not in case_order:
+                        case_order.append(default_bid)
+
         if post_switch_bid is None:
             self._log("STRUCT",
                       f"OSwitch@{last.index}: no post-switch block, falling back",
@@ -3421,16 +3448,58 @@ class ControlStructurer:
             if loop_info and bid in loop_info:
                 return False
 
-        # ── Verify each case body is simple and pre-collect IR stmts ──
+        # ── Pre-compute case regions for exclusive-membership check ──
+        case_regions: List[Set[int]] = []
+        for bid in case_order:
+            cb = block_map.get(bid)
+            if cb is not None:
+                region = self._compute_case_forward_region(
+                    bid, post_switch_bid, block_map)
+                case_regions.append(region)
+            else:
+                case_regions.append(set())
+
+        # ── Verify exclusive case membership ──
+        # No block should belong to more than one case region.
+        seen_blocks: Dict[int, int] = {}  # block_id → case_index
+        for ci, region in enumerate(case_regions):
+            for bid in region:
+                if bid in seen_blocks:
+                    # Block shared between cases → fall back
+                    return False
+                seen_blocks[bid] = ci
+
+        # ── Verify no nested OSwitch in any case region ──
+        for ci, region in enumerate(case_regions):
+            for bid in region:
+                b = block_map.get(bid)
+                if b and b.instructions and b.instructions[-1].opcode == 70:
+                    # Nested OSwitch → too complex for this structuring pass
+                    return False
+
+        # ── Collect case body IR statements ──
+        # Try the simple linear walker first; fall back to the internal-flow
+        # walker for regions that have structured control flow (if/else).
         case_bodies: List[List[IRStmt]] = []
         blocks_to_mark: Set[int] = set()
-        for bid in case_order:
+        all_ok = True
+        for ci, bid in enumerate(case_order):
+            # First try simple walker
             ok, stmts, local_blocks = self._walk_simple_case_body(
                 bid, post_switch_bid, block_map, func_stmts)
             if not ok:
-                return False
+                # Try the more permissive internal-flow walker
+                ok, stmts, local_blocks = self._walk_case_region_with_internal_flow(
+                    bid, post_switch_bid, block_map, func_stmts, loop_info,
+                    case_regions[ci])
+            if not ok:
+                all_ok = False
+                break
             case_bodies.append(stmts)
             blocks_to_mark.update(local_blocks)
+
+        if not all_ok:
+            return False
 
         # ── Emit header statements (before OSwitch) ──
         for instr in blk.instructions[:-1]:
@@ -3461,6 +3530,78 @@ class ControlStructurer:
                              stop_at_merge=stop_at_merge)
 
         return True
+
+    def _compute_case_forward_region(
+        self, start_bid: int, stop_bid: int,
+        block_map: Dict[int, BasicBlock],
+    ) -> Set[int]:
+        """Compute the set of blocks forward-reachable from *start_bid*
+        without passing through *stop_bid*.
+
+        This is a purely structural check used for exclusive-membership
+        verification — it only follows forward CFG edges and stops at
+        *stop_bid*.
+        """
+        visited: Set[int] = set()
+        stack: List[int] = [start_bid]
+        while stack:
+            bid = stack.pop()
+            if bid in visited:
+                continue
+            if bid == stop_bid:
+                continue
+            visited.add(bid)
+            blk = block_map.get(bid)
+            if blk is None:
+                continue
+            for sid in blk.successors:
+                sblk = block_map.get(sid)
+                if sblk is None:
+                    continue
+                # Only follow forward edges (start_ip non-decreasing)
+                if sblk.start_ip >= blk.start_ip:
+                    if sid not in visited:
+                        stack.append(sid)
+        return visited
+
+    def _walk_case_region_with_internal_flow(
+        self, start_bid: int, post_switch_bid: int,
+        block_map: Dict[int, BasicBlock],
+        func_stmts: Dict[int, List[IRStmt]],
+        loop_info: Dict[int, Dict],
+        exclusive_region: Set[int],
+    ) -> Tuple[bool, List[IRStmt], Set[int]]:
+        """Walk a case body region that may contain internal structured
+        control flow (if/else).
+
+        Delegates to ``_walk_block`` with a *local* visited set so that
+        the structurer's main visited set is not contaminated if a sibling
+        case body later fails.  The ``exclusive_region`` set (pre-computed
+        by ``_compute_case_forward_region``) is used to verify that every
+        walked block stays within the case's exclusive membership.
+
+        Returns ``(ok, stmts, block_ids)``.
+        """
+        if start_bid not in exclusive_region:
+            return False, [], set()
+
+        local_visited: Set[int] = set()
+        body_stmts: List[IRStmt] = []
+
+        self._walk_block(
+            start_bid, block_map, func_stmts,
+            local_visited, body_stmts, loop_info,
+            stop_at_merge=post_switch_bid,
+        )
+
+        # Verify every walked block is within the exclusive region and not
+        # already claimed by the main walker (unless it's the start block).
+        for bid in local_visited:
+            if bid not in exclusive_region:
+                return False, [], set()
+
+        return True, body_stmts, local_visited
+
 
     def _walk_simple_case_body(self, start_bid: int,
                                 post_switch_bid: int,
@@ -3524,9 +3665,6 @@ class ControlStructurer:
         # Accept as valid if the case body doesn't leak into other cases
         return True, stmts, block_ids
 
-
-# ============================================================================
-# Function Signature Builder
 # ============================================================================
 
 class FunctionSigBuilder:
