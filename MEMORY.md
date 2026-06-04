@@ -3,10 +3,10 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-04
-Current session: 66
+Current session: 67
 Branch: main
-HEAD: ab357d4
-Tests: 846 passed, 4 skipped
+HEAD: d443114
+Tests: 853 passed, 4 skipped
 Guardrails: 88/88 (B38-B55 + B63)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -15,32 +15,30 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 
 - Stable parser/decompiler validation baseline (Track A zero errors, Track B zero errors).
 - Session 63: Bounded ControlStructurer implementation (behavior-changing, B63).
-  - Conditional-jump header gotos suppressed in _walk_block when merge found.
-  - Pre-B63 CSfeas: 1463/165/394. Post-B63 CSfeas: 553/41/104.
-- Session 64: Closeout consistency audit. Historical continuity restored. No behavior changed.
+- Session 64: Closeout consistency audit.
 - Session 65: Conditional-jump no-merge fallback gotos suppressed (behavior-changing, B65).
-  - Same B63 suppression pattern applied to no-merge fallback path in _walk_block.
-  - Track A CSfeas: 553 -> 3 (-99.5%).
-  - TB200 CSfeas: 41 -> 8 (-80.5%).
-  - TB500 CSfeas: 104 -> 30 (-71.2%).
-  - 100% of conditional-jump gotos eliminated across all scopes.
-  - Remaining gotos (3/8/30) are exclusively OJAlways (unconditional): switch case breaks.
 - Session 66: Diagnostic OJAlways frontier map (diagnostic-only).
-  - Exhaustive verification of all remaining OJAlways top-level gotos.
-  - 100% classified as switch_case_break_to_post_switch_merge patterns.
-  - 40/41 have direct predecessor OSwitch evidence; 1 has function-level switch evidence.
-  - Session 65 remaining-goto counts superseded by Session 66 remeasurement.
-- Conditional-jump goto frontier is now CLOSED. OJAlways (op 58) gotos remain, all switch-break patterns.
-- Field-name frontier remains paused (zero recoverable cases).
-- Broad ControlStructurer work remains paused.
+- Session 67: Narrow OJAlways switch case-break absorption (behavior-changing).
+  - 41/41 OJAlways gotos classified as switch-case-break in Session 66.
+  - 40/41 with direct predecessor OSwitch evidence (predSW=True).
+  - Session 67 suppresses OJAlways gotos when the block has a predSW=True predecessor and
+    the OJAlways target matches the OSwitch's jump_default (post-switch merge).
+  - Track A: 3 -> 0 gotos. TB200: 8 -> 0 gotos. TB500: 30 -> 1 goto.
+  - The 1 remaining TB500 case (writeParam instr=12, predSW=False, funcSW-only)
+    is intentionally excluded from suppression.
+- Conditional-jump goto frontier: CLOSED (B63 + B65).
+- OJAlways switch-case-break frontier: CLOSED for all predSW-proven cases.
+- Field-name recovery: PAUSED (zero recoverable cases).
+- Broad ControlStructurer work: PAUSED.
+- No active behavior-changing frontier.
 
 ## 2. Active unlocked frontier
 
 No behavior-changing frontier is currently unlocked.
 
-Session 66 completed a diagnostic-only OJAlways frontier map. All remaining OJAlways top-level gotos (Track A: 3, TB200: 8, TB500: 30) are classified as switch-case-break patterns. 40/41 have direct predecessor OSwitch evidence; 1 has function-level switch evidence only. Session 65 remaining-goto counts (22/91) are superseded by Session 66 remeasurement (8/30).
+Session 67 closed the predSW-proven OJAlways switch-case-break frontier. The remaining 1 TB500 case (writeParam instr=12, predSW=False) is not a direct switch case-break pattern and is structurally harmless.
 
-Switch-structurer behavior work is a candidate for future unlocking, subject to project-owner approval.
+Switch-structurer behavior work for non-predSW patterns is a candidate for future unlocking, subject to project-owner approval and additional evidence.
 
 ## 3. Closed or paused frontiers
 
@@ -50,47 +48,42 @@ Do not reopen without explicit project-owner unlock.
 |---|---|---|---|
 | Conditional-jump header-goto (B63) | Closed | session63_controlstructurer_implementation.md | Merge-found path; 62-75% reduction |
 | Conditional-jump no-merge goto (B65) | Closed | session65_ojalways_merge_goto_frontier.md | 6-line fix; 100% cond-jump elimination; Track A 553->3 |
-| OJAlways to-merge gotos | Measured | session66_ojalways_frontier_map.md | All remaining OJAlways (3/8/30) are switch-case-break patterns; 40/41 predSW proven; 1 funcSW only |
+| OJAlways to-merge gotos (diagnostic) | Measured | session66_ojalways_frontier_map.md | All remaining OJAlways are switch-case-break; 40/41 predSW proven; 1 funcSW only |
+| OJAlways switch-case-break (predSW) | Closed | session67_ojalways_switch_break_absorption.md | Session 67: narrow guard suppresses predSW-proven switch-break gotos; Track A 3->0, TB200 8->0, TB500 30->1 |
 | Dynamic/null/call-return | Locked | docs/validation_matrix.md, reports | Zero actionable cases |
 | Field-name recovery | Paused | scripts/analyze_field_name_fallbacks.py | 2084 IR fallbacks (Track A), zero recoverable |
 | TypeResolver changes | Paused | -- | No current evidence-backed target |
 | Virtual struct/typedef invention | Paused | scripts/extract_b31_virtual_detail.py | K_VIRTUAL cases expected |
-| ControlStructurer broad cleanup | Paused | session60/session63/session65/session66 reports | Remaining: OJAlways switch breaks only (3/8/30, all verified as switch-case-break) |
+| ControlStructurer broad cleanup | Paused | session60/session63/session65/session66/session67 reports | Remaining: 1 TB500 goto (predSW=False, non-direct pattern) |
 | Tiers 2-5 | Frozen | -- | Requires explicit unlock |
 
 ## 4. Current validation baseline
 
-- Tests: 846 passed, 4 skipped
+- Tests: 853 passed, 4 skipped
 - Guardrails: 88/88 (B38-B55 + B63)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
-- CSfeas (post-B65, Session 66 remeasured): Track A 3, TB200 8, TB500 30 gotos
-  - All OJAlways switch-break patterns (40/41 predSW proven, 1 funcSW only)
+- CSfeas (post-Session 67): Track A 0, TB200 0, TB500 1 goto
+  - The 1 remaining goto is the writeParam instr=12 case (fidx=38661), classified as Category 1: true switch case-break with indirect switch predecessor (case body has OJFalse conditional jump, preventing direct predSW match)
 - Field-name fallbacks: Track A 2084, TB200 58, TB500 356
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
 ## 5. Latest handoff
 
-### Session 65 (B65: conditional-jump no-merge goto suppression)
+### Session 67: Narrow OJAlways switch case-break absorption
 
-- Classified remaining 553 post-B63 gotos: 99.3% conditional jumps, 0.7% OJAlways.
-- Root cause: `_walk_block` no-merge fallback path (line 3054) did not pop conditional-jump goto.
-- Fix: Added B65 goto pop in no-merge fallback (6 lines, same guard as B63).
-- `hl_decompile.py` only file changed.
-- No new tests added (existing B63/B47 tests validate the pattern).
-- No parser/disassembler/TypeResolver/CLI/GUI/Tier 2-5 changes.
-- No new B-number created.
-- Note: Session 65 reported remaining counts (22/91) were stale; Session 66 remeasurement supersedes them (8/30).
-
-### Session 66 (diagnostic-only: OJAlways frontier map)
-
-- Exhaustively verified all remaining OJAlways top-level gotos across Track A, TB200 seed=42, TB500 seed=42.
-- **41/41 OJAlways gotos**: Track A 3, TB200 8, TB500 30.
-- **100% classified as switch_case_break_to_post_switch_merge** (40/41 with direct predecessor OSwitch evidence, 1 with function-level switch evidence only).
-- No pure bridge blocks, no bridge chains, no sequential OJAlways, no unknowns.
-- Scratch probe: `/tmp/ojalways_verify_probe.py` (non-canonical, not committed).
-- No behavior changes. No parser/disassembler/TypeResolver/CLI/GUI changes.
-- Recommendation: eligible for narrow switch-structurer behavior milestone bounded to switch-break OJAlways absorption.
+- **Type:** Behavior-changing.
+- **Evidence base:** Session 66 exhaustive OJAlways frontier map (41/41 cases, 40/41 predSW proven).
+- **Fix:** Added `_is_switch_break_ojalways()` helper in hl_decompile.py (narrow guard: predSW=True + forward + target==jump_default). Added Session 67 suppression pop in `_walk_block` OJAlways handling section, mirroring B63/B65 pattern.
+- **Impact:**
+  - Track A: 3 -> 0 gotos
+  - TB200: 8 -> 0 gotos
+  - TB500: 30 -> 1 goto
+- **Excluded:** 1 TB500 case (writeParam fidx=38661, instr=12, predSW=False). The case body contains a conditional jump (OJFalse), so the direct predecessor of the OJAlways block is not OSwitch. Classified as Category 1: true switch case-break with indirect switch predecessor. No predSW=False case was suppressed.
+- **Files changed:** hl_decompile.py (+41 lines), tests/test_decompile.py (+165 lines, +1 updated). Diagnostic probes under /tmp/ (non-canonical, not committed).
+- **Tests added:** 6 new tests (2 fixture-backed, 4 unit) in TestSession67SwitchBreakOJAlways + 1 negative back-edge test added during naming cleanup.
+- **No parser/disassembler/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **Recommendation:** Pause implementation. The remaining case is structurally harmless and requires broader switch-structuring logic to handle case bodies with internal conditional jumps. If pursued, recommend diagnostic-first Session 68 on `_try_structure_switch` linear-chain relaxation.
 
 ## 6. Compact evidence pointers
 
@@ -103,4 +96,5 @@ Do not reopen without explicit project-owner unlock.
 - decompiler_quality_report/session64_closeout_consistency_audit.md -- Session 64 closeout audit
 - decompiler_quality_report/report.md -- main quality report
 - decompiler_quality_report/report.json -- machine-readable quality report
+- decompiler_quality_report/session67_ojalways_switch_break_absorption.md -- Session 67 report
 - scripts/analyze_controlstructurer_feasibility.py -- CSfeas diagnostic

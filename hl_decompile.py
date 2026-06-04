@@ -2452,6 +2452,41 @@ def _is_pure_bridge_op(instr: Instruction) -> bool:
     return False
 
 
+def _is_switch_break_ojalways(blk: BasicBlock,
+                                block_map: Dict[int, BasicBlock]) -> bool:
+    """Check if an OJAlways block is a direct switch case-break to post-switch merge.
+
+    Returns True when ALL of the following hold:
+    1. The block ends with OJAlways (opcode 58).
+    2. The jump target is forward (not a back-edge).
+    3. At least one predecessor block ends with OSwitch (opcode 70).
+    4. The OJAlways target matches that predecessor's *jump_default*,
+       i.e. the post-switch merge instruction.
+
+    This is a narrow guard: only the proven redundant switch-case-break
+    pattern captured in Session 66 passes all criteria.
+    """
+    if not blk.instructions:
+        return False
+    last = blk.instructions[-1]
+    if last.opcode != 58:          # not OJAlways
+        return False
+    target = last.jump_target
+    if target is None or target <= last.index:   # not forward
+        return False
+    for pred_id in blk.predecessors:
+        pred_blk = block_map.get(pred_id)
+        if pred_blk is None or not pred_blk.instructions:
+            continue
+        pred_last = pred_blk.instructions[-1]
+        if pred_last.opcode != 70:                # not OSwitch
+            continue
+        pred_default = getattr(pred_last, 'jump_default', None)
+        if pred_default is not None and target == pred_default:
+            return True
+    return False
+
+
 def _cleanup_goto_labels(stmts: List[IRStmt]) -> List[IRStmt]:
     """Remove provably no-op goto-to-next-label comment pairs.
 
@@ -2989,6 +3024,12 @@ class ControlStructurer:
         result.extend(block_stmts)
 
         if last and last.opcode == 58:  # OJAlways
+            # Session 67: Suppress OJAlways goto if it is a direct switch case-break
+            # to a post-switch merge block. The structured switch output already
+            # captures the case boundary, so the goto comment is redundant.
+            if (result and result[-1].op == "goto"
+                    and _is_switch_break_ojalways(blk, block_map)):
+                result.pop()
             # Unconditional jump -- follow if not back-edge
             target = last.jump_target
             if target is not None and target <= blk.start_ip:

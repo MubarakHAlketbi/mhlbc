@@ -824,3 +824,14 @@ Good agent work:
 - Leaves clearer evidence for the next contributor.
 - Keeps report output ASCII-safe.
 - Preserves tests, reports, and legacy metrics for continuity.
+
+25. Milestone naming rule
+
+All new behavior-changing or diagnostic milestones must use `Session ##` naming.
+
+Rules:
+- New work: use `Session ##` (e.g., Session 67, Session 68).
+- Do not create new `B##` milestone labels. The old B-series (B38, B40, B41, B44, B46, B47, B48, B50, B51, B52, B54, B55, B63, B65) is closed. No new B-number shall be assigned.
+- Historical B## labels may remain only when referring to old accepted milestones in docs, reports, tests, MEMORY.md, or standing documentation. Do not rewrite old reports to remove old B-names.
+- Reports, tests, docs, code comments, MEMORY.md handoff text, and commit messages for new work must use Session naming.
+- Test class names for Session N work should use `TestSessionNSwitchBreakOJAlways` naming pattern. Existing historical test classes (TestB38*, TestB40*, etc.) remain unchanged.

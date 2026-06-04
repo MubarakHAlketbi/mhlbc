@@ -6865,14 +6865,10 @@ class TestB52ForwardMergeCleanup:
 
         The B51-proven fallthrough_target (144) and jump_chain (54) cases in
         Track A are structurally indistinguishable from unsafe cases at the IR
-        body level because they contain structured if-blocks between the goto
-        and its target label.  B52's structural check correctly preserves these
-        -- only gotos with NO branching statements between goto and label can
-        be safely removed.
+        level.  B52 should make no changes (before == after).
 
-        For Track B (Farever), the patterns may differ.  This test verifies
-        the Track A behavior is correct: B52 does not reduce gotos on standard
-        fixtures, but the implementation is correct and conservative.
+        After Session 67 all Track A top-level gotos were eliminated, so the
+        expected before and after counts are both 0.
         """
         before, after = self._run_cleanup_on_fixtures()
         # Track A: B52 correctly preserves all forward-merge gotos because
@@ -6881,13 +6877,17 @@ class TestB52ForwardMergeCleanup:
             f"Expected before==after (B52 structural check preserves all "
             f"Track A gotos), got before={before} after={after}"
         )
-        print(f"  Track A: {before} -> {after} gotos (0 reduction -- expected, "
-              f"all forward-merge gotos have if-blocks between goto and label)")
+        # Session 67 baseline protection: Track A should have 0 gotos.
+        assert before == 0, (
+            f"Expected 0 gotos before B52 cleanup (Session 67 baseline), "
+            f"got {before}. Regression: gotos reappeared."
+        )
+        print(f"  Track A: {before} -> {after} gotos (Session 67 baseline: 0)")
 
     def test_track_a_no_regressions(self):
         """B52 does not crash on any Track A fixture."""
         before, after = self._run_cleanup_on_fixtures()
-        assert before > 0, "Expected some gotos before cleanup"
+        assert before >= 0, "Expected valid goto count before cleanup"
         assert after <= before, (
             f"Expected after <= before, got {after} > {before}"
         )
@@ -7336,3 +7336,200 @@ class TestB63NestedIfMergeGotoSuppression:
 
         errors = result.errors
         assert len(errors) == 0, f"Expected 0 errors, got {len(errors)}: {errors}"
+
+
+class TestSession67SwitchBreakOJAlways:
+    """Session 67: Suppress OJAlways case-break gotos with direct OSwitch predecessor.
+
+    When a block ending with OJAlways has a direct predecessor ending with
+    OSwitch, and the OJAlways target matches the OSwitch jump_default, the
+    goto comment is redundant (the switch structure already captures the
+    branch boundary) and is suppressed.
+    """
+
+    def _decompile_function(self, hl_path: str, func_name: str) -> list:
+        """Decompile a named function and return its IR body."""
+        import io, os
+        from hl_parser import HLParser
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+
+        fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
+        full_path = os.path.join(fixtures_dir, hl_path)
+        raw = open(full_path, "rb").read()
+        p = HLParser(full_path)
+        p.execute(io.BytesIO(raw))
+        dasm = Disassembler(p)
+        dasm.disassemble_all()
+        dec = Decompiler(p, dasm)
+        result = dec.decompile_all()
+
+        for fi, ir_fn in result.functions.items():
+            fn = p.functions[fi]
+            nm = fn.name or ""
+            if nm == func_name:
+                return ir_fn.body
+        pytest.fail(f"Function {func_name} not found in {hl_path}")
+
+    def test_switch_hl_testswitch_no_top_level_goto(self):
+        """Switch.hl testSwitch had 2 OJAlways gotos (both predSW proven).
+
+        Session 67 should suppress both, leaving 0 top-level gotos.
+        """
+        body = self._decompile_function("Switch.hl", "testSwitch")
+        gotos = [s for s in body if s.op == "goto"]
+        assert len(gotos) == 0, (
+            f"Expected 0 top-level gotos in testSwitch after Session 67, "
+            f"got {len(gotos)}: {[g.comment for g in gotos]}"
+        )
+
+    def test_enums_hl_main_no_top_level_goto(self):
+        """Enums.hl main had 1 OJAlways goto (predSW proven).
+
+        Session 67 should suppress it, leaving 0 top-level gotos.
+        """
+        body = self._decompile_function("Enums.hl", "main")
+        gotos = [s for s in body if s.op == "goto"]
+        # Enums.hl main may have other gotos (loop/if). Only assert
+        # that no OJAlways gotos remain.
+        # The specific OJAlways case was `// goto @@20`.
+        ojalways_gotos = [g for g in gotos if g.comment == "@20"]
+        assert len(ojalways_gotos) == 0, (
+            f"Expected 0 OJAlways gotos targeting @20 in main after Session 67, "
+            f"got {len(ojalways_gotos)}: {[g.comment for g in ojalways_gotos]}"
+        )
+
+    def test_is_switch_break_ojalways_positive(self):
+        """Unit test: _is_switch_break_ojalways returns True for switch-break pattern."""
+        from hl_decompile import _is_switch_break_ojalways
+        from hl_disasm import BasicBlock, Instruction
+
+        # Build a minimal OSwitch block (predecessor)
+        switch_instr = Instruction(index=0, opcode=70, mnemonic="OSwitch",
+                                   args=[0, 2], byte_offset=0, byte_size=0)
+        switch_instr.jump_cases = [4, 8]
+        switch_instr.jump_default = 12
+        switch_blk = BasicBlock(
+            id=0, start_ip=0, end_ip=1,
+            instructions=[switch_instr], predecessors=[], successors=[1]
+        )
+
+        # Build an OJAlways block (the case-break)
+        jalways_instr = Instruction(index=4, opcode=58, mnemonic="OJAlways",
+                                     args=[8], byte_offset=0, byte_size=0)
+        jalways_instr.jump_target = 12
+        jalways_blk = BasicBlock(
+            id=1, start_ip=4, end_ip=5,
+            instructions=[jalways_instr],
+            predecessors=[0], successors=[]
+        )
+
+        block_map = {0: switch_blk, 1: jalways_blk}
+        assert _is_switch_break_ojalways(jalways_blk, block_map) is True
+
+    def test_is_switch_break_ojalways_no_oswitch_pred(self):
+        """Unit test: returns False when no predecessor ends with OSwitch."""
+        from hl_decompile import _is_switch_break_ojalways
+        from hl_disasm import BasicBlock, Instruction
+
+        # Predecessor ends with OJAlways, not OSwitch
+        jalways_instr = Instruction(index=0, opcode=58, mnemonic="OJAlways",
+                                     args=[8], byte_offset=0, byte_size=0)
+        jalways_instr.jump_target = 4
+        pred_blk = BasicBlock(
+            id=0, start_ip=0, end_ip=1,
+            instructions=[jalways_instr], predecessors=[], successors=[1]
+        )
+        jalways_instr2 = Instruction(index=4, opcode=58, mnemonic="OJAlways",
+                                      args=[4], byte_offset=0, byte_size=0)
+        jalways_instr2.jump_target = 8
+        blk = BasicBlock(
+            id=1, start_ip=4, end_ip=5,
+            instructions=[jalways_instr2],
+            predecessors=[0], successors=[]
+        )
+        block_map = {0: pred_blk, 1: blk}
+        assert _is_switch_break_ojalways(blk, block_map) is False
+
+    def test_is_switch_break_ojalways_wrong_target(self):
+        """Unit test: returns False when target != OSwitch jump_default."""
+        from hl_decompile import _is_switch_break_ojalways
+        from hl_disasm import BasicBlock, Instruction
+
+        switch_instr = Instruction(index=0, opcode=70, mnemonic="OSwitch",
+                                   args=[0, 2], byte_offset=0, byte_size=0)
+        switch_instr.jump_cases = [4]
+        switch_instr.jump_default = 12
+        switch_blk = BasicBlock(
+            id=0, start_ip=0, end_ip=1,
+            instructions=[switch_instr], predecessors=[], successors=[1]
+        )
+        jalways_instr = Instruction(index=4, opcode=58, mnemonic="OJAlways",
+                                     args=[8], byte_offset=0, byte_size=0)
+        jalways_instr.jump_target = 8  # does NOT match default 12
+        jalways_blk = BasicBlock(
+            id=1, start_ip=4, end_ip=5,
+            instructions=[jalways_instr],
+            predecessors=[0], successors=[]
+        )
+        block_map = {0: switch_blk, 1: jalways_blk}
+        assert _is_switch_break_ojalways(jalways_blk, block_map) is False
+
+    def test_is_switch_break_ojalways_forward_jump_default(self):
+        """Unit test: returns True when forward jump targets jump_default.
+
+        Even when the OJAlways instruction index is before the OSwitch index
+        (scattered layout), a forward target to jump_default still qualifies.
+        """
+        from hl_decompile import _is_switch_break_ojalways
+        from hl_disasm import BasicBlock, Instruction
+
+        switch_instr = Instruction(index=10, opcode=70, mnemonic="OSwitch",
+                                   args=[0, 2], byte_offset=0, byte_size=0)
+        switch_instr.jump_cases = [2]
+        switch_instr.jump_default = 12
+        switch_blk = BasicBlock(
+            id=0, start_ip=10, end_ip=11,
+            instructions=[switch_instr], predecessors=[], successors=[1]
+        )
+        jalways_instr = Instruction(index=2, opcode=58, mnemonic="OJAlways",
+                                     args=[8], byte_offset=0, byte_size=0)
+        jalways_instr.jump_target = 12  # forward relative to instr index
+        jalways_blk = BasicBlock(
+            id=1, start_ip=2, end_ip=3,
+            instructions=[jalways_instr],
+            predecessors=[0], successors=[]
+        )
+        block_map = {0: switch_blk, 1: jalways_blk}
+        # target=12 > instr.index=2, so forward is True
+        assert _is_switch_break_ojalways(jalways_blk, block_map) is True
+
+    def test_is_switch_break_ojalways_back_edge(self):
+        """Unit test: returns False when OJAlways is a back-edge (not forward).
+
+        A backward jump targets an instruction before the source, meaning it
+        is a loop back-edge rather than a switch case-break to post-switch
+        merge.  The guard must reject this pattern.
+        """
+        from hl_decompile import _is_switch_break_ojalways
+        from hl_disasm import BasicBlock, Instruction
+
+        switch_instr = Instruction(index=10, opcode=70, mnemonic="OSwitch",
+                                   args=[0, 2], byte_offset=0, byte_size=0)
+        switch_instr.jump_cases = [2]
+        switch_instr.jump_default = 14
+        switch_blk = BasicBlock(
+            id=0, start_ip=10, end_ip=11,
+            instructions=[switch_instr], predecessors=[], successors=[1]
+        )
+        jalways_instr = Instruction(index=16, opcode=58, mnemonic="OJAlways",
+                                     args=[-8], byte_offset=0, byte_size=0)
+        jalways_instr.jump_target = 8  # backward: 8 < 16
+        jalways_blk = BasicBlock(
+            id=1, start_ip=16, end_ip=17,
+            instructions=[jalways_instr],
+            predecessors=[0], successors=[]
+        )
+        block_map = {0: switch_blk, 1: jalways_blk}
+        # target=8 < instr.index=16, so not forward
+        assert _is_switch_break_ojalways(jalways_blk, block_map) is False
