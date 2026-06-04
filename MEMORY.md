@@ -48,8 +48,8 @@ Do not reopen without explicit project-owner unlock.
 
 ## 4. Current validation baseline
 
-- Tests: 844 passed, 4 skipped
-- Guardrails: 86/86 (B38-B55)
+- Tests: 846 passed, 4 skipped
+- Guardrails: 86/86 (B38-B55 + B63)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas: Track A 553, TB200 41, TB500 104 gotos
@@ -74,7 +74,10 @@ Do not reopen without explicit project-owner unlock.
 
 - decompiler_quality_report/session63_controlstructurer_implementation.md -- Session 63 report
 - decompiler_quality_report/session63_controlstructurer_implementation.json -- Session 63 report (JSON)
-- decompiler_quality_report/session60_controlstructurer_feasibility_*.{json,md} -- Session 60 CSfeas (updated post-B63)
+- decompiler_quality_report/session63_controlstructurer_feasibility_*.{json,md} -- Session 63 post-B63 feasibility (553/41/104)
+- decompiler_quality_report/session60_controlstructurer_feasibility_*.{json,md} -- Session 60 pre-B63 feasibility (1463/165/394, restored)
+- decompiler_quality_report/session64_closeout_consistency_audit.md -- Session 64 closeout audit
+- decompiler_quality_report/session64_closeout_consistency_audit.json -- Session 64 closeout audit (JSON)
 - scripts/analyze_controlstructurer_feasibility.py -- CSfeas diagnostic
 - decompiler_quality_report/report.md -- main quality report
 - decompiler_quality_report/report.json -- machine-readable quality report
