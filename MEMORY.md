@@ -3,11 +3,11 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-05
-Current session: 70
+Current session: 71
 Branch: main
 HEAD: (pending commit)
 Tests: 872 passed, 4 skipped
-Guardrails: 101/101 (B38-B55 + B63 + Session 67-70)
+Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -28,7 +28,7 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - Added `_compute_case_forward_region()` for exclusive-membership verification
   - Added nested OSwitch detection guard for case regions
   - Track A structured_switch: 0 -> 2 (testSwitch in Switch.hl, main in Enums.hl)
-  - 36 OSwitch remain in __add__ functions (nested OSwitch -- not addressed)
+  - 36 OSwitch remain in __add__ functions (nested OSwitch + shared_merge; 9/36 nested_oswitch, 27/36 shared_merge per Session 71)
   - writeParam fidx=38661 now structures successfully: OSwitch=1 -> structured_switch=1
   - No change to goto suppression (Session 67/68 still at 0 gotos)
 - Session 70: Source-visible case-break goto comment suppression inside structured switch cases (behavior-changing).
@@ -40,19 +40,27 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - Track A testSwitch: cases 0-2 no longer show `// goto @@9`
   - writeParam fidx=38661 case 1 (simple-linear): no longer shows `// goto @@20`
   - No change to top-level gotos (remain 0 across all measured scopes)
+- Session 71: Nested OSwitch diagnostic (diagnostic-only).
+  - Built `scripts/session71_nested_switch_census.py` to classify the 36 remaining Track A OSwitch.
+  - Key finding: only 9/36 (25%) are truly nested OSwitch. The remaining 27/36 (75%) are `shared_merge` within `__add__` (indices 18, 27, 43) -- cross-case block sharing prevents structuring with current exclusive-membership rules.
+  - Shape breakdown: nested_oswitch=9 (25%), shared_merge=27 (75%), exclusive_simple=2 (already structured).
+  - No behavior changed. Full pytest: 872 passed, 4 skipped. Track A: 0 errors.
+  - Recommendation: release-hardening checkpoint. Recursive switch pass would only address 25% of remaining OSwitch.
 - Conditional-jump goto frontier: CLOSED (B63 + B65).
 - OJAlways switch-case-break frontier: CLOSED (Sessions 67 + 68).
   - All 0 top-level gotos across Track A (9/9, 3014 funcs), TB200 (seed=42),
     TB500 (seed=42).
 - OSwitch->structured_switch frontier: PARTIALLY ADDRESSED (default-as-merge + internal-if/else + simple-linear patterns).
-  - Nested OSwitch (__add__ functions) remains unaddressed.
+  - Session 71 diagnostic: 9/36 OSwitch are nested_oswitch (25%), 27/36 are shared_merge (75%).
+  - shared_merge at `__add__` indices 18, 27, 43 cannot be structured with current exclusive-membership rules.
+  - 2 already structured (testSwitch in Switch.hl, main in Enums.hl).
 - Field-name recovery: PAUSED (zero recoverable cases).
 - Broad ControlStructurer work: PAUSED.
 - No active behavior-changing frontier recommended for immediate next session.
 
 ## 2. Active unlocked frontier
 
-Switch structuring for nested OSwitch case bodies (Track A __add__ functions, 36 OSwitch). Not recommended without explicit project-owner unlock -- requires multi-level structuring or switch-of-switch detection.
+Switch structuring for nested OSwitch case bodies (Track A 9/36 OSwitch, nested_oswitch shape). 27/36 OSwitch (shared_merge) cannot be structured with current rules. Not recommended without explicit project-owner unlock -- recursive switch pass would only address 25% of remaining OSwitch.
 
 ## 3. Closed or paused frontiers
 
@@ -67,6 +75,7 @@ Do not reopen without explicit project-owner unlock.
 | OJAlways switch-case-break (indirect) | Closed | session68 report | Session 68: forward-reachability guard for indirect cases; TB500 1->0; ALL 0 gotos |
 | OSwitch->struct_switch (internal-if) | Closed | session69_switch_internal_if_structuring.md | Session 69: default-as-merge fix + internal-if/else case bodies; TA 0->2 structured |
 | OSwitch->struct_switch (simple-linear) | Closed | session70 report | Session 70: case-break goto suppression in simple-linear cases; testSwitch, writeParam clean |
+| Nested OSwitch diagnostic | Diagnostic-closed | session71_nested_switch_diagnostic.md | Session 71: 9/36 nested_oswitch, 27/36 shared_merge. 75% of remaining OSwitch cannot be structured with current rules. |
 | Dynamic/null/call-return | Locked | docs/validation_matrix.md, reports | Zero actionable cases |
 | Field-name recovery | Paused | scripts/analyze_field_name_fallbacks.py | 2084 IR fallbacks (Track A), zero recoverable |
 | TypeResolver changes | Paused | -- | No current evidence-backed target |
@@ -84,12 +93,30 @@ Do not reopen without explicit project-owner unlock.
   - All OJAlways switch-case-break gotos suppressed. No remaining top-level gotos in any measured scope.
 - OSwitch vs structured_switch:
   - Track A: 38 OSwitch, 2 structured_switch (testSwitch, Enums.hl main)
-  - 36 OSwitch remain in __add__ functions (nested OSwitch)
-  - writeParam (fidx=38661): structured successfully
+  - Session 71 diagnostic: 9/36 nested_oswitch (first OSwitch in __add__ at index 15), 27/36 shared_merge (indices 18, 27, 43)
+  - 27/36 shared_merge cannot be structured with current exclusive-membership rules
 - Field-name fallbacks: Track A 2084, TB200 58, TB500 356
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
 ## 5. Latest handoff
+
+### Session 71: Nested OSwitch diagnostic
+
+- **Type:** Diagnostic-only. No runtime behavior changed.
+- **Evidence base:** Track A switch census revealed 38 OSwitch total (2 structured, 36 remaining). All 36 in `__add__` functions (Std parent). Detailed per-OSwitch CFG analysis shows 3 distinct shapes:
+  - `nested_oswitch` (9/36, 25%): First OSwitch per `__add__` at index 15, 7 cases, 87 region-instrs. Each case entry block ends with another OSwitch (inner switch-of-switch). Structurable via recursive pass.
+  - `shared_merge` (27/36, 75%): Indices 18, 27, 43 in each `__add__`. Case regions share blocks across cases, violating exclusive-membership rule. Not structurable with current approach.
+  - `exclusive_simple` (2/36, ~5%): Already structured by Session 69 (testSwitch, Enums.hl main).
+- **Key discovery:** MEMORY.md claim "all 36 in nested OSwitch functions" was imprecise -- only 25% are truly nested OSwitch; 75% are shared_merge.
+- **Recommendation:** Release-hardening checkpoint. Recursive pass would only address 25%.
+- **Files changed:**
+  - `scripts/session71_nested_switch_census.py` (+577 lines): Diagnostic classification script
+  - `decompiler_quality_report/session71_nested_switch_diagnostic.md` (new): Canonical report
+  - `decompiler_quality_report/session71_nested_switch_diagnostic.json` (new): Machine-readable per-OSwitch records
+- **Tests:** 872 passed, 4 skipped (full pytest). Track A: 0 errors.
+- **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/GUI/Tier 2-5 changes.**
+- **No Farever-specific logic.**
+- **Session 71 naming only.**
 
 ### Session 70: Switch case-break goto suppression in simple-linear case bodies
 
@@ -130,7 +157,7 @@ Do not reopen without explicit project-owner unlock.
   - Track A structured_switch: 0 -> 2 (testSwitch in Switch.hl, main in Enums.hl)
   - Track A top-level gotos: 0 -> 0 (unchanged)
   - writeParam (fidx=38661): unstructured -> structured (OJAlways breaks now inside switch body)
-  - 36 OSwitch in __add__ functions remain unstructured (nested OSwitch)
+  - 36 OSwitch in __add__ functions remain unstructured (9/36 nested_oswitch, 27/36 shared_merge per Session 71)
 - **Census results:** Track A: 3014 funcs, 38 OSwitch, 2 structured, 9 unstructured funcs. TB200/TB500: 0 OSwitch in sample (sample does not include writeParam).
 - **Files changed:**
   - hl_decompile.py (+130 raw): extended `_try_structure_switch`, added `_compute_case_forward_region`, `_walk_case_region_with_internal_flow`, preserved `_walk_simple_case_body`
@@ -145,6 +172,9 @@ Do not reopen without explicit project-owner unlock.
 
 ## 6. Compact evidence pointers
 
+- scripts/session71_nested_switch_census.py -- Session 71 nested OSwitch diagnostic script
+- decompiler_quality_report/session71_nested_switch_diagnostic.md -- Session 71 diagnostic report
+- decompiler_quality_report/session71_nested_switch_diagnostic.json -- Session 71 per-OSwitch records (JSON)
 - decompiler_quality_report/session65_ojalways_merge_goto_frontier.md -- Session 65 report
 - decompiler_quality_report/session65_ojalways_merge_goto_frontier.json -- Session 65 report (JSON)
 - decompiler_quality_report/session66_ojalways_frontier_map.md -- Session 66 diagnostic OJAlways frontier map

@@ -10,7 +10,7 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 70, which removed source-visible case-break goto comments from structured switch cases (simple-linear and internal-if/else patterns). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 71 (diagnostic-only: nested OSwitch classification). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
@@ -18,17 +18,17 @@ This README reflects the accepted state after Session 70, which removed source-v
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
 | Full pytest baseline | 872 passed, 4 skipped |
-| Guardrails | 101 (B38-B55 + B63 + Session 67-70) |
+| Guardrails | 101 (B38-B55 + B63 + Session 67-71) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
 | Structured switches (Track A) | 2 (testSwitch, Enums.hl main) |
-| OSwitch remaining (Track A) | 36 (all __add__ nested OSwitch) |
+| OSwitch remaining (Track A) | 36 (9 nested_oswitch, 27 shared_merge per Session 71) |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
 | Current recommendation | Release-hardening / milestone checkpoint |
 
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. No active behavior-changing frontier currently unlocked.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). No active behavior-changing frontier currently unlocked.
 
 ---
 
