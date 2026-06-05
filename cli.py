@@ -525,7 +525,7 @@ def cmd_disasm(args):
     for fi in func_indices:
         if fi < 0 or fi >= len(parser.functions):
             print(f"Function index {fi} out of range (0-{len(parser.functions)-1})", file=sys.stderr)
-            continue
+            sys.exit(EX_INPUT_ERR)
         
         func = parser.functions[fi]
         if func.malformed or func.nops <= 0:

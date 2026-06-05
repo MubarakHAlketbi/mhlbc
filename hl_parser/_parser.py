@@ -178,7 +178,10 @@ class HLParser:
         if magic != b"HLB":
             raise HLParserError("Invalid magic bytes. Not a valid HashLink file.")
             
-        self.version = int(struct.unpack("<B", stream.read(1))[0])
+        ver_byte = stream.read(1)
+        if not ver_byte:
+            raise HLParserError("Truncated header: missing version byte after HLB magic.")
+        self.version = int(struct.unpack("<B", ver_byte)[0])
         self._log("HEADER", f"version={self.version}", level=INFO)
         if self.version < 3 or self.version > 5:
             self._warn("HEADER", f"Unsupported bytecode version {self.version} — parsing may produce incorrect results")

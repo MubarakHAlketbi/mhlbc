@@ -7,7 +7,7 @@ import sys
 
 import pytest
 from hl_disasm import (
-    OpcodeDecoder, CFGBuilder, JumpResolver, RegisterTracker,
+    OpcodeDecoder, CFGBuilder, JumpResolver, RegisterTracker, StructureAnalyzer,
     Disassembler, Instruction, BasicBlock, format_disassembly, _read_varint,
 )
 from hl_parser import HLParser, HLParserError
@@ -595,3 +595,64 @@ class TestDisassemblerVarIntParity:
         assert instrs[1].jump_target is not None
         assert instrs[1].jump_target < instrs[1].index, \
             f"Backward jump target ({instrs[1].jump_target}) should be < {instrs[1].index}"
+class TestStructureAnalyzerOSwitchAnnotation:
+    """TODO-006: CFG StructureAnalyzer annotates opcode 70 (OSwitch) as switch."""
+
+    def _build_single_instr_block(self, opcodes: bytes) -> list:
+        """Decode bytes to a single-instruction list, then build CFG."""
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1, f"Expected 1 instruction, got {len(instrs)}"
+        cfg = CFGBuilder.build(instrs)
+        return StructureAnalyzer.analyze(cfg, instrs)
+
+    def test_opcode_70_annotated_as_switch(self):
+        """Block ending in opcode 70 (OSwitch) gets structure='switch'."""
+        # OSwitch r0, 2 cases: case_offsets [2,4], default 6
+        # All offsets relative to instruction after OSwitch
+        opcodes = encode_op(70, 0, 2) + encode_op(2) + encode_op(4) + encode_op(6)
+        cfg = self._build_single_instr_block(opcodes)
+        blk = cfg[0]
+        assert blk.structure == "switch", (
+            f"Opcode 70 block should be 'switch', got '{blk.structure}'"
+        )
+
+    def test_opcode_71_not_annotated_as_switch(self):
+        """Block ending in opcode 71 (ONullCheck) does NOT get structure='switch'."""
+        # ONullCheck r0
+        opcodes = encode_op(71, 0)
+        cfg = self._build_single_instr_block(opcodes)
+        blk = cfg[0]
+        assert blk.structure != "switch", (
+            f"Opcode 71 block should NOT be 'switch', got '{blk.structure}'"
+        )
+
+
+class TestCLIDisasmInvalidFunctionIndex:
+    """TODO-007: CLI exits with error for out-of-range --function index."""
+
+    def _run_cli(self, *args, input_hlb=None):
+        import tempfile, os, subprocess
+        if input_hlb:
+            tf = tempfile.NamedTemporaryFile(suffix='.hl', delete=False)
+            tf.write(input_hlb)
+            tf.close()
+            filepath = tf.name
+        else:
+            filepath = '/nonexistent'
+        cmd = [sys.executable, 'cli.py', 'disasm', filepath] + list(args)
+        result = subprocess.run(cmd, capture_output=True, text=True,
+                                cwd=os.path.dirname(os.path.dirname(__file__)))
+        if input_hlb:
+            os.unlink(filepath)
+        return result
+
+    def test_disasm_invalid_explicit_function_index(self):
+        """disasm --function 99999 on a valid HL file exits with code 2."""
+        data = build_test_hlb(b"", nops=0)
+        result = self._run_cli('--function', '99999', input_hlb=data)
+        assert result.returncode == 2, (
+            f"Expected exit code 2 for invalid function index, "
+            f"got {result.returncode}: stderr={result.stderr}"
+        )
+        assert "out of range" in result.stderr.lower()

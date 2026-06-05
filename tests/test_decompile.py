@@ -3172,10 +3172,12 @@ def _build_switch_bytecode(reg_types, nops, raw_opcodes_bytes):
         build_floats_pool, build_strings_pool, build_globals_pool, \
         build_natives_pool
 
-    # Add padding to ensure function body < 50% of total file
+    # Build type table so that index K_I32 maps to K_I32 type
+    # Callers pass K_I32=3 as register type index, so index 3 must be I32.
     type_i32 = build_type_primitive(K_I32)
     type_void = build_type_primitive(K_VOID)
-    type_blobs = [type_i32, type_void] * 5
+    max_idx = max(reg_types) if reg_types else 0
+    type_blobs = [type_i32] * (max_idx + 1)
     pad_strings = ["pad" + str(i) for i in range(10)]
 
     header = build_header(
@@ -8322,3 +8324,32 @@ class TestSession70SwitchCaseBreakGotoSuppression:
                     f"{fname} func[{fidx}]: Expected 0 case-body gotos, "
                     f"got {len(case_gotos)}: {[g.comment for g in case_gotos]}"
                 )
+class TestSession72SyntheticSwitchTypeFix:
+    """TODO-010: Synthetic switch helper now uses proper type indices."""
+
+    def test_synthetic_switch_uses_int_type(self):
+        """Synthetic switch with reg_types=[K_I32] declares variable as Int, not Void."""
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=1,
+            case_offsets=[1],
+            default_offset=1,
+            before_ops=[],
+            after_ops=[
+                (1, [1, 42]),      # case 0: OInt r1, 42
+                (58, [0]),         # break to merge
+                (67, [0]),         # ORet (merge)
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        text = _decompile_to_text(data)
+        # r0 (or equivalent) should be declared as Int (I32), not Void
+        assert ": Int" in text, (
+            f"Expected Int type declaration, got output:\n{text}"
+        )
+        assert ": Void" not in text, (
+            f"No variable should be Void after TODO-010 fix, got:\n{text}"
+        )

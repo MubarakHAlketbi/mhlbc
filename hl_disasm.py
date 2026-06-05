@@ -733,7 +733,7 @@ class StructureAnalyzer:
             op = last.opcode
 
             # Switch
-            if op == 71:  # OSwitch
+            if op == 70:  # OSwitch
                 blk.structure = "switch"
                 continue
 

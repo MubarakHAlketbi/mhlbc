@@ -1568,3 +1568,10 @@ def _build_header_raw(
     data += encode_varint(nconstants)
     data += encode_varint(entrypoint)
     return data
+def test_truncated_header_hlb_only():
+    """TODO-008: Exactly b'HLB' raises HLParserError, not struct.error."""
+    import io
+    data = b"HLB"
+    p = HLParser("/dev/null")
+    with pytest.raises(HLParserError, match="missing version byte"):
+        p.execute(stream=io.BytesIO(data))

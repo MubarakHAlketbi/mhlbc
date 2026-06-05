@@ -2,13 +2,38 @@
 
 Project: mhlbc
 Generated: 2026-06-05
+Last updated: 2026-06-05 (Session 72 claim verification)
 Source: ChatGPT audit of the uploaded repository snapshot and local validation attempt.
-Purpose: Queue audit findings for future sessions. Session 71 (diagnostic-only nested OSwitch classification) is now closed.
-Status: Session 71 validated: 9/36 nested_oswitch, 27/36 shared_merge. Backlog items below remain open for future sessions.
+Purpose: Queue audit findings for future sessions. Sessions 71-72 are now closed.
+Status: All 15 TODO items classified and verified against real checkout. See status table below.
+
+## Session 72 verification results
+
+Every TODO item below has been verified against the real repository checkout. The status table reflects evidence-based findings. Items marked `closed_*` are resolved. Items marked `confirmed_open` or `deferred_*` remain for future sessions.
+
+| TODO | Priority | Session 72 status | Eligible for quick fix? |
+|------|----------|-------------------|-------------------------|
+| TODO-001 | P0 | closed_upload_snapshot_only | N/A |
+| TODO-002 | P1 | deferred_needs_dedicated_session | Requires HaxeWriter/ControlStructurer |
+| TODO-003 | P1 | confirmed_open (deferred) | Touches ControlStructurer |
+| TODO-004 | P1 | deferred_needs_dedicated_session | Test strategy |
+| TODO-005 | P1 | confirmed_fixed_this_session | FIXED (docs-only) |
+| TODO-006 | P2 | confirmed_fixed_this_session | FIXED (CFG annotation fix) |
+| TODO-007 | P2 | confirmed_fixed_this_session | FIXED (CLI exit code) |
+| TODO-008 | P2 | confirmed_fixed_this_session | FIXED (HLParserError guard) |
+| TODO-009 | P2 | blocked_needs_more_evidence | Needs bytecode research |
+| TODO-010 | P2 | confirmed_fixed_this_session | FIXED (test type helper) |
+| TODO-011 | P2 | deferred_needs_dedicated_session | Security/hardening |
+| TODO-012 | P3 | deferred_needs_dedicated_session | API ergonomics |
+| TODO-013 | P3 | deferred_needs_dedicated_session | GUI cleanup |
+| TODO-014 | P3 | deferred_needs_dedicated_session | Output polish |
+| TODO-015 | P3 | ongoing | Process |
+
+Full verification details: `decompiler_quality_report/session72_todo_claim_verification.md`
 
 ## Important scope note
 
-Session 71 has been completed (diagnostic-only nested OSwitch classification). Do not mix these TODO items into a behavior-changing milestone unless explicitly approved. Some items below depend on the uploaded snapshot, which did not include `scripts/` or compiled `tests/fixtures/hl/*.hl` files. First verify each snapshot-dependent finding against the real checkout before treating it as an accepted repository defect.
+Session 71 has been completed (diagnostic-only nested OSwitch classification). Session 72 has completed TODO claim verification. Do not mix these TODO items into a behavior-changing milestone unless explicitly approved. Some items below depend on the uploaded snapshot, which did not include `scripts/` or compiled `tests/fixtures/hl/*.hl` files. These are now verified: scripts/ and fixtures exist in the real checkout.
 
 ## Status legend
 

@@ -257,7 +257,7 @@ Architecture rule: the parser and CLI must remain headless. GUI code must not be
 
 ## Reproducible validation
 
-Use these commands for the accepted Session 61 / Session 62-start baseline.
+Use these commands for the current accepted baseline (post-Session 71).
 
 ```bash
 # Full pytest baseline
@@ -267,18 +267,18 @@ cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 Expected accepted result:
 
 ```text
-846 passed, 4 skipped
+872 passed, 4 skipped
 ```
 
 ```bash
-# Guardrails (88 tests: B38-B55 + B63)
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63"
+# Guardrails (101 tests: B38-B55 + B63 + Sessions 67-71)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71"
 ```
 
 Expected accepted result:
 
 ```text
-88 passed
+101 passed
 ```
 
 ```bash

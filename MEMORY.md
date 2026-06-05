@@ -3,10 +3,10 @@
 Current accepted state for mhlbc.
 
 Last updated: 2026-06-05
-Current session: 71
+Current session: 72
 Branch: main
 HEAD: (pending commit)
-Tests: 872 passed, 4 skipped
+Tests: 877 passed, 4 skipped
 Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -117,6 +117,40 @@ Do not reopen without explicit project-owner unlock.
 - **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/GUI/Tier 2-5 changes.**
 - **No Farever-specific logic.**
 - **Session 71 naming only.**
+
+### Session 72: TODO claim verification, triage, and four quick fixes
+
+- **Type:** Diagnostic/report/docs/test-triage with behavior-correcting quick fixes.
+- **Verification:** All 15 TODO items verified against real checkout. Full status table in `TODO.md`.
+- **Results:**
+  - `confirmed_fixed_this_session` (5): TODO-005 (README), TODO-006 (CFG annotation), TODO-007 (CLI exit code), TODO-008 (HLParserError), TODO-010 (test type helper)
+  - `closed_upload_snapshot_only` (1): TODO-001
+  - `confirmed_open` (1): TODO-003 (post-switch merge -- deferred, ControlStructurer)
+  - `deferred_needs_dedicated_session` (7): TODO-002, TODO-004, TODO-009, TODO-011, TODO-012, TODO-013, TODO-014
+  - `blocked_needs_more_evidence` (1): TODO-009
+  - `ongoing` (1): TODO-015
+- **Fixes implemented (4):**
+  - TODO-006: hl_disasm.py:736 `op == 71` -> `op == 70` (OSwitch annotation)
+  - TODO-007: cli.py cmd_disasm invalid function index -> `sys.exit(EX_INPUT_ERR)`
+  - TODO-008: hl_parser/_parser.py:181 guard version byte read, raise `HLParserError`
+  - TODO-010: tests/test_decompile.py `_build_switch_bytecode` type table fix (index K_I32=3 maps to I32)
+- **Tests added:** 5 (3 in test_disasm.py, 1 in test_parser.py, 1 in test_decompile.py)
+- **Files changed:**
+  - hl_disasm.py: 1-char fix
+  - cli.py: exit code fix
+  - hl_parser/_parser.py: version byte guard
+  - tests/test_disasm.py: 2 new test classes (3 tests)
+  - tests/test_parser.py: 1 new test
+  - tests/test_decompile.py: type table fix + 1 new test
+  - README.md: validation baseline update
+  - TODO.md: status table update
+  - MEMORY.md: session update
+  - `decompiler_quality_report/session72_todo_claim_verification.md`: evidence report
+- **Tests:** 877 passed, 4 skipped (5 new). Track A: 0 errors.
+- **Session 71 census unchanged:** 38 OSwitch, 2 structured, 9/27 nested/shared split.
+- **ControlStructurer/HaxeWriter/TypeResolver NOT touched.**
+- **No Tier 2-5 work, no recursive switch structuring, no metric definition changes.**
+- **Session 72 naming only.**
 
 ### Session 70: Switch case-break goto suppression in simple-linear case bodies
 
