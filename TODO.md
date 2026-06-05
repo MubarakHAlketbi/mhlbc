@@ -2,20 +2,20 @@
 
 Project: mhlbc
 Generated: 2026-06-05
-Last updated: 2026-06-05 (Session 72 claim verification)
+Last updated: 2026-06-05 (Session 73: TODO-003 fix)
 Source: ChatGPT audit of the uploaded repository snapshot and local validation attempt.
-Purpose: Queue audit findings for future sessions. Sessions 71-72 are now closed.
+Purpose: Queue audit findings for future sessions. Sessions 71-73 are now closed.
 Status: All 15 TODO items classified and verified against real checkout. See status table below.
 
-## Session 72 verification results
+## Session 73 verification results
 
-Every TODO item below has been verified against the real repository checkout. The status table reflects evidence-based findings. Items marked `closed_*` are resolved. Items marked `confirmed_open` or `deferred_*` remain for future sessions.
+Session 73 fixed TODO-003 (post-switch merge preservation). Session 72 completed TODO claim verification. Session 71 completed nested OSwitch diagnostic.
 
-| TODO | Priority | Session 72 status | Eligible for quick fix? |
+|| TODO | Priority | Session 73 status | Eligible for quick fix? ||
 |------|----------|-------------------|-------------------------|
 | TODO-001 | P0 | closed_upload_snapshot_only | N/A |
 | TODO-002 | P1 | deferred_needs_dedicated_session | Requires HaxeWriter/ControlStructurer |
-| TODO-003 | P1 | confirmed_open (deferred) | Touches ControlStructurer |
+| TODO-003 | P1 | confirmed_fixed_this_session | FIXED (post-switch merge preservation) |
 | TODO-004 | P1 | deferred_needs_dedicated_session | Test strategy |
 | TODO-005 | P1 | confirmed_fixed_this_session | FIXED (docs-only) |
 | TODO-006 | P2 | confirmed_fixed_this_session | FIXED (CFG annotation fix) |
@@ -30,6 +30,7 @@ Every TODO item below has been verified against the real repository checkout. Th
 | TODO-015 | P3 | ongoing | Process |
 
 Full verification details: `decompiler_quality_report/session72_todo_claim_verification.md`
+Session 73 fix details: `decompiler_quality_report/session73_post_switch_merge_fix.md`
 
 ## Important scope note
 

@@ -1,12 +1,11 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-
 Last updated: 2026-06-05
-Current session: 72
+Current session: 73
 Branch: main
 HEAD: (pending commit)
-Tests: 877 passed, 4 skipped
+Tests: 878 passed, 4 skipped
 Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -46,10 +45,15 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - Shape breakdown: nested_oswitch=9 (25%), shared_merge=27 (75%), exclusive_simple=2 (already structured).
   - No behavior changed. Full pytest: 872 passed, 4 skipped. Track A: 0 errors.
   - Recommendation: release-hardening checkpoint. Recursive switch pass would only address 25% of remaining OSwitch.
+- Session 73: Preserve post-switch merge blocks after structuring (behavior-changing, TODO-003).
+  - **Bug:** `_try_structure_switch` marked `post_switch_bid` visited before walking it (line 3513), causing the `if post_switch_bid not in visited:` check (line 3527) to always fail. Post-switch merge content (assignments, returns) was silently dropped.
+  - **Fix:** Removed premature `visited.add(post_switch_bid)`. The post-switch block is now walked naturally by `_walk_block`, which marks it visited internally.
+  - **Test:** Added `TestSession73PostSwitchMergePreservation.test_structured_switch_preserves_post_switch_merge` - synthetic 2-case switch with post-switch `r1 = 999; return r1` verifies content appears after switch.
+  - **Validation:** Full pytest 878 passed (+1), 4 skipped. Track A: 9/9, 3014 funcs, 0 errors. Session 71 census unchanged (38 OSwitch, 2 structured, 36 remaining, 9/27 split).
+  - No change to Session 69/70 switch structuring or goto suppression behavior.
 - Conditional-jump goto frontier: CLOSED (B63 + B65).
 - OJAlways switch-case-break frontier: CLOSED (Sessions 67 + 68).
-  - All 0 top-level gotos across Track A (9/9, 3014 funcs), TB200 (seed=42),
-    TB500 (seed=42).
+  - All 0 top-level gotos across Track A (9/9, 3014 funcs), TB200 (seed=42), TB500 (seed=42).
 - OSwitch->structured_switch frontier: PARTIALLY ADDRESSED (default-as-merge + internal-if/else + simple-linear patterns).
   - Session 71 diagnostic: 9/36 OSwitch are nested_oswitch (25%), 27/36 are shared_merge (75%).
   - shared_merge at `__add__` indices 18, 27, 43 cannot be structured with current exclusive-membership rules.
@@ -85,8 +89,8 @@ Do not reopen without explicit project-owner unlock.
 
 ## 4. Current validation baseline
 
-- Tests: 872 passed, 4 skipped
-- Guardrails: 101/101 (B38-B55 + B63 + Session 67-70)
+- Tests: 878 passed, 4 skipped
+- Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
@@ -97,6 +101,32 @@ Do not reopen without explicit project-owner unlock.
   - 27/36 shared_merge cannot be structured with current exclusive-membership rules
 - Field-name fallbacks: Track A 2084, TB200 58, TB500 356
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
+
+## 5. Latest handoff
+
+### Session 73: Preserve post-switch merge blocks (TODO-003)
+
+- **Type:** Behavior-changing (narrow fix).
+- **Bug:** `_try_structure_switch` prematurely marked `post_switch_bid` as visited (line 3513), causing the post-switch walk guard (line 3527) to skip the merge block entirely. Post-switch content was dropped.
+- **Fix:** Removed `visited.add(post_switch_bid)` at line 3513. The `_walk_block` call at lines 3527-3530 now walks the post-switch block naturally and marks it visited internally.
+- **Test added:** `TestSession73PostSwitchMergePreservation.test_structured_switch_preserves_post_switch_merge` - synthetic 2-case switch with post-switch `r1 = 999; return r1` verifies merge content appears after structured switch.
+- **Validation:**
+  - Full pytest: 878 passed, 4 skipped (+1 new test)
+  - Session 69/70 switch tests: 13/13 passed
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors
+  - Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge)
+- **Scope compliance:**
+  - Only fixed the proven visited-set/merge-walk issue
+  - Did not change nested OSwitch behavior
+  - Did not suppress labels/gotos beyond Session 70
+  - Did not touch TODO-002, HaxeWriter, TypeResolver, parser/disassembler
+- **Files changed:**
+  - `hl_decompile.py`: 1 line removed, 3 comment lines added (lines 3513-3514)
+  - `tests/test_decompile.py`: +130 lines (new test class, fixed helper, updated negative test)
+  - `TODO.md`: TODO-003 -> `confirmed_fixed_this_session`
+  - `decompiler_quality_report/session73_post_switch_merge_fix.md`: canonical report
+- **No parser/disassembler/ControlStructurer broad behavior/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **No Farever-specific logic.**
 
 ## 5. Latest handoff
 

@@ -3510,7 +3510,9 @@ class ControlStructurer:
         visited.add(blk.id)
         for bid in blocks_to_mark:
             visited.add(bid)
-        visited.add(post_switch_bid)
+        # NOTE: Do NOT mark post_switch_bid visited here.
+        # It will be walked naturally by _walk_block below, which marks it visited internally.
+        # Marking it prematurely caused the post-switch merge content to be skipped (TODO-003).
 
         # ── Build structured switch IR ──
         val_reg = last.args[0]

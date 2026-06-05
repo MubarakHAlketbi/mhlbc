@@ -8059,16 +8059,25 @@ class TestSession70SwitchCaseBreakGotoSuppression:
         pytest.fail(f"Function {func_name} not found in {hl_path}")
 
     def _get_switch_case_gotos(self, ir_body: list) -> list:
-        """Extract all goto statements from switch case bodies recursively."""
+        """Extract all goto statements from switch case bodies recursively.
+
+        Only checks the blocks of IRStmt(op="switch"), not other nested
+        structures (while, if, etc.) that may appear after the switch.
+        """
         gotos = []
-        def collect(stmts):
+        def collect_case_blocks(stmts):
             for s in stmts:
-                if s.op == "goto":
-                    gotos.append(s)
-                if hasattr(s, 'blocks') and s.blocks:
-                    for blk in s.blocks:
-                        collect(blk)
-        collect(ir_body)
+                if s.op == "switch" and s.blocks:
+                    for case_blk in s.blocks:
+                        def collect_from_case(case_stmts):
+                            for cs in case_stmts:
+                                if cs.op == "goto":
+                                    gotos.append(cs)
+                                if hasattr(cs, 'blocks') and cs.blocks:
+                                    for nested_blk in cs.blocks:
+                                        collect_from_case(nested_blk)
+                        collect_from_case(case_blk)
+        collect_case_blocks(ir_body)
         return gotos
 
     # ── Positive: Track A simple switch (testSwitch) ──
@@ -8181,10 +8190,12 @@ class TestSession70SwitchCaseBreakGotoSuppression:
         fn = result.functions.get(0)
         assert fn is not None
 
-        # The goto should NOT be suppressed (target is not post-switch merge)
-        case_gotos = self._get_switch_case_gotos(fn.body)
-        assert len(case_gotos) == 1, (
-            f"Expected 1 unsuppressed goto (wrong target), got {len(case_gotos)}"
+        # This switch has only 1 case, so it's NOT structured (requires >=2 cases).
+        # It falls back to flat output. The goto should appear in top-level statements.
+        top_level_gotos = [s for s in fn.body if s.op == "goto"]
+        assert len(top_level_gotos) == 1, (
+            f"Expected 1 unsuppressed goto in flat output (wrong target), "
+            f"got {len(top_level_gotos)}: {[g.comment for g in top_level_gotos]}"
         )
 
     def test_negative_non_final_goto_in_case_body(self):
@@ -8324,6 +8335,129 @@ class TestSession70SwitchCaseBreakGotoSuppression:
                     f"{fname} func[{fidx}]: Expected 0 case-body gotos, "
                     f"got {len(case_gotos)}: {[g.comment for g in case_gotos]}"
                 )
+class TestSession73PostSwitchMergePreservation:
+    """Session 73 (TODO-003): Preserve post-switch merge blocks after structuring.
+
+    Bug: _try_structure_switch marked post_switch_bid as visited before
+    walking it, causing post-switch merge content to be dropped.
+    """
+
+    def test_structured_switch_preserves_post_switch_merge(self):
+        """Simple 2-case switch with post-switch merge block containing statements.
+
+        Layout (2 cases + default-as-merge):
+          0: OInt r0, 0            -- setup
+          1: OSwitch r0, 2 cases + default
+          2: OInt r1, 10           -- Case 0 entry (simple linear)
+          3: OJAlways +2           -- break to merge (idx 6)
+          4: OInt r1, 20           -- Case 1 entry (simple linear)
+          5: OJAlways +0           -- break to merge (idx 6)
+          6: OInt r1, 999          -- default/merge (post-switch content)
+          7: ORet r1               -- return
+
+        Expected output after fix:
+        - structured switch with 2 cases
+        - post-switch statements (r1 = 999; return r1) appear AFTER the switch
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[0, 2],   # relative to post-OSwitch (idx 2): case0=0, case1=2
+            default_offset=4,      # relative: default=4 (post-OSwitch + 4 = idx 6)
+            before_ops=[
+                (1, [0, 0]),       # OInt r0, 0
+            ],
+            after_ops=[
+                (1, [1, 10]),      # idx2: OInt r1, 10 (case 0)
+                (58, [2]),         # idx3: OJAlways +2 -> idx6 (merge)
+                (1, [1, 20]),      # idx4: OInt r1, 20 (case 1)
+                (58, [0]),         # idx5: OJAlways +0 -> idx6 (merge)
+                (1, [1, 999]),     # idx6: OInt r1, 999 (merge/default)
+                (67, [1]),         # idx7: ORet r1
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None, f"fn is None; errors={result.errors}"
+
+        # Should have 1 structured switch
+        switch_stmts = [s for s in fn.body if s.op == "switch"]
+        assert len(switch_stmts) == 1, f"Expected 1 structured switch, got {len(switch_stmts)}"
+        sw = switch_stmts[0]
+
+        # Case bodies should have NO goto statements (Session 70)
+        case_gotos = self._get_switch_case_gotos(fn.body)
+        assert len(case_gotos) == 0, (
+            f"Expected 0 case-body gotos, got {len(case_gotos)}: "
+            f"{[g.comment for g in case_gotos]}"
+        )
+
+        # Post-switch statements should appear AFTER the switch
+        # The function body should contain: [switch, assign (r1=999), return]
+        # Find the index of the switch statement
+        switch_idx = None
+        for i, stmt in enumerate(fn.body):
+            if stmt.op == "switch":
+                switch_idx = i
+                break
+        assert switch_idx is not None, "Switch statement not found"
+
+        # Verify there are statements after the switch
+        post_switch_stmts = fn.body[switch_idx + 1:]
+        assert len(post_switch_stmts) >= 2, (
+            f"Expected at least 2 post-switch statements (assign + return), "
+            f"got {len(post_switch_stmts)}: {[str(s) for s in post_switch_stmts]}"
+        )
+
+        # Verify the post-switch content: assign r1 = 999 and return r1
+        # The assign should be an IRStmt(op="assign") with src containing 999
+        # The return should be an IRStmt(op="return")
+        found_assign_999 = False
+        found_return = False
+        for stmt in post_switch_stmts:
+            if stmt.op == "assign" and stmt.src is not None:
+                if "999" in str(stmt.src):
+                    found_assign_999 = True
+            if stmt.op == "return":
+                found_return = True
+
+        assert found_assign_999, (
+            f"Post-switch merge assignment 'r1 = 999' not found in "
+            f"post-switch statements: {[str(s) for s in post_switch_stmts]}"
+        )
+        assert found_return, (
+            f"Post-switch return not found in "
+            f"post-switch statements: {[str(s) for s in post_switch_stmts]}"
+        )
+
+    def _get_switch_case_gotos(self, ir_body: list) -> list:
+        """Extract all goto statements from switch case bodies recursively.
+
+        Only checks the blocks of IRStmt(op="switch"), not other nested
+        structures (while, if, etc.) that may appear after the switch.
+        """
+        gotos = []
+        def collect_case_blocks(stmts):
+            for s in stmts:
+                if s.op == "switch" and s.blocks:
+                    for case_blk in s.blocks:
+                        def collect_from_case(case_stmts):
+                            for cs in case_stmts:
+                                if cs.op == "goto":
+                                    gotos.append(cs)
+                                if hasattr(cs, 'blocks') and cs.blocks:
+                                    for nested_blk in cs.blocks:
+                                        collect_from_case(nested_blk)
+                        collect_from_case(case_blk)
+        collect_case_blocks(ir_body)
+        return gotos
+
+
 class TestSession72SyntheticSwitchTypeFix:
     """TODO-010: Synthetic switch helper now uses proper type indices."""
 
