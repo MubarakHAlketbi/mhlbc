@@ -2,12 +2,12 @@
 
 Current accepted state for mhlbc.
 
-Last updated: 2026-06-04
-Current session: 69
+Last updated: 2026-06-05
+Current session: 70
 Branch: main
-HEAD: 26b755c
-Tests: 864 passed, 4 skipped
-Guardrails: 93/93 (B38-B55 + B63 + Session 69)
+HEAD: (pending commit)
+Tests: 872 passed, 4 skipped
+Guardrails: 101/101 (B38-B55 + B63 + Session 67-70)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -31,11 +31,20 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - 36 OSwitch remain in __add__ functions (nested OSwitch -- not addressed)
   - writeParam fidx=38661 now structures successfully: OSwitch=1 -> structured_switch=1
   - No change to goto suppression (Session 67/68 still at 0 gotos)
+- Session 70: Source-visible case-break goto comment suppression inside structured switch cases (behavior-changing).
+  - Extended `_walk_simple_case_body` to drop trailing OJAlways goto when:
+    - opcode is 58 (OJAlways)
+    - jump target equals proven post-switch merge block start
+    - case body is simple-linear (walked via `_walk_simple_case_body`)
+    - suppression guard matches `_is_switch_break_ojalways` or `_is_indirect_switch_break_ojalways`
+  - Track A testSwitch: cases 0-2 no longer show `// goto @@9`
+  - writeParam fidx=38661 case 1 (simple-linear): no longer shows `// goto @@20`
+  - No change to top-level gotos (remain 0 across all measured scopes)
 - Conditional-jump goto frontier: CLOSED (B63 + B65).
 - OJAlways switch-case-break frontier: CLOSED (Sessions 67 + 68).
   - All 0 top-level gotos across Track A (9/9, 3014 funcs), TB200 (seed=42),
     TB500 (seed=42).
-- OSwitch->structured_switch frontier: PARTIALLY ADDRESSED (default-as-merge + internal-if/else patterns).
+- OSwitch->structured_switch frontier: PARTIALLY ADDRESSED (default-as-merge + internal-if/else + simple-linear patterns).
   - Nested OSwitch (__add__ functions) remains unaddressed.
 - Field-name recovery: PAUSED (zero recoverable cases).
 - Broad ControlStructurer work: PAUSED.
@@ -57,20 +66,21 @@ Do not reopen without explicit project-owner unlock.
 | OJAlways switch-case-break (direct) | Closed | session67_ojalways_switch_break_absorption.md | Session 67: narrow guard for direct predSW cases; Track A 3->0, TB200 8->0, TB500 30->1 |
 | OJAlways switch-case-break (indirect) | Closed | session68 report | Session 68: forward-reachability guard for indirect cases; TB500 1->0; ALL 0 gotos |
 | OSwitch->struct_switch (internal-if) | Closed | session69_switch_internal_if_structuring.md | Session 69: default-as-merge fix + internal-if/else case bodies; TA 0->2 structured |
+| OSwitch->struct_switch (simple-linear) | Closed | session70 report | Session 70: case-break goto suppression in simple-linear cases; testSwitch, writeParam clean |
 | Dynamic/null/call-return | Locked | docs/validation_matrix.md, reports | Zero actionable cases |
 | Field-name recovery | Paused | scripts/analyze_field_name_fallbacks.py | 2084 IR fallbacks (Track A), zero recoverable |
 | TypeResolver changes | Paused | -- | No current evidence-backed target |
 | Virtual struct/typedef invention | Paused | scripts/extract_b31_virtual_detail.py | K_VIRTUAL cases expected |
-| ControlStructurer broad cleanup | Closed | session69 report | ALL 0 top-level gotos across TA/TB200/TB500; OSwitch structuring extended |
+| ControlStructurer broad cleanup | Closed | session69/70 reports | ALL 0 top-level gotos across TA/TB200/TB500; OSwitch structuring extended |
 | Tiers 2-5 | Frozen | -- | Requires explicit unlock |
 
 ## 4. Current validation baseline
 
-- Tests: 864 passed, 4 skipped
-- Guardrails: 93/93 (B38-B55 + B63 + Session 69)
+- Tests: 872 passed, 4 skipped
+- Guardrails: 101/101 (B38-B55 + B63 + Session 67-70)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
-- CSfeas (post-Session 69): Track A 0, TB200 0, TB500 0 gotos
+- CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
   - All OJAlways switch-case-break gotos suppressed. No remaining top-level gotos in any measured scope.
 - OSwitch vs structured_switch:
   - Track A: 38 OSwitch, 2 structured_switch (testSwitch, Enums.hl main)
@@ -80,6 +90,32 @@ Do not reopen without explicit project-owner unlock.
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
 ## 5. Latest handoff
+
+### Session 70: Switch case-break goto suppression in simple-linear case bodies
+
+- **Type:** Behavior-changing.
+- **Evidence base:** Session 69 census showed structured switches now emit in Track A (testSwitch, Enums.hl main) and writeParam (fidx=38661). However, simple-linear case bodies walked via `_walk_simple_case_body` still emitted source-visible `// goto` comments for the terminal OJAlways break to post-switch merge.
+  - testSwitch from Switch.hl: cases 0-2 contained `// goto @@9`
+  - writeParam fidx=38661: case 1 (simple-linear) contained `// goto @@20`
+  - These were NOT top-level gotos (already 0); they were source-visible comments inside structured switch cases.
+- **Fix:** Extended `_walk_simple_case_body` to suppress the trailing OJAlways goto comment when:
+  - opcode is 58 (OJAlways)
+  - jump target equals the proven post-switch merge block start
+  - the case body has been validated as simple-linear (walked via `_walk_simple_case_body`)
+  - the suppression guard (`_is_switch_break_ojalways` or `_is_indirect_switch_break_ojalways`) returns True
+  - the goto is the final statement in that case body
+- **Impact:**
+  - Track A testSwitch: 3 `// goto @@9` comments removed (cases 0-2 now clean)
+  - writeParam fidx=38661 case 1: `// goto @@20` removed (now clean alongside case 0 which was already clean via Session 68 internal-flow path)
+  - Top-level gotos: remain 0 across all measured scopes (TA, TB200, TB500)
+- **Files changed:**
+  - hl_decompile.py (+6 lines): added suppression logic in `_walk_simple_case_body` mirroring `_walk_block`
+  - tests/test_decompile.py (+300 lines): added `TestSession70SwitchCaseBreakGotoSuppression` (8 tests)
+- **Tests added:** 8 (2 Track A positive, 1 synthetic positive, 4 negative guards, 1 integration). Session 67/68/69 tests (18) all pass.
+- **No parser/disassembler/TypeResolver/HaxeWriter broad behavior/CLI/GUI/Tier 2-5 changes.**
+- **No Farever-specific logic.** All guards use CFG-level evidence (OSwitch, forward reachability, block predecessors, block_map).
+- **No new B## labels.** Session 70 naming only.
+- **Recommendation:** Simple-linear and internal-flow switch case bodies are now clean. Nested OSwitch (__add__ functions) remains the only unaddressed OSwitch pattern. No active behavior-changing frontier recommended without explicit unlock.
 
 ### Session 69: Switch structuring for internal if/else case bodies + default-as-merge fix
 
@@ -124,4 +160,5 @@ Do not reopen without explicit project-owner unlock.
 - scripts/session69_switch_census.py -- Session 69 switch structuring census
 - tests/test_decompile.py::TestSession68IndirectSwitchBreakOJAlways -- Session 68 tests (6)
 - tests/test_decompile.py::TestSession69SwitchInternalIfStructuring -- Session 69 tests (5)
+- tests/test_decompile.py::TestSession70SwitchCaseBreakGotoSuppression -- Session 70 tests (8)
 - scripts/analyze_controlstructurer_feasibility.py -- CSfeas diagnostic

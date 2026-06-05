@@ -3644,6 +3644,12 @@ class ControlStructurer:
                 target_bid = (self._ip_to_block.get(target)
                               if target is not None else None)
                 if target_bid == post_switch_bid:
+                    # Session 70: Suppress proven switch case-break goto comments
+                    # in simple-linear case bodies, mirroring _walk_block logic.
+                    if (stmts and stmts[-1].op == "goto"
+                            and (_is_switch_break_ojalways(cb, block_map)
+                                 or _is_indirect_switch_break_ojalways(cb, block_map))):
+                        stmts.pop()
                     return True, stmts, block_ids  # Valid break
                 # Jump to somewhere else → case body too complex
                 return False, [], set()
