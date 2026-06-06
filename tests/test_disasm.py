@@ -327,6 +327,77 @@ class TestDisassembler:
         assert len(cfg) == 1
 
 
+class TestSession78BuildCfgApi:
+    """TODO-012: build_cfg should auto-populate instructions when called directly."""
+
+    def test_build_cfg_before_disassemble_function(self):
+        """build_cfg should auto-populate instructions when called directly."""
+        opcodes = encode_op(0, 0, 1) + encode_op(67, 0)
+        hlb = build_test_hlb(opcodes, nops=2)
+        p = HLParser('<test>')
+        p.execute(stream_from_bytes(hlb))
+
+        d = Disassembler(p)
+        # Call build_cfg directly WITHOUT calling disassemble_function first
+        cfg = d.build_cfg(0)
+        assert len(cfg) == 1, (
+            f"build_cfg(0) returned {len(cfg)} blocks; "
+            "expected 1 (should auto-populate instructions)"
+        )
+
+    def test_build_cfg_returns_same_as_normal_path(self):
+        """build_cfg called directly should produce same CFG as normal path."""
+        opcodes = encode_op(0, 0, 1) + encode_op(67, 0)
+        hlb = build_test_hlb(opcodes, nops=2)
+        p = HLParser('<test>')
+        p.execute(stream_from_bytes(hlb))
+
+        d = Disassembler(p)
+        # Direct path: build_cfg without disassemble_function first
+        cfg_direct = d.build_cfg(0)
+
+        # Normal path: disassemble_function first, then build_cfg
+        d2 = Disassembler(p)
+        d2.disassemble_function(0)
+        cfg_normal = d2.build_cfg(0)
+
+        assert len(cfg_direct) == len(cfg_normal), (
+            f"Direct CFG has {len(cfg_direct)} blocks, "
+            f"normal CFG has {len(cfg_normal)} blocks"
+        )
+        assert cfg_direct[0].start_ip == cfg_normal[0].start_ip
+        assert cfg_direct[0].end_ip == cfg_normal[0].end_ip
+
+    def test_build_cfg_with_conditional_jump(self):
+        """build_cfg should handle functions with conditional jumps."""
+        # OJFalse r0, +2 (skip ret), ORet r0, OLabel, ORet r0
+        opcodes = (encode_op(45, 0, 2) +  # OJFalse r0, +2
+                   encode_op(67, 0) +      # ORet r0
+                   bytes([66]) +           # OLabel
+                   encode_op(67, 0))       # ORet r0
+        hlb = build_test_hlb(opcodes, nops=4)
+        p = HLParser('<test>')
+        p.execute(stream_from_bytes(hlb))
+
+        d = Disassembler(p)
+        cfg = d.build_cfg(0)
+        assert len(cfg) >= 2, (
+            f"build_cfg(0) returned {len(cfg)} blocks; "
+            "expected >=2 for function with conditional jump"
+        )
+
+    def test_build_cfg_invalid_index_returns_empty(self):
+        """build_cfg with invalid func_idx should return empty list."""
+        opcodes = encode_op(0, 0, 1) + encode_op(67, 0)
+        hlb = build_test_hlb(opcodes, nops=2)
+        p = HLParser('<test>')
+        p.execute(stream_from_bytes(hlb))
+
+        d = Disassembler(p)
+        cfg = d.build_cfg(999)
+        assert cfg == []
+
+
 # ── CLI Tests ───────────────────────────────────────────────────────────
 
 class TestCLIDisasm:

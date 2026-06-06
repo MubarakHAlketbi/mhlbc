@@ -24,7 +24,7 @@ Session 74 fixed TODO-004 (test-only: weak goto assertions tightened). Session 7
 | TODO-009 | P2 | blocked_needs_more_evidence | Needs bytecode research |
 | TODO-010 | P2 | confirmed_fixed_this_session | FIXED (test type helper) |
 | TODO-011 | P2 | confirmed_fixed_this_session | FIXED (Session 76: output filename sanitization + path containment) |
-| TODO-012 | P3 | deferred_needs_dedicated_session | API ergonomics |
+| TODO-012 | P3 | confirmed_fixed_this_session | API ergonomics |
 | TODO-013 | P3 | deferred_needs_dedicated_session | GUI cleanup |
 | TODO-014 | P3 | deferred_needs_dedicated_session | Output polish |
 | TODO-015 | P3 | ongoing | Process |
@@ -428,22 +428,28 @@ Do not:
 
 Priority: P3
 Area: `hl_disasm.py`, API ergonomics
-Status: open
+Status: confirmed_fixed_this_session (Session 78)
 Scope: small API hardening
 
 Finding:
 
 `build_cfg(func_idx)` can return empty if `disassemble_function(func_idx)` has not already populated the instruction cache. Current callers usually disassemble first, but the API is easy to misuse.
 
-Next action:
+Fix:
 
-1. Add a test that calls `build_cfg()` directly on a valid function.
-2. If current behavior returns empty incorrectly, make `build_cfg()` call `disassemble_function()` when needed.
-3. Preserve behavior for malformed/empty functions.
+Added 3 lines to `hl_disasm.py` `Disassembler.build_cfg()`: if `func_idx` is not in `self._instructions`, call `self.disassemble_function(func_idx)` before attempting CFG construction. Added 4 tests in `TestSession78BuildCfgApi`:
+
+- `test_build_cfg_before_disassemble_function` — direct call returns non-empty CFG
+- `test_build_cfg_returns_same_as_normal_path` — direct path matches normal path
+- `test_build_cfg_with_conditional_jump` — works with conditional jumps
+- `test_build_cfg_invalid_index_returns_empty` — invalid index still returns empty
 
 Validation:
 
-- Targeted disassembler tests.
+- Full pytest: 906 passed, 4 skipped (+4 new tests)
+- Track A: 9 fixtures, 3014 functions, 0 errors (unchanged)
+- Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9/27 split)
+- No parser/opcode/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI changes
 
 ---
 

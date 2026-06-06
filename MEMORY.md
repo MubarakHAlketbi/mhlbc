@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: 2026-06-06 (Session 77 checkpoint)
-Current session: 77
+Last updated: 2026-06-06 (Session 78 checkpoint)
+Current session: 78
 Branch: main
-HEAD: 0566343
-Tests: 902 passed, 4 skipped
-Guardrails: 140/140 (B38-B55 + B63 + Sessions 67-76)
+HEAD: fe66532
+Tests: 906 passed, 4 skipped
+Guardrails: 144/144 (B38-B55 + B63 + Sessions 67-78)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -108,6 +108,30 @@ Do not reopen without explicit project-owner unlock.
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
 ## 5. Latest handoff
+
+### Session 78: Disassembler.build_cfg() API hardening (TODO-012)
+
+- **Type:** Core correctness (narrow API fix).
+- **Problem:** `Disassembler.build_cfg(func_idx)` returned an empty CFG when called directly before `disassemble_function(func_idx)` had populated the instruction cache. The API was easy to misuse.
+- **Fix:** Added 3 lines to `hl_disasm.py` `Disassembler.build_cfg()`: if `func_idx` is not in `self._instructions`, call `self.disassemble_function(func_idx)` before attempting CFG construction.
+- **Tests added:** 4 in `TestSession78BuildCfgApi`:
+  - `test_build_cfg_before_disassemble_function` — direct call returns non-empty CFG
+  - `test_build_cfg_returns_same_as_normal_path` — direct path matches normal path
+  - `test_build_cfg_with_conditional_jump` — works with conditional jumps
+  - `test_build_cfg_invalid_index_returns_empty` — invalid index still returns empty
+- **Validation:**
+  - Full pytest: 906 passed, 4 skipped (+4 new tests)
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors
+  - Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge)
+  - ASCII safety: PASS on changed files (pre-existing non-ASCII in hl_disasm.py and test_disasm.py unchanged)
+- **Files changed:**
+  - `hl_disasm.py`: +4 lines (auto-populate guard in `build_cfg`)
+  - `tests/test_disasm.py`: +73 lines (new `TestSession78BuildCfgApi` with 4 tests)
+  - `TODO.md`: TODO-012 -> `confirmed_fixed_this_session`
+  - `MEMORY.md`: session update
+- **No parser/opcode/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **No Farever-specific logic.**
+- **Session 78 naming only.**
 
 ### Session 74: Tighten fixture-backed goto/switch regression tests (TODO-004)
 

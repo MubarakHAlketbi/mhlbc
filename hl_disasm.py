@@ -888,6 +888,10 @@ class Disassembler:
         if func_idx in self._cfgs:
             return self._cfgs[func_idx]
 
+        # Auto-populate instructions if not already cached
+        if func_idx not in self._instructions:
+            self.disassemble_function(func_idx)
+
         instructions = self._instructions.get(func_idx, [])
         if not instructions:
             return []

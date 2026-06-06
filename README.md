@@ -10,15 +10,15 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 76 (output filename hardening). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 78 (build_cfg API hardening). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 902 passed, 4 skipped |
-| Guardrails | 140 (B38-B55 + B63 + Sessions 67-76) |
+| Full pytest baseline | 906 passed, 4 skipped |
+| Guardrails | 144 (B38-B55 + B63 + Sessions 67-78) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
@@ -152,9 +152,9 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ## Recommended next step
 
-The release-hardening checkpoint (Session 77) is complete. The accepted baseline is stable: full pytest 902 passed, 4 skipped; Track A 9/9 fixtures, 3014 functions, 0 errors; all measured scopes at 0 top-level gotos.
+The release-hardening checkpoint (Session 77) is complete. Session 78 fixed TODO-012 (build_cfg API hardening). The accepted baseline is stable: full pytest 906 passed, 4 skipped; Track A 9/9 fixtures, 3014 functions, 0 errors; all measured scopes at 0 top-level gotos.
 
-Preferred next small task: **TODO-012 - direct `Disassembler.build_cfg()` API hardening** (low-risk, isolated API ergonomics fix). Alternative output-polish task: **TODO-014 - identifier sanitization** if desired. **TODO-009 remains blocked** until bytecode evidence is available.
+Preferred next small task: **TODO-014 - identifier sanitization** (output polish). Alternative: **TODO-013 - GUI cancellation granularity** if desired. **TODO-009 remains blocked** until bytecode evidence is available.
 
 No Tier 2-5 unlock is recommended.
 
@@ -244,7 +244,7 @@ Architecture rule: the parser and CLI must remain headless. GUI code must not be
 
 ## Reproducible validation
 
-Use these commands for the current accepted baseline (post-Session 76).
+Use these commands for the current accepted baseline (post-Session 78).
 
 ```bash
 # Full pytest baseline
@@ -254,12 +254,12 @@ cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 Expected accepted result:
 
 ```text
-902 passed, 4 skipped
+906 passed, 4 skipped
 ```
 
 ```bash
-# Guardrails (140 tests: B38-B55 + B63 + Sessions 67-76)
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76"
+# Guardrails (144 tests: B38-B55 + B63 + Sessions 67-78)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76 or Session78"
 ```
 
 Expected accepted result:
