@@ -3428,6 +3428,21 @@ class ControlStructurer:
                     if default_bid not in case_order:
                         case_order.append(default_bid)
 
+        # ── Compute default_case_idx for writer ──
+        # Tells the writer which case body (if any) corresponds to the HL default target.
+        # -1 means the default target is the merge point (not a case body).
+        default_case_idx = -1
+        if default_target is not None:
+            d_bid = self._ip_to_block.get(default_target)
+            if d_bid is not None and d_bid != blk.id:
+                db = block_map.get(d_bid)
+                if db is not None and len(db.predecessors) == 1:
+                    # Default is a real case body → find its index in case_order
+                    for i, bid in enumerate(case_order):
+                        if bid == d_bid:
+                            default_case_idx = i
+                            break
+
         if post_switch_bid is None:
             self._log("STRUCT",
                       f"OSwitch@{last.index}: no post-switch block, falling back",
@@ -3522,7 +3537,8 @@ class ControlStructurer:
         switch_stmt = IRStmt("switch", src=IRVar(val_name, reg=val_reg),
                               blocks=case_bodies,
                               extra={"ncases": ncases,
-                                     "has_default": has_default})
+                                     "has_default": has_default,
+                                     "default_case_idx": default_case_idx})
         result.append(switch_stmt)
 
         # ── Walk post-switch block ──
@@ -4545,10 +4561,16 @@ class HaxeWriter:
         if stmt.op == "switch":
             val_str = self._value_to_str(stmt.src) if stmt.src else "?"
             lines = [f"switch ({val_str}) {{"]
-            for blk in (stmt.blocks if stmt.blocks else []):
+            extra = stmt.extra if isinstance(stmt.extra, dict) else {}
+            default_case_idx = extra.get("default_case_idx", -1)
+            for i, blk in enumerate(stmt.blocks if stmt.blocks else []):
+                if i == default_case_idx:
+                    lines.append(self._indent_str() + "default:")
+                else:
+                    lines.append(self._indent_str() + f"case {i}:")
                 for s in blk:
                     line = self._stmt_to_line(s)
-                    lines.append(self._indent_str() + (line or ""))
+                    lines.append(self._indent_str() * 2 + (line or ""))
             lines.append("}")
             return "\n".join(lines)
 

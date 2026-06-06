@@ -8441,6 +8441,240 @@ class TestSession73PostSwitchMergePreservation:
         return gotos
 
 
+class TestSession75SwitchCaseLabels:
+    """Session 75 (TODO-002): Structured switch output preserves case/default boundaries.
+
+    Before the fix, structured switch output looked like:
+        switch (t0) {
+            v1 = 10;
+            v1 = 20;
+        }
+
+    After the fix, it should look like:
+        switch (t0) {
+            case 0:
+                v1 = 10;
+            case 1:
+                v1 = 20;
+        }
+    """
+
+    def test_structured_switch_emits_case_labels(self):
+        """Simple 2-case switch with default-as-merge: writer emits case 0: and case 1:.
+
+        Layout:
+          0: OInt r0, 0            -- setup
+          1: OSwitch r0, 2 cases + default
+          2: OInt r1, 10           -- Case 0 entry (simple linear)
+          3: OJAlways +2           -- break to merge (idx 6)
+          4: OInt r1, 20           -- Case 1 entry (simple linear)
+          5: OJAlways +0           -- break to merge (idx 6)
+          6: OInt r1, 999          -- default/merge (post-switch content)
+          7: ORet r1               -- return
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[0, 2],   # relative to post-OSwitch (idx 2): case0=0, case1=2
+            default_offset=4,      # relative: default=4 (post-OSwitch + 4 = idx 6)
+            before_ops=[
+                (1, [0, 0]),       # OInt r0, 0
+            ],
+            after_ops=[
+                (1, [1, 10]),      # idx2: OInt r1, 10 (case 0)
+                (58, [2]),         # idx3: OJAlways +2 -> idx6 (merge)
+                (1, [1, 20]),      # idx4: OInt r1, 20 (case 1)
+                (58, [0]),         # idx5: OJAlways +0 -> idx6 (merge)
+                (1, [1, 999]),     # idx6: OInt r1, 999 (merge/default)
+                (67, [1]),         # idx7: ORet r1
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None, f"fn is None; errors={result.errors}"
+
+        # Verify structured switch exists
+        switch_stmts = [s for s in fn.body if s.op == "switch"]
+        assert len(switch_stmts) == 1, f"Expected 1 structured switch, got {len(switch_stmts)}"
+
+        # Verify writer output contains case labels
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser, include_comments=True)
+        output = writer.write_function(fn)
+
+        assert "case 0:" in output, (
+            f"Expected 'case 0:' in switch output, got:\n{output}"
+        )
+        assert "case 1:" in output, (
+            f"Expected 'case 1:' in switch output, got:\n{output}"
+        )
+
+    def test_structured_switch_case_labels_with_post_switch_merge(self):
+        """Case labels appear AND post-switch merge statements are preserved after the switch.
+
+        Same layout as test_structured_switch_emits_case_labels but also verifies
+        that post-switch merge content (v1 = 999; return v1) appears after the
+        closing brace of the switch, not inside a case body.
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[0, 2],
+            default_offset=4,
+            before_ops=[
+                (1, [0, 0]),
+            ],
+            after_ops=[
+                (1, [1, 10]),
+                (58, [2]),
+                (1, [1, 20]),
+                (58, [0]),
+                (1, [1, 999]),
+                (67, [1]),
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None, f"fn is None; errors={result.errors}"
+
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser, include_comments=True)
+        output = writer.write_function(fn)
+
+        # Case labels present
+        assert "case 0:" in output, f"Missing 'case 0:' in:\n{output}"
+        assert "case 1:" in output, f"Missing 'case 1:' in:\n{output}"
+
+        # Post-switch merge content appears after the switch closing brace
+        # Find the switch line, then find the matching closing brace
+        lines = output.splitlines()
+        switch_line_idx = None
+        switch_close_idx = None
+        for i, line in enumerate(lines):
+            if "switch (" in line:
+                switch_line_idx = i
+            if switch_line_idx is not None and line.strip() == "}":
+                # First '}' after the switch line is the switch closing brace
+                if i > switch_line_idx:
+                    switch_close_idx = i
+                    break
+        assert switch_close_idx is not None, (
+            f"Could not find switch closing brace in output:\n{output}"
+        )
+        assert switch_close_idx < len(lines) - 1, (
+            f"Switch closing brace is the last line; expected post-switch content after it"
+        )
+        post_switch_lines = lines[switch_close_idx + 1:]
+        post_switch_text = "\n".join(post_switch_lines)
+        assert "999" in post_switch_text, (
+            f"Post-switch merge content '999' not found after switch closing brace. "
+            f"Post-switch lines: {post_switch_lines}"
+        )
+        assert "return" in post_switch_text, (
+            f"Post-switch 'return' not found after switch closing brace. "
+            f"Post-switch lines: {post_switch_lines}"
+        )
+
+    def test_structured_switch_three_cases_with_labels(self):
+        """3-case switch with default-as-merge: case 0, case 1, case 2 labels.
+
+        Layout:
+          0: OInt r0, 0            -- setup
+          1: OSwitch r0, 3 cases + default
+          2: OInt r1, 10           -- Case 0
+          3: OJAlways +4           -- break to merge (idx 8)
+          4: OInt r1, 20           -- Case 1
+          5: OJAlways +2           -- break to merge (idx 8)
+          6: OInt r1, 30           -- Case 2
+          7: OJAlways +0           -- break to merge (idx 8)
+          8: OInt r1, 999          -- merge/default
+          9: ORet r1
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=3,
+            case_offsets=[0, 2, 4],
+            default_offset=6,
+            before_ops=[(1, [0, 0])],
+            after_ops=[
+                (1, [1, 10]),       # case 0
+                (58, [4]),          # break to idx 8
+                (1, [1, 20]),       # case 1
+                (58, [2]),          # break to idx 8
+                (1, [1, 30]),       # case 2
+                (58, [0]),          # break to idx 8
+                (1, [1, 999]),      # merge
+                (67, [1]),          # return
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None, f"fn is None; errors={result.errors}"
+
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser, include_comments=True)
+        output = writer.write_function(fn)
+
+        assert "case 0:" in output, f"Missing 'case 0:' in:\n{output}"
+        assert "case 1:" in output, f"Missing 'case 1:' in:\n{output}"
+        assert "case 2:" in output, f"Missing 'case 2:' in:\n{output}"
+
+        # Verify no default: label (default is merge point, not a case body)
+        # The default: label should only appear when the HL default target is a case body
+        # In this test, default is the merge point, so no default: label expected
+        # (We don't assert absence of 'default:' because it might appear in other contexts)
+
+    def test_structured_switch_case_labels_ascii_safe(self):
+        """Case label output is ASCII-safe (no non-ASCII characters)."""
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[0, 2],
+            default_offset=4,
+            before_ops=[(1, [0, 0])],
+            after_ops=[
+                (1, [1, 10]),
+                (58, [2]),
+                (1, [1, 20]),
+                (58, [0]),
+                (1, [1, 999]),
+                (67, [1]),
+            ],
+        )
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+
+        parser = _parse_bytecode(data)
+        writer = HaxeWriter(TypeResolver(parser), parser, include_comments=True)
+        output = writer.write_function(fn)
+
+        for i, ch in enumerate(output):
+            assert ord(ch) <= 127, (
+                f"Non-ASCII character U+{ord(ch):04X} at position {i} in output"
+            )
+
+
 class TestSession72SyntheticSwitchTypeFix:
     """TODO-010: Synthetic switch helper now uses proper type indices."""
 

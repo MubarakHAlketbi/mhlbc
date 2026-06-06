@@ -2,10 +2,10 @@
 
 Current accepted state for mhlbc.
 Last updated: 2026-06-06
-Current session: 74
+Current session: 75
 Branch: main
-HEAD: 37c0bfe
-Tests: 878 passed, 4 skipped
+HEAD: a48b4fa
+Tests: 882 passed, 4 skipped
 Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -132,6 +132,38 @@ Do not reopen without explicit project-owner unlock.
 - **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
 - **No Farever-specific logic.**
 - **Session 74 naming only.**
+
+### Session 75: Structured switch output preserves case/default boundaries (TODO-002)
+
+- **Type:** Behavior-changing (narrow writer/IR change).
+- **Problem:** Structured switch output emitted a flat unlabeled block inside `switch (...) { ... }` without `case`/`default` boundaries.
+- **Metadata change:** Added `default_case_idx` to the switch IR `extra` dict in `_try_structure_switch`. Value is `-1` when the HL default target is the merge point (default-as-merge pattern), or the case index when the default target is a real case body.
+- **Writer change:** Updated `HaxeWriter._stmt_to_line` to emit `case N:` before each case body (N = 0-based case index) and `default:` for the case body matching the HL default target. Case body statements are indented one level deeper than the case label.
+- **Tests added:** 4 in `TestSession75SwitchCaseLabels`:
+  - `test_structured_switch_emits_case_labels` -- `case 0:` and `case 1:` appear
+  - `test_structured_switch_case_labels_with_post_switch_merge` -- labels + post-switch merge preserved
+  - `test_structured_switch_three_cases_with_labels` -- `case 0:`, `case 1:`, `case 2:`
+  - `test_structured_switch_case_labels_ascii_safe` -- output is ASCII-safe
+- **Validation:**
+  - Full pytest: 882 passed, 4 skipped (+4 new tests)
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors
+  - Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge)
+  - Existing switch/goto tests: 49 passed (45 existing + 4 new)
+  - Real fixture output verified: testSwitch and Enums.hl main show case labels
+  - Post-switch merge preservation confirmed (Session 73 fix intact)
+- **Files changed:**
+  - `hl_decompile.py`: +15 lines (default_case_idx computation in `_try_structure_switch`, updated extra dict, updated `_stmt_to_line` switch rendering)
+  - `tests/test_decompile.py`: +233 lines (new TestSession75SwitchCaseLabels class with 4 tests)
+  - `TODO.md`: TODO-002 -> `confirmed_fixed_this_session`
+  - `MEMORY.md`: session update
+- **Scope compliance:**
+  - No recursive/nested/shared OSwitch behavior changed
+  - No Session 71 census changes
+  - No TypeResolver/parser/disassembler/CLI/GUI changes
+  - No Tier 2-5 work
+  - No Track A/Track B metric definition changes
+  - No Farever-specific logic
+- **Session 75 naming only.**
 
 ### Session 73: Preserve post-switch merge blocks (TODO-003)
 

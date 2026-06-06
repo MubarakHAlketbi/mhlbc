@@ -14,7 +14,7 @@ Session 74 fixed TODO-004 (test-only: weak goto assertions tightened). Session 7
 || TODO | Priority | Session 73 status | Eligible for quick fix? ||
 |------|----------|-------------------|-------------------------|
 | TODO-001 | P0 | closed_upload_snapshot_only | N/A |
-| TODO-002 | P1 | deferred_needs_dedicated_session | Requires HaxeWriter/ControlStructurer |
+| TODO-002 | P1 | confirmed_fixed_this_session | FIXED (Session 75: case/default labels in structured switch output) |
 | TODO-003 | P1 | confirmed_fixed_this_session | FIXED (post-switch merge preservation) |
 | TODO-004 | P1 | confirmed_fixed_this_session | FIXED (test-only: weak goto assertions tightened) |
 | TODO-005 | P1 | confirmed_fixed_this_session | FIXED (docs-only) |
@@ -96,8 +96,8 @@ Do not:
 
 Priority: P1
 Area: `hl_decompile.py`, `ControlStructurer`, `HaxeWriter`
-Status: open
-Scope: diagnostic or behavior-changing only after proof
+Status: confirmed_fixed_this_session (Session 75)
+Scope: behavior-changing
 
 Finding:
 
@@ -116,36 +116,28 @@ switch (t0) {
 
 This is not sufficiently Haxe-like because case/default boundaries are missing.
 
-Likely affected components:
+Fix (Session 75):
 
-- `ControlStructurer._try_structure_switch`
-- `IRStmt("switch")` payload shape
-- `HaxeWriter._stmt_to_line`
-- Existing B38/Session 67-70 switch tests that assert only the presence of `switch`
+1. Added `default_case_idx` to the switch IR `extra` dict in `_try_structure_switch`. This tells the writer which case body (if any) corresponds to the HL default target. Value is `-1` when the default target is the merge point (default-as-merge pattern).
 
-Next action:
+2. Updated `HaxeWriter._stmt_to_line` to emit `case N:` before each case body (where N is the 0-based case index) and `default:` for the case body matching the HL default target.
 
-1. Add a diagnostic/test-only check showing current switch output lacks case/default boundaries.
-2. Define the minimal switch IR payload needed by the writer:
-   - switched value
-   - ordered case values or case indices
-   - case target instruction/block
-   - explicit default body identity
-   - post-switch merge block identity
-3. Add source-visible writer assertions for `case` and `default` output or explicit ASCII-safe comments if true Haxe syntax is not yet supported.
-4. Only then make the smallest behavior change.
+3. Added 4 focused tests in `TestSession75SwitchCaseLabels`:
+   - `test_structured_switch_emits_case_labels` -- verifies `case 0:` and `case 1:` appear
+   - `test_structured_switch_case_labels_with_post_switch_merge` -- verifies labels + post-switch merge preservation
+   - `test_structured_switch_three_cases_with_labels` -- verifies `case 0:`, `case 1:`, `case 2:`
+   - `test_structured_switch_case_labels_ascii_safe` -- verifies output is ASCII-safe
 
 Validation:
-
-- Focused switch writer tests.
-- Existing Session 67-70 switch/goto guardrails.
-- Track A quality report.
-- Source-visible output comparison for `testSwitch`, `Enums.hl main`, and `writeParam` benchmark if available.
+- Full pytest: 882 passed, 4 skipped (+4 new tests)
+- Track A: 9/9 fixtures, 3014 functions, 0 errors
+- Session 71 census unchanged: 38 OSwitch, 2 structured, 36 remaining (9 nested_oswitch / 27 shared_merge)
+- Existing switch/goto tests: 49 passed (45 existing + 4 new)
+- Real fixture output verified: testSwitch and Enums.hl main show case labels
+- Post-switch merge preservation confirmed (Session 73 fix intact)
+- No recursive/nested/shared OSwitch behavior changed
 
 Do not:
-
-- Combine this with Session 71's nested OSwitch classification. Session 71 is now closed.
-- Claim nested switches are solved by adding labels for already structured simple switches.
 
 ---
 
