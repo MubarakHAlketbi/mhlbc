@@ -1,10 +1,10 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: 2026-06-06
-Current session: 76
+Last updated: 2026-06-06 (Session 77 checkpoint)
+Current session: 77
 Branch: main
-HEAD: 14b998f
+HEAD: 0566343
 Tests: 902 passed, 4 skipped
 Guardrails: 140/140 (B38-B55 + B63 + Sessions 67-76)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
@@ -171,6 +171,23 @@ Do not reopen without explicit project-owner unlock.
   - No Tier 2-5 work
   - No Farever-specific logic
 - **Session 76 naming only.**
+
+### Session 77: Checkpoint after TODO cleanup (Sessions 72-76)
+
+- **Type:** Docs-only consistency checkpoint.
+- **Scope:** Verify repository state after Sessions 72-76, fix stale documentation references.
+- **Changes:**
+  - README.md: Updated pytest baseline (872→902), guardrail count (101→140), session reference (Session 71→Session 76), reproducible validation section.
+  - MEMORY.md: Updated HEAD hash (6d42b95→14b998f→0566343), guardrail count (101→140).
+- **Validation:**
+  - Full pytest: 902 passed, 4 skipped (unchanged from Session 76).
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - Guardrails: 140 passed (B38-B55 + B63 + Sessions 67-76).
+  - ASCII safety: PASS on changed files.
+- **No runtime behavior changed.** Docs-only consistency fixes.
+- **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **Session 77 naming only.**
 
 ### Session 75: Structured switch output preserves case/default boundaries (TODO-002)
 
