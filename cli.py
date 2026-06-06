@@ -663,8 +663,16 @@ def cmd_decompile(args):
             })
         elif args.output_dir:
             os.makedirs(args.output_dir, exist_ok=True)
+            resolved_outdir = os.path.realpath(args.output_dir)
             for fname, fsrc in files.items():
                 fpath = os.path.join(args.output_dir, fname)
+                # Safety check: resolved path must stay inside output_dir
+                resolved_fpath = os.path.realpath(fpath)
+                if not resolved_fpath.startswith(resolved_outdir + os.sep) \
+                        and resolved_fpath != resolved_outdir:
+                    print(f"ERROR: output path {fpath} escapes {args.output_dir}",
+                          file=sys.stderr)
+                    sys.exit(EX_TOOL_ERR)
                 with open(fpath, "w", encoding="utf-8") as f:
                     f.write(fsrc)
                 print(f"Wrote {fpath}  ({len(fsrc)} bytes)")

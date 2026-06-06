@@ -2,10 +2,10 @@
 
 Current accepted state for mhlbc.
 Last updated: 2026-06-06
-Current session: 75
+Current session: 76
 Branch: main
-HEAD: a48b4fa
-Tests: 882 passed, 4 skipped
+HEAD: 6d42b95
+Tests: 902 passed, 4 skipped
 Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -94,7 +94,7 @@ Do not reopen without explicit project-owner unlock.
 
 ## 4. Current validation baseline
 
-- Tests: 878 passed, 4 skipped
+- Tests: 902 passed, 4 skipped
 - Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
@@ -132,6 +132,45 @@ Do not reopen without explicit project-owner unlock.
 - **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
 - **No Farever-specific logic.**
 - **Session 74 naming only.**
+
+### Session 76: Harden output filenames (TODO-011)
+
+- **Type:** Security/hardening (output filename sanitization + path containment).
+- **Problem:** `HaxeWriter.write_output` derived filenames from class/enum names that had been through `_sanitize_type_name` (a Haxe display-name sanitizer), but there was no dedicated filesystem filename sanitizer and no path containment check in the CLI output-dir writing path.
+- **Fix:**
+  - Added `_sanitize_output_filename(name, fallback_prefix, suffix)` to `hl_decompile.py` -- a dedicated filesystem filename sanitizer that replaces `/`, `\\`, `..` with `_`, strips unsafe characters, and falls back to a deterministic prefix when the result is empty.
+  - Applied `_sanitize_output_filename` in `write_output` for class, enum, and single-function filenames. Hardcoded names (`_orphans.hx`, `_decompiled.hx`) are already safe and unchanged.
+  - Added path containment check in `cli.py` output-dir writing: resolves both `output_dir` and candidate path via `os.path.realpath` and verifies the candidate stays inside `output_dir`. Exits with `EX_TOOL_ERR` (3) on escape.
+- **Sanitization contract:**
+  - Path separators (`/`, `\\`) -> `_`
+    - Parent-dir references (`..`) -> `_`
+    - Characters not in `[a-zA-Z0-9_.-]` -> `_`
+    - Leading/trailing dots, dashes, underscores stripped
+    - Empty result -> `fallback_prefix` (default `_unnamed`)
+  - Suffix appended (default `.hx`)
+  - Does NOT change Haxe display names (`_sanitize_type_name` is untouched).
+- **Tests added:** 20 in `TestSession76OutputFilenameSanitization`:
+  - 14 unit tests for `_sanitize_output_filename` (normal, dotted, slash, backslash, absolute paths, `..`, `...`, empty, punctuation, custom fallback/suffix, complex traversal, determinism)
+  - 4 `write_output` integration tests (class, enum, func name sanitization; bulk malicious names)
+  - 2 CLI path containment tests (containment assertion, safe write)
+- **Validation:**
+  - Full pytest: 902 passed, 4 skipped (+20 new tests)
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors
+  - Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge)
+  - Existing CLI output-dir tests: 11 passed
+- **Files changed:**
+  - `hl_decompile.py`: +36 lines (`_sanitize_output_filename` function + 3 call-site changes in `write_output`)
+  - `cli.py`: +8 lines (path containment check in output-dir writing)
+  - `tests/test_decompile.py`: +294 lines (new `TestSession76OutputFilenameSanitization` with 20 tests)
+  - `TODO.md`: TODO-011 -> `confirmed_fixed_this_session`
+  - `MEMORY.md`: session update
+- **Scope compliance:**
+  - No Haxe display names changed (`_sanitize_type_name` untouched)
+  - No TypeResolver/ControlStructurer/HaxeWriter switch rendering/parser/disassembler changes
+  - No Track A/Track B metric definition changes
+  - No Tier 2-5 work
+  - No Farever-specific logic
+- **Session 76 naming only.**
 
 ### Session 75: Structured switch output preserves case/default boundaries (TODO-002)
 

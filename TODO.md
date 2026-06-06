@@ -23,7 +23,7 @@ Session 74 fixed TODO-004 (test-only: weak goto assertions tightened). Session 7
 | TODO-008 | P2 | confirmed_fixed_this_session | FIXED (HLParserError guard) |
 | TODO-009 | P2 | blocked_needs_more_evidence | Needs bytecode research |
 | TODO-010 | P2 | confirmed_fixed_this_session | FIXED (test type helper) |
-| TODO-011 | P2 | deferred_needs_dedicated_session | Security/hardening |
+| TODO-011 | P2 | confirmed_fixed_this_session | FIXED (Session 76: output filename sanitization + path containment) |
 | TODO-012 | P3 | deferred_needs_dedicated_session | API ergonomics |
 | TODO-013 | P3 | deferred_needs_dedicated_session | GUI cleanup |
 | TODO-014 | P3 | deferred_needs_dedicated_session | Output polish |

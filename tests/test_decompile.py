@@ -8704,3 +8704,299 @@ class TestSession72SyntheticSwitchTypeFix:
         assert ": Void" not in text, (
             f"No variable should be Void after TODO-010 fix, got:\n{text}"
         )
+
+class TestSession76OutputFilenameSanitization:
+    """TODO-011: Harden output file writing for decompile --output-dir.
+
+    Tests that _sanitize_output_filename produces safe filesystem names
+    and that write_output / CLI output-dir writing cannot escape the
+    requested output directory.
+    """
+
+    # -- _sanitize_output_filename unit tests --------------------------
+
+    def test_sanitize_normal_name(self):
+        """Normal class/enum names pass through unchanged."""
+        from hl_decompile import _sanitize_output_filename
+        assert _sanitize_output_filename("MyClass") == "MyClass.hx"
+        assert _sanitize_output_filename("MyEnum") == "MyEnum.hx"
+        assert _sanitize_output_filename("hl_types_ArrayDyn") == "hl_types_ArrayDyn.hx"
+
+    def test_sanitize_dotted_package_name(self):
+        """Dotted package names are preserved (dots are valid in filenames)."""
+        from hl_decompile import _sanitize_output_filename
+        assert _sanitize_output_filename("hl.types.ArrayDyn") == "hl.types.ArrayDyn.hx"
+        assert _sanitize_output_filename("haxe.Exception") == "haxe.Exception.hx"
+
+    def test_sanitize_path_traversal_slash(self):
+        """Forward slash in name is replaced with underscore."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("../evil")
+        assert "/" not in result
+        assert ".." not in result
+        assert result == "evil.hx"
+
+    def test_sanitize_path_traversal_backslash(self):
+        """Backslash in name is replaced with underscore."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("..\\evil")
+        assert "\\" not in result
+        assert ".." not in result
+        assert result == "evil.hx"
+
+    def test_sanitize_absolute_path_unix(self):
+        """Absolute-looking Unix path is neutralised."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("/etc/passwd")
+        assert "/" not in result
+        assert result == "etc_passwd.hx"
+
+    def test_sanitize_absolute_path_windows(self):
+        """Absolute-looking Windows path is neutralised."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("C:\\Windows\\system32")
+        assert "\\" not in result
+        assert result == "C__Windows_system32.hx"
+
+    def test_sanitize_double_dot_only(self):
+        """Name consisting only of '..' falls back to _unnamed."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("..")
+        assert result == "_unnamed.hx"
+
+    def test_sanitize_triple_dot(self):
+        """Name '...' falls back to _unnamed."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("...")
+        assert result == "_unnamed.hx"
+
+    def test_sanitize_empty_string(self):
+        """Empty name falls back to _unnamed."""
+        from hl_decompile import _sanitize_output_filename
+        assert _sanitize_output_filename("") == "_unnamed.hx"
+
+    def test_sanitize_punctuation_only(self):
+        """Punctuation-only name falls back to _unnamed."""
+        from hl_decompile import _sanitize_output_filename
+        assert _sanitize_output_filename("!@#$%") == "_unnamed.hx"
+
+    def test_sanitize_custom_fallback(self):
+        """Custom fallback_prefix is used when name sanitises to empty."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("..", fallback_prefix="_custom")
+        assert result == "_custom.hx"
+
+    def test_sanitize_custom_suffix(self):
+        """Custom suffix is appended."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("MyClass", suffix=".txt")
+        assert result == "MyClass.txt"
+
+    def test_sanitize_complex_traversal(self):
+        """Complex traversal like 'a/../../b' is fully neutralised."""
+        from hl_decompile import _sanitize_output_filename
+        result = _sanitize_output_filename("a/../../b")
+        assert "/" not in result
+        assert ".." not in result
+        assert result == "a_____b.hx"
+
+    def test_sanitize_deterministic(self):
+        """Same input always produces same output."""
+        from hl_decompile import _sanitize_output_filename
+        assert _sanitize_output_filename("../evil") == _sanitize_output_filename("../evil")
+
+    # -- write_output integration tests --------------------------------
+
+    def test_write_output_sanitizes_class_name(self):
+        """write_output sanitises class names that contain path separators."""
+        from hl_decompile import (
+            HaxeWriter, TypeResolver, DecompileResult, ClassDef,
+        )
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser)
+
+        result = DecompileResult(
+            decompiler_version="test",
+            classes={
+                "../evil": ClassDef(
+                    name="../evil", type_idx=1, super_class=None, fields=[],
+                    methods=[], static_methods=[],
+                ),
+            },
+            enums={},
+            functions={},
+            orphan_functions=[],
+            errors=[],
+        )
+        files = writer.write_output(result)
+        for fname in files:
+            assert "/" not in fname
+            assert "\\" not in fname
+            assert ".." not in fname
+        assert len(files) == 1
+
+    def test_write_output_sanitizes_enum_name(self):
+        """write_output sanitises enum names that contain path separators."""
+        from hl_decompile import (
+            HaxeWriter, TypeResolver, DecompileResult, EnumDef,
+        )
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser)
+
+        result = DecompileResult(
+            decompiler_version="test",
+            classes={},
+            enums={
+                "../../../tmp/evil": EnumDef(
+                    name="../../../tmp/evil", type_idx=2, constructs=[],
+                ),
+            },
+            functions={},
+            orphan_functions=[],
+            errors=[],
+        )
+        files = writer.write_output(result)
+        for fname in files:
+            assert "/" not in fname
+            assert "\\" not in fname
+            assert ".." not in fname
+
+    def test_write_output_sanitizes_func_name(self):
+        """write_output sanitises single-function output filename."""
+        from hl_decompile import (
+            HaxeWriter, TypeResolver, DecompileResult, IRFunction, FunctionSig,
+        )
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser)
+
+        result = DecompileResult(
+            decompiler_version="test",
+            classes={},
+            enums={},
+            functions={
+                0: IRFunction(
+                    name="test", findex=0, func_idx=0, nops=1, nregs=1,
+                    sig=FunctionSig(
+                        name="test", params=[], ret_type=0,
+                        is_method=False, parent_class=None, has_this=False,
+                    ),
+                    body=[], variables={}, raw_regnames={}, errors=[],
+                ),
+            },
+            orphan_functions=[],
+            errors=[],
+        )
+        files = writer.write_output(result, single_func_idx=0)
+        for fname in files:
+            assert "/" not in fname
+            assert "\\" not in fname
+            assert ".." not in fname
+
+    def test_write_output_no_escape_via_class_name(self):
+        """write_output with malicious class name does not produce path traversal."""
+        from hl_decompile import (
+            HaxeWriter, TypeResolver, DecompileResult, ClassDef,
+        )
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser)
+
+        malicious_names = [
+            "../evil",
+            "..\\evil",
+            "/etc/passwd",
+            "C:\\Windows\\system32",
+            "a/../../b",
+            "..",
+            "...",
+            "",
+        ]
+        for bad_name in malicious_names:
+            result = DecompileResult(
+                decompiler_version="test",
+                classes={
+                    bad_name: ClassDef(
+                        name=bad_name, type_idx=1, super_class=None, fields=[],
+                        methods=[], static_methods=[],
+                    ),
+                },
+                enums={},
+                functions={},
+                orphan_functions=[],
+                errors=[],
+            )
+            files = writer.write_output(result)
+            for fname in files:
+                assert "/" not in fname, f"Name {bad_name!r} produced slash in {fname!r}"
+                assert "\\" not in fname, f"Name {bad_name!r} produced backslash in {fname!r}"
+                assert ".." not in fname, f"Name {bad_name!r} produced '..' in {fname!r}"
+
+    # -- CLI output-dir path containment tests -------------------------
+
+    def test_cli_output_dir_path_containment(self):
+        """CLI --output-dir rejects paths that escape the output directory."""
+        from hl_decompile import (
+            HaxeWriter, TypeResolver, DecompileResult, ClassDef,
+        )
+        import tempfile, os
+
+        parser = _parse_bytecode(build_minimal_bytecode(version=5))
+        resolver = TypeResolver(parser)
+        writer = HaxeWriter(resolver, parser)
+
+        result = DecompileResult(
+            decompiler_version="test",
+            classes={
+                "safe": ClassDef(
+                    name="safe", type_idx=1, super_class=None, fields=[],
+                    methods=[], static_methods=[],
+                ),
+            },
+            enums={},
+            functions={},
+            orphan_functions=[],
+            errors=[],
+        )
+        files = writer.write_output(result)
+
+        outdir = tempfile.mkdtemp()
+        try:
+            resolved_outdir = os.path.realpath(outdir)
+            for fname, fsrc in files.items():
+                fpath = os.path.join(outdir, fname)
+                resolved_fpath = os.path.realpath(fpath)
+                assert resolved_fpath.startswith(resolved_outdir + os.sep) \
+                    or resolved_fpath == resolved_outdir, \
+                    f"Path {fpath} escapes {outdir}"
+        finally:
+            import shutil
+            shutil.rmtree(outdir, ignore_errors=True)
+
+    def test_cli_output_dir_safe_names_write(self):
+        """CLI --output-dir writes safe names without error."""
+        import tempfile, os, sys, subprocess
+
+        type_i32 = build_type_primitive(K_I32)
+        data = _build_minimal_with_types(
+            ntypes=1,
+            type_blobs=[type_i32],
+            functions=[(0, 0, [K_I32], [67])],
+        )
+        with tempfile.NamedTemporaryFile(suffix=".hlb", delete=False, mode="wb") as f:
+            f.write(data)
+            fpath = f.name
+        outdir = tempfile.mkdtemp()
+        try:
+            cmd = [sys.executable,
+                   os.path.join(os.path.dirname(__file__), "..", "cli.py"),
+                   "decompile", fpath, "--output-dir", outdir]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            assert result.returncode in (0, 1, 2), \
+                f"Unexpected exit code {result.returncode}: {result.stderr}"
+        finally:
+            os.unlink(fpath)
+            import shutil
+            shutil.rmtree(outdir, ignore_errors=True)

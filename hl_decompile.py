@@ -3811,6 +3811,42 @@ def _sanitize_type_name(name: str) -> str:
     return cleaned
 
 
+def _sanitize_output_filename(name: str,
+                              fallback_prefix: str = "_unnamed",
+                              suffix: str = ".hx") -> str:
+    """Sanitize a name for safe use as a filesystem filename.
+
+    This is a filesystem-focused sanitizer, separate from the Haxe
+    display-name sanitizer (_sanitize_type_name).  It ensures the
+    resulting filename cannot escape a parent directory or create
+    unsafe paths.
+
+    Rules:
+    - Replace path separators (/ \\) and parent-dir references (..) with _.
+    - Replace any character not in [a-zA-Z0-9_.-] with _.
+    - Strip leading/trailing dots, dashes, and underscores.
+    - If the result is empty, use fallback_prefix.
+    - Append suffix (default '.hx').
+
+    The function does NOT resolve paths or check containment; the
+    caller must verify the joined path stays inside the intended
+    output directory.
+    """
+    if not name:
+        safe = fallback_prefix
+    else:
+        # Neutralise path separators and parent-dir references
+        safe = name.replace("/", "_").replace("\\", "_")
+        safe = safe.replace("..", "_")
+        # Replace any remaining unsafe characters
+        safe = re.sub(r'[^a-zA-Z0-9_.-]', '_', safe)
+        # Strip leading/trailing dots, dashes, underscores
+        safe = safe.strip('_.-')
+        if not safe:
+            safe = fallback_prefix
+    return f"{safe}{suffix}"
+
+
 # ============================================================================
 # Type Resolver
 # ============================================================================
@@ -4405,7 +4441,8 @@ class HaxeWriter:
             ir_fn = result.functions.get(single_func_idx)
             if ir_fn:
                 src = self.write_function(ir_fn)
-                files[f"func_{single_func_idx}.hx"] = src
+                files[_sanitize_output_filename(f"func_{single_func_idx}",
+                                                suffix=".hx")] = src
             return files
 
         # Class files
@@ -4418,12 +4455,12 @@ class HaxeWriter:
 
             if cls_methods or cls_def.fields:
                 src = self.write_class(cls_def, cls_methods)
-                files[f"{cls_name}.hx"] = src
+                files[_sanitize_output_filename(cls_name, suffix=".hx")] = src
 
         # Enum files
         for enum_name, enum_def in result.enums.items():
             src = self.write_enum(enum_def)
-            files[f"{enum_name}.hx"] = src
+            files[_sanitize_output_filename(enum_name, suffix=".hx")] = src
 
         # Orphan functions (no parent class)
         orphan_srcs: List[str] = []
