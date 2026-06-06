@@ -7749,8 +7749,6 @@ class TestSession68IndirectSwitchBreakOJAlways:
         fixtures_dir = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
         for hl_name in ["Switch.hl", "Enums.hl", "ControlFlow.hl"]:
             full_path = os.path.join(fixtures_dir, hl_name)
-            if not os.path.exists(full_path):
-                continue
             p = HLParser(full_path)
             p.execute(io.BytesIO(open(full_path, "rb").read()))
             dasm = Disassembler(p)
@@ -7760,16 +7758,11 @@ class TestSession68IndirectSwitchBreakOJAlways:
             for fi, ir_fn in result.functions.items():
                 fn = p.functions[fi]
                 gotos = [s for s in ir_fn.body if s.op == "goto"]
-                # Only assert on functions that previously had 0 gotos
-                # (all Track A fixtures should have 0 after Session 67)
-                if fn.name in ("testSwitch", "main") and gotos:
-                    # These were the specific functions targeted by Session 67.
-                    # They should still have 0 gotos.
-                    pass  # Allow; the assertion below catches anomalies
-            # No hard assertion — this test validates no regression.
-            # If a fixture suddenly gains gotos, the test name serves as
-            # documentation.  Full Track A validation is done by the
-            # quality report pipeline.
+                if fn.name in ("testSwitch", "main"):
+                    assert not gotos, (
+                        f"{fn.name} in {hl_name}: expected 0 gotos, "
+                        f"got {len(gotos)}. Regression: gotos reappeared."
+                    )
         # The fact that this test runs without exception confirms
         # no structural breakage in the decompilation pipeline.
 
@@ -8008,22 +8001,12 @@ class TestSession69SwitchInternalIfStructuring:
             for fidx, ir_fn in result.functions.items():
                 if ir_fn is None:
                     continue
-                # Count goto stmts at any level
-                def _count_gotos(stmts):
-                    c = 0
-                    for s in stmts or []:
-                        if s.op == "goto":
-                            c += 1
-                        if hasattr(s, 'blocks') and s.blocks:
-                            for blk in s.blocks:
-                                c += _count_gotos(blk)
-                    return c
-                gotos = _count_gotos(ir_fn.body)
-                if gotos > 0:
-                    # Track A should have 0 top-level gotos after Session 67/68.
-                    # Report if any fixture has gotos.
-                    pass  # Don't fail — Track A goto baseline is validated
-                          # by the quality report pipeline.
+                # Count top-level goto stmts only (not inside if/while/switch blocks)
+                gotos = sum(1 for s in (ir_fn.body or []) if s.op == "goto")
+                assert gotos == 0, (
+                    f"{fname} fidx={fidx}: expected 0 gotos, "
+                    f"got {gotos}. Regression: gotos reappeared."
+                )
 
 
 class TestSession70SwitchCaseBreakGotoSuppression:

@@ -1,8 +1,8 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: 2026-06-05
-Current session: 73
+Last updated: 2026-06-06
+Current session: 74
 Branch: main
 HEAD: (pending commit)
 Tests: 878 passed, 4 skipped
@@ -51,6 +51,11 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
   - **Test:** Added `TestSession73PostSwitchMergePreservation.test_structured_switch_preserves_post_switch_merge` - synthetic 2-case switch with post-switch `r1 = 999; return r1` verifies content appears after switch.
   - **Validation:** Full pytest 878 passed (+1), 4 skipped. Track A: 9/9, 3014 funcs, 0 errors. Session 71 census unchanged (38 OSwitch, 2 structured, 36 remaining, 9/27 split).
   - No change to Session 69/70 switch structuring or goto suppression behavior.
+- Session 74: Tighten fixture-backed goto/switch regression tests (test-only, TODO-004).
+  - **Weak test 1:** `TestSession68IndirectSwitchBreakOJAlways.test_track_a_fixture_gotos_unchanged` silently skipped missing fixtures (`if not os.path.exists: continue`) and used `pass` when gotos were found in testSwitch/main. Fixed: removed silent skip, replaced `pass` with real assertion that gotos == 0.
+  - **Weak test 2:** `TestSession69SwitchInternalIfStructuring.test_track_a_fixtures_zero_errors` counted gotos at all levels (recursive into blocks) but used `pass` when gotos > 0. Fixed: changed to top-level-only count and replaced `pass` with real assertion that gotos == 0.
+  - **Validation:** Full pytest 878 passed, 4 skipped (unchanged). Track A: 9/9, 3014 funcs, 0 errors. Session 71 census unchanged.
+  - No production behavior changed. No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI changes.
 - Conditional-jump goto frontier: CLOSED (B63 + B65).
 - OJAlways switch-case-break frontier: CLOSED (Sessions 67 + 68).
   - All 0 top-level gotos across Track A (9/9, 3014 funcs), TB200 (seed=42), TB500 (seed=42).
@@ -103,6 +108,30 @@ Do not reopen without explicit project-owner unlock.
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
 ## 5. Latest handoff
+
+### Session 74: Tighten fixture-backed goto/switch regression tests (TODO-004)
+
+- **Type:** Test-only. No production behavior changed.
+- **Weak test 1:** `TestSession68IndirectSwitchBreakOJAlways.test_track_a_fixture_gotos_unchanged`
+  - Silently skipped missing fixtures (`if not os.path.exists: continue`)
+  - Used `pass` when gotos found in testSwitch/main
+  - Comment: "No hard assertion -- this test validates no regression"
+  - **Fix:** Removed silent skip (fixtures exist in real checkout). Replaced `pass` with `assert not gotos`.
+- **Weak test 2:** `TestSession69SwitchInternalIfStructuring.test_track_a_fixtures_zero_errors`
+  - Counted gotos at ALL levels (recursive into blocks) but used `pass` when gotos > 0
+  - Comment: "Don't fail -- Track A goto baseline is validated by the quality report pipeline"
+  - **Fix:** Changed to top-level-only count. Replaced `pass` with `assert gotos == 0`.
+- **Validation:**
+  - Full pytest: 878 passed, 4 skipped (unchanged)
+  - Track A quality report: 9 fixtures, 3014 functions, 0 errors
+  - Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge)
+- **Files changed:**
+  - `tests/test_decompile.py`: 2 test methods tightened (lines 7749-7765, 8004-8015)
+  - `TODO.md`: TODO-004 -> `confirmed_fixed_this_session`
+  - `MEMORY.md`: session update
+- **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **No Farever-specific logic.**
+- **Session 74 naming only.**
 
 ### Session 73: Preserve post-switch merge blocks (TODO-003)
 
