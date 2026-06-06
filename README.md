@@ -26,7 +26,7 @@ This README reflects the accepted state after Session 76 (output filename harden
 | OSwitch remaining (Track A) | 36 (9 nested_oswitch, 27 shared_merge per Session 71) |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
-| Current recommendation | Release-hardening / milestone checkpoint |
+| Current recommendation | Checkpoint complete - next: TODO-012 (Disassembler.build_cfg() API hardening) |
 
 Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. No active behavior-changing frontier currently unlocked.
 
@@ -152,24 +152,11 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ## Recommended next step
 
-Conditional-jump goto frontier is closed (B63 + B65: 1463 -> 3, -99.8% from Session 60 baseline). The safest next step is **Path 1: Stable checkpoint / release-hardening**.
+The release-hardening checkpoint (Session 77) is complete. The accepted baseline is stable: full pytest 902 passed, 4 skipped; Track A 9/9 fixtures, 3014 functions, 0 errors; all measured scopes at 0 top-level gotos.
 
-Why:
+Preferred next small task: **TODO-012 - direct `Disassembler.build_cfg()` API hardening** (low-risk, isolated API ergonomics fix). Alternative output-polish task: **TODO-014 - identifier sanitization** if desired. **TODO-009 remains blocked** until bytecode evidence is available.
 
-- It requires no tier unlock.
-- It preserves the accepted baseline after the ControlStructurer frontier closure (0 top-level gotos across all measured scopes).
-- It creates a durable git-taggable checkpoint against regression creep.
-- It does not block later ControlStructurer, TypeResolver, or tier expansion work.
-
-Recommended scope for the checkpoint:
-
-1. Confirm README, `MEMORY.md`, `CONTRIBUTING.md`, `AGENTS.md`, and `docs/validation_matrix.md` are consistent.
-2. Run the full documented validation block.
-3. Confirm report output remains ASCII-safe.
-4. Record exact command results.
-5. Create a release-hardening report or tag only if explicitly requested.
-
-No Tier 2-5 unlock is recommended before this checkpoint.
+No Tier 2-5 unlock is recommended.
 
 ---
 
@@ -611,7 +598,7 @@ Current Tier 1 state:
 - Track B samples 200 and 500 decompile with 0 errors.
 - Diagnostic frontiers are exhausted.
 - Session 63 and Session 65 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
-- Recommended next step is stable checkpoint / release-hardening.
+- Checkpoint complete (Session 77). Preferred next: TODO-012 (Disassembler.build_cfg() API hardening) or TODO-014 (identifier sanitization). TODO-009 blocked pending bytecode evidence.
 
 ### Tier 2: Bytecode manipulation, frozen
 
