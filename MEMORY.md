@@ -4,9 +4,9 @@ Current accepted state for mhlbc.
 Last updated: 2026-06-06
 Current session: 76
 Branch: main
-HEAD: 6d42b95
+HEAD: 14b998f
 Tests: 902 passed, 4 skipped
-Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
+Guardrails: 140/140 (B38-B55 + B63 + Sessions 67-76)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -95,7 +95,7 @@ Do not reopen without explicit project-owner unlock.
 ## 4. Current validation baseline
 
 - Tests: 902 passed, 4 skipped
-- Guardrails: 101/101 (B38-B55 + B63 + Session 67-71)
+- Guardrails: 140/140 (B38-B55 + B63 + Sessions 67-76)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
