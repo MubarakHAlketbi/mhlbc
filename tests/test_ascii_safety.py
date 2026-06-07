@@ -170,9 +170,44 @@ class TestAsciiSafetyChecker:
     def test_default_path_discovery_handles_absent_dirs(self):
         """Default path discovery does not crash when optional dirs are absent."""
         # Run the script with default paths from the real project root
-        # This tests that reports/ and decompiler_quality_report/ absence is handled
+        # After Session 79, the 5 root policy files are ASCII-safe
         rc, out, err = _run()
-        # Should exit 0 or 1 depending on actual project state, but not crash
-        assert rc in (0, 1), f"Expected 0 or 1, got {rc}, err={err!r}"
+        assert rc == 0, f"Expected 0, got {rc}, err={err!r}"
         # No crash means stderr should be empty or only expected messages
         assert "Traceback" not in err, f"Unexpected crash: {err!r}"
+
+    def test_default_mode_skips_non_policy_dirs(self):
+        """Default discovery does not include docs/ or other non-policy dirs."""
+        # Import the discovery function directly
+        import importlib
+        spec = importlib.util.spec_from_file_location(
+            "check_ascii_safety", SCRIPT
+        )
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        paths = mod.discover_default_paths()
+        # All default paths should be root-level markdown files
+        for p in paths:
+            rel = os.path.relpath(p)
+            # Should not contain subdirectory separators
+            assert "/" not in rel.lstrip("../"), (
+                f"Default path should be root-level, got: {rel}"
+            )
+        # Should include the 5 policy files (or subset if some missing)
+        basenames = {os.path.basename(p) for p in paths}
+        assert "README.md" in basenames
+        assert "MEMORY.md" in basenames
+        assert "AGENTS.md" in basenames
+
+    def test_explicit_path_still_reports_non_ascii_in_docs(self):
+        """Explicit path mode still reports non-ASCII in docs/ files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            docs_dir = os.path.join(tmpdir, "docs")
+            os.makedirs(docs_dir)
+            with open(os.path.join(docs_dir, "diagram.md"), "w") as f:
+                f.write("box\u2500drawing\n")
+
+            rc, out, err = _run(os.path.join(docs_dir, "diagram.md"))
+            assert rc == 1, f"Expected 1, got {rc}, out={out!r}"
+            assert "U+2500" in out, f"Expected U+2500 in output: {out!r}"

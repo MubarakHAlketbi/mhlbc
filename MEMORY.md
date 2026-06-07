@@ -5,7 +5,7 @@ Last updated: (Session 79 checkpoint)
 Current session: 79
 Branch: main
 HEAD: a5e05c6
-Tests: 914 passed, 4 skipped
+Tests: 916 passed, 4 skipped
 Guardrails: 144/144 (B38-B55 + B63 + Sessions 67-78)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -113,13 +113,13 @@ Do not reopen without explicit project-owner unlock.
 
 - **Type:** Tooling/docs/test-only.
 - **Script added:** `scripts/check_ascii_safety.py` -- reusable ASCII-safety checker with:
-  - Default path discovery (README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md, docs/*.md, reports/**/*.md, decompiler_quality_report/**/*.md if present).
-  - Explicit path arguments: `python3 scripts/check_ascii_safety.py FILE...`.
+  - Default path discovery: process artifacts only (README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md). Technical docs (docs/) and report archives (reports/, decompiler_quality_report/) are excluded from default scope because they may contain intentional non-ASCII diagram characters.
+  - Explicit path arguments: `python3 scripts/check_ascii_safety.py FILE...` (strict -- checks any file, including docs/).
   - Reports non-ASCII as `path:line:col: non-ASCII U+XXXX`.
   - Exit codes: 0 (all ASCII-safe), 1 (non-ASCII found), 2 (input error).
   - `--fix` mode: replaces em dash, en dash, arrows, smart quotes, ellipsis with ASCII equivalents. Unknown chars reported but not guessed.
   - Output is ASCII-only.
-- **Tests added:** 8 in `test_ascii_safety.py` (`TestAsciiSafetyChecker`):
+- **Tests added:** 10 in `test_ascii_safety.py` (`TestAsciiSafetyChecker`):
   - clean ASCII file returns 0
   - non-ASCII file returns 1 and reports path, line, column, codepoint
   - explicit path arguments work
@@ -127,23 +127,26 @@ Do not reopen without explicit project-owner unlock.
   - unknown non-ASCII remains reported after `--fix`
   - checker output is ASCII-only
   - default path discovery does not fail on absent directories
+  - default discovery returns only root-level policy files (no docs/)
+  - explicit path still reports non-ASCII in docs/ files
 - **Documentation updated:**
-  - AGENTS.md section 16: replaced inline Python check with `scripts/check_ascii_safety.py` usage. Added ASCII-safety policy boundary: process artifacts only, not a ban on UTF-8 bytecode support.
+  - AGENTS.md section 16: replaced inline Python check with `scripts/check_ascii_safety.py` usage. Added ASCII-safety policy boundary: process artifacts only, not a ban on UTF-8 bytecode support. Default scope described accurately.
   - CONTRIBUTING.md section 15: same updates.
   - README.md: replaced inline Python check with script reference.
   - All changed docs verified ASCII-safe.
 - **Draft files removed:** `check_ascii.py`, `check_ascii_summary.py`, `ascii_report.txt`.
 - **MEMORY.md normalized:** `--fix` applied to remove em dashes and right arrows. Now file-level ASCII-safe.
 - **Validation:**
-  - ASCII safety tests: 8 passed.
-  - Full pytest: 914 passed, 4 skipped (906 baseline + 8 new test_ascii_safety tests).
+  - ASCII safety tests: 10 passed.
+  - Full pytest: 916 passed, 4 skipped (906 baseline + 10 new test_ascii_safety tests).
   - `python3 scripts/check_ascii_safety.py MEMORY.md AGENTS.md CONTRIBUTING.md README.md TODO.md` -> 0, all clean.
-  - Default `scripts/check_ascii_safety.py` -> 1 (docs/ and reports/ have intentional diagram chars -- expected, not process artifacts).
+  - Default `scripts/check_ascii_safety.py` -> 0 (process artifacts only, docs/ excluded).
+  - Explicit `scripts/check_ascii_safety.py docs/decompilation_patterns.md` -> 1 (reports non-ASCII diagram chars).
   - Track A skipped: no decompiler runtime behavior changed.
   - Session 71 census unchanged (38 OSwitch, 2 structured, 9 nested_oswitch / 27 shared_merge).
 - **Files changed:**
-  - `scripts/check_ascii_safety.py` (new, +204 lines)
-  - `tests/test_ascii_safety.py` (new, +177 lines, 8 tests)
+  - `scripts/check_ascii_safety.py` (new, +204 lines, then default scope narrowed)
+  - `tests/test_ascii_safety.py` (new, +177 lines, 10 tests)
   - `AGENTS.md` (section 16 updated)
   - `CONTRIBUTING.md` (section 15 updated)
   - `README.md` (ASCII check example updated)

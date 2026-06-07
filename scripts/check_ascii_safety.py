@@ -39,7 +39,14 @@ KNOWN_SET = frozenset(KNOWN_FIXES.keys())
 def discover_default_paths():
     """Return list of paths for the default check set.
 
-    Only includes files/directories that actually exist at check time.
+    Default scope is process artifacts and active handoff files that
+    are expected to be ASCII-safe by policy:
+      - README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md
+
+    Technical docs (docs/) and report archives (reports/,
+    decompiler_quality_report/) are excluded from the default scope
+    because they may contain intentional non-ASCII diagram characters.
+    Use explicit path arguments to check those files.
     """
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     paths = []
@@ -55,29 +62,6 @@ def discover_default_paths():
     for p in candidates:
         if os.path.isfile(p):
             paths.append(p)
-
-    # docs/*.md
-    docs_dir = os.path.join(root, "docs")
-    if os.path.isdir(docs_dir):
-        for fname in sorted(os.listdir(docs_dir)):
-            if fname.endswith(".md"):
-                paths.append(os.path.join(docs_dir, fname))
-
-    # reports/**/*.md
-    reports_dir = os.path.join(root, "reports")
-    if os.path.isdir(reports_dir):
-        for dirpath, _dirnames, filenames in os.walk(reports_dir):
-            for fname in sorted(filenames):
-                if fname.endswith(".md"):
-                    paths.append(os.path.join(dirpath, fname))
-
-    # decompiler_quality_report/**/*.md
-    dqr_dir = os.path.join(root, "decompiler_quality_report")
-    if os.path.isdir(dqr_dir):
-        for dirpath, _dirnames, filenames in os.walk(dqr_dir):
-            for fname in sorted(filenames):
-                if fname.endswith(".md"):
-                    paths.append(os.path.join(dirpath, fname))
 
     return paths
 

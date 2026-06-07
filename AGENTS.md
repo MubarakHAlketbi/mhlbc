@@ -631,13 +631,15 @@ Recommended check (scoped):
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py <changed markdown/report paths>
 ```
 
-For a broader check across project docs and reports:
+For a default check of process artifacts (README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md):
 
 ```bash
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py
 ```
 
 The script prints every non-ASCII occurrence as `path:line:col: non-ASCII U+XXXX`, exits 0 when all checked files are clean, and exits 1 when non-ASCII is found. Use `--fix` to replace common safe equivalents (em/en dash, arrows, smart quotes, ellipsis). Unknown characters are never guessed.
+
+Note: The default scope excludes technical docs (docs/) and report archives (reports/, decompiler_quality_report/) because they may contain intentional non-ASCII diagram characters. Use explicit path arguments to check those files.
 
 17. MEMORY.md purpose
 

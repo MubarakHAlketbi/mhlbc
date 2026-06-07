@@ -303,11 +303,13 @@ Example ASCII check:
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py README.md MEMORY.md CONTRIBUTING.md AGENTS.md
 ```
 
-For a broader check across project docs and reports:
+For a default check of process artifacts (README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md):
 
 ```bash
 cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py
 ```
+
+Note: The default scope excludes technical docs (docs/) and report archives (reports/, decompiler_quality_report/) because they may contain intentional non-ASCII diagram characters. Use explicit path arguments to check those files.
 
 ---
 
