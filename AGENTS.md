@@ -606,9 +606,16 @@ Conclusion:
 - Next milestone should be diagnostic or behavior-changing:
 ```
 
-16. ASCII-safe output
+16. ASCII-safe output policy
 
-Generated reports, markdown reports, JSON summaries, logs intended for reports, handoff text, and changed documentation must be ASCII-safe unless a task explicitly requires otherwise.
+ASCII safety applies to project process artifacts only:
+- Generated reports.
+- Markdown handoffs and JSON summaries.
+- Logs intended for reports.
+- Changed documentation.
+- The ASCII checker tool's own output.
+
+ASCII safety does NOT forbid the parser, disassembler, or decompiler from reading or preserving valid non-ASCII bytecode string data. HaxeWriter string-literal \uXXXX escaping for non-ASCII output is a separate future output behavior task; do not implement it as part of tooling or documentation changes.
 
 Use ASCII alternatives:
 - "--" instead of em dash.
@@ -618,31 +625,19 @@ Use ASCII alternatives:
 
 If a report claims ASCII safety, it must state exactly which paths were checked.
 
-Recommended check:
+Recommended check (scoped):
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
-
-paths = [
-    Path("AGENTS.md"),
-]
-
-bad = False
-for path in paths:
-    data = path.read_text(encoding="utf-8")
-    for i, ch in enumerate(data):
-        if ord(ch) > 127:
-            line = data.count("\n", 0, i) + 1
-            col = i - data.rfind("\n", 0, i)
-            print(f"{path}:{line}:{col}: non-ASCII U+{ord(ch):04X}")
-            bad = True
-
-raise SystemExit(1 if bad else 0)
-PY
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py <changed markdown/report paths>
 ```
 
-Adjust the paths list to include every changed report, doc, JSON summary, or handoff file.
+For a broader check across project docs and reports:
+
+```bash
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py
+```
+
+The script prints every non-ASCII occurrence as `path:line:col: non-ASCII U+XXXX`, exits 0 when all checked files are clean, and exits 1 when non-ASCII is found. Use `--fix` to replace common safe equivalents (em/en dash, arrows, smart quotes, ellipsis). Unknown characters are never guessed.
 
 17. MEMORY.md purpose
 

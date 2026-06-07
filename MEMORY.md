@@ -1,11 +1,11 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: 2026-06-06 (Session 78 checkpoint)
-Current session: 78
+Last updated: (Session 79 checkpoint)
+Current session: 79
 Branch: main
-HEAD: 20242f6
-Tests: 906 passed, 4 skipped
+HEAD: a5e05c6
+Tests: 914 passed, 4 skipped
 Guardrails: 144/144 (B38-B55 + B63 + Sessions 67-78)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -109,16 +109,63 @@ Do not reopen without explicit project-owner unlock.
 
 ## 5. Latest handoff
 
+### Session 79: ASCII safety checker tooling and policy clarification
+
+- **Type:** Tooling/docs/test-only.
+- **Script added:** `scripts/check_ascii_safety.py` -- reusable ASCII-safety checker with:
+  - Default path discovery (README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md, docs/*.md, reports/**/*.md, decompiler_quality_report/**/*.md if present).
+  - Explicit path arguments: `python3 scripts/check_ascii_safety.py FILE...`.
+  - Reports non-ASCII as `path:line:col: non-ASCII U+XXXX`.
+  - Exit codes: 0 (all ASCII-safe), 1 (non-ASCII found), 2 (input error).
+  - `--fix` mode: replaces em dash, en dash, arrows, smart quotes, ellipsis with ASCII equivalents. Unknown chars reported but not guessed.
+  - Output is ASCII-only.
+- **Tests added:** 8 in `test_ascii_safety.py` (`TestAsciiSafetyChecker`):
+  - clean ASCII file returns 0
+  - non-ASCII file returns 1 and reports path, line, column, codepoint
+  - explicit path arguments work
+  - `--fix` replaces known characters
+  - unknown non-ASCII remains reported after `--fix`
+  - checker output is ASCII-only
+  - default path discovery does not fail on absent directories
+- **Documentation updated:**
+  - AGENTS.md section 16: replaced inline Python check with `scripts/check_ascii_safety.py` usage. Added ASCII-safety policy boundary: process artifacts only, not a ban on UTF-8 bytecode support.
+  - CONTRIBUTING.md section 15: same updates.
+  - README.md: replaced inline Python check with script reference.
+  - All changed docs verified ASCII-safe.
+- **Draft files removed:** `check_ascii.py`, `check_ascii_summary.py`, `ascii_report.txt`.
+- **MEMORY.md normalized:** `--fix` applied to remove em dashes and right arrows. Now file-level ASCII-safe.
+- **Validation:**
+  - ASCII safety tests: 8 passed.
+  - Full pytest: 914 passed, 4 skipped (906 baseline + 8 new test_ascii_safety tests).
+  - `python3 scripts/check_ascii_safety.py MEMORY.md AGENTS.md CONTRIBUTING.md README.md TODO.md` -> 0, all clean.
+  - Default `scripts/check_ascii_safety.py` -> 1 (docs/ and reports/ have intentional diagram chars -- expected, not process artifacts).
+  - Track A skipped: no decompiler runtime behavior changed.
+  - Session 71 census unchanged (38 OSwitch, 2 structured, 9 nested_oswitch / 27 shared_merge).
+- **Files changed:**
+  - `scripts/check_ascii_safety.py` (new, +204 lines)
+  - `tests/test_ascii_safety.py` (new, +177 lines, 8 tests)
+  - `AGENTS.md` (section 16 updated)
+  - `CONTRIBUTING.md` (section 15 updated)
+  - `README.md` (ASCII check example updated)
+  - `MEMORY.md` (session update, normalized)
+  - `TODO.md` (normalized)
+  - Removed: `check_ascii.py`, `check_ascii_summary.py`, `ascii_report.txt`
+- **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
+- **No HaxeWriter string-literal escaping implemented.**
+- **ASCII policy boundary documented:** process artifact ASCII safety != ban on UTF-8 bytecode data.
+- **Session 79 naming only.**
+- **Recommendation for next feature session:** TODO-014 identifier sanitization, or a dedicated string-literal escaping diagnostic first per Sato preference.
+
 ### Session 78: Disassembler.build_cfg() API hardening (TODO-012)
 
 - **Type:** Core correctness (narrow API fix).
 - **Problem:** `Disassembler.build_cfg(func_idx)` returned an empty CFG when called directly before `disassemble_function(func_idx)` had populated the instruction cache. The API was easy to misuse.
 - **Fix:** Added 3 lines to `hl_disasm.py` `Disassembler.build_cfg()`: if `func_idx` is not in `self._instructions`, call `self.disassemble_function(func_idx)` before attempting CFG construction.
 - **Tests added:** 4 in `TestSession78BuildCfgApi`:
-  - `test_build_cfg_before_disassemble_function` — direct call returns non-empty CFG
-  - `test_build_cfg_returns_same_as_normal_path` — direct path matches normal path
-  - `test_build_cfg_with_conditional_jump` — works with conditional jumps
-  - `test_build_cfg_invalid_index_returns_empty` — invalid index still returns empty
+  - `test_build_cfg_before_disassemble_function` -- direct call returns non-empty CFG
+  - `test_build_cfg_returns_same_as_normal_path` -- direct path matches normal path
+  - `test_build_cfg_with_conditional_jump` -- works with conditional jumps
+  - `test_build_cfg_invalid_index_returns_empty` -- invalid index still returns empty
 - **Validation:**
   - Full pytest: 906 passed, 4 skipped (+4 new tests)
   - Track A quality report: 9 fixtures, 3014 functions, 0 errors
@@ -201,8 +248,8 @@ Do not reopen without explicit project-owner unlock.
 - **Type:** Docs-only consistency checkpoint.
 - **Scope:** Verify repository state after Sessions 72-76, fix stale documentation references.
 - **Changes:**
-  - README.md: Updated pytest baseline (872→902), guardrail count (101→140), session reference (Session 71→Session 76), reproducible validation section.
-  - MEMORY.md: Updated HEAD hash (6d42b95→14b998f→0566343), guardrail count (101→140).
+  - README.md: Updated pytest baseline (872->902), guardrail count (101->140), session reference (Session 71->Session 76), reproducible validation section.
+  - MEMORY.md: Updated HEAD hash (6d42b95->14b998f->0566343), guardrail count (101->140).
 - **Validation:**
   - Full pytest: 902 passed, 4 skipped (unchanged from Session 76).
   - Track A quality report: 9 fixtures, 3014 functions, 0 errors (unchanged).

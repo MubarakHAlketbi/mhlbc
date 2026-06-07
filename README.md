@@ -300,28 +300,13 @@ Reports and handoff artifacts should remain ASCII-safe.
 Example ASCII check:
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py README.md MEMORY.md CONTRIBUTING.md AGENTS.md
+```
 
-paths = [
-    Path("README.md"),
-    Path("MEMORY.md"),
-    Path("CONTRIBUTING.md"),
-    Path("AGENTS.md"),
-]
+For a broader check across project docs and reports:
 
-bad = False
-for path in paths:
-    data = path.read_text(encoding="utf-8")
-    for i, ch in enumerate(data):
-        if ord(ch) > 127:
-            line = data.count("\n", 0, i) + 1
-            col = i - data.rfind("\n", 0, i)
-            print(f"{path}:{line}:{col}: non-ASCII U+{ord(ch):04X}")
-            bad = True
-
-raise SystemExit(1 if bad else 0)
-PY
+```bash
+cd ~/mhlbc && ~/.local/bin/uv run python3 scripts/check_ascii_safety.py
 ```
 
 ---

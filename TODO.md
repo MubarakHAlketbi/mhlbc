@@ -439,10 +439,10 @@ Fix:
 
 Added 3 lines to `hl_disasm.py` `Disassembler.build_cfg()`: if `func_idx` is not in `self._instructions`, call `self.disassemble_function(func_idx)` before attempting CFG construction. Added 4 tests in `TestSession78BuildCfgApi`:
 
-- `test_build_cfg_before_disassemble_function` — direct call returns non-empty CFG
-- `test_build_cfg_returns_same_as_normal_path` — direct path matches normal path
-- `test_build_cfg_with_conditional_jump` — works with conditional jumps
-- `test_build_cfg_invalid_index_returns_empty` — invalid index still returns empty
+- `test_build_cfg_before_disassemble_function` -- direct call returns non-empty CFG
+- `test_build_cfg_returns_same_as_normal_path` -- direct path matches normal path
+- `test_build_cfg_with_conditional_jump` -- works with conditional jumps
+- `test_build_cfg_invalid_index_returns_empty` -- invalid index still returns empty
 
 Validation:
 
