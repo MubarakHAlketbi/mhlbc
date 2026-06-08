@@ -1,11 +1,11 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 84 checkpoint)
-Current session: 84
+Last updated: (Session 85 checkpoint)
+Current session: 85
 Branch: main
-HEAD: 8fb17ec
-Tests: 966 passed, 5 skipped
+HEAD: 1419bbb
+Tests: 982 passed, 5 skipped
 Guardrails: 195/195 (B38-B55 + B63 + Sessions 67-83)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
@@ -196,6 +196,69 @@ Do not reopen without explicit project-owner unlock.
   - No Farever-specific logic.
 - **TODO status:** All 15 TODO items resolved, resolved_by_process, confirmed_fixed_this_session, or blocked with no immediate actionable item. No active actionable TODO remains.
 - **Recommendation for next session:** No active behavior-changing frontier currently recommended. Pause behavior work until Sato identifies a new target, or start a new diagnostic investigation only with a clearly scoped question. No Tier 2-5 unlock recommended.
+
+### Session 85: Full Farever readability census and next-frontier selector
+
+- **Type:** Diagnostic/report-only. No runtime behavior changed.
+- **Scope:** Created a new diagnostic script (`scripts/session85_full_farever_census.py`) that collects comprehensive readability metrics from Farever hlboot.dat across parser-level, bytecode-level, and decompiled-function-level analysis. Default bounded pass: 5000 functions (11% coverage) in ~90s. Full pass (all 45463 functions) is feasible with --max-functions 0.
+- **New classifier functions added:**
+  - `scan_functions_for_opcode()` -- fast bytecode-level scan for specific opcodes without full decompile
+  - `detect_raw_register_names()` -- count rN/uN/tN/vN patterns in source output
+  - `detect_virtual_conservatism()` -- count K_VIRTUAL type usage
+  - `detect_anonymous_struct_output()` -- detect Dynamic object literal patterns
+  - `compute_largest_functions()` -- largest by nops/nregs/IR body
+  - `classify_oswitch_functions()` -- OSwitch shape classification (nested/simple/with-trap)
+  - `_identify_top_blockers()` -- rank top 5 readability blockers
+- **Reuses** existing metric infrastructure from `decompiler_quality_report.py` (analyze_frontier_census, analyze_structured_flow, analyze_dynamic_attributions, analyze_register_leakage, etc.)
+- **Output artifacts:**
+  - `decompiler_quality_report/session85_full_farever_readability_census.md` (ASCII-safe, 4.6KB)
+  - `decompiler_quality_report/session85_full_farever_readability_census.json` (ASCII-safe, 362KB)
+  - Note: `decompiler_quality_report/` is gitignored; artifacts are generated on demand.
+- **Top Farever readability blockers (from bounded pass):**
+
+  | Blocker | Count | Impact |
+  |---------|-------|--------|
+  | 1. Unstructured OSwitch functions | **2,426** | 2426 functions (of 45463) contain OSwitch opcodes that cannot be structured; 62% are nested OSwitch |
+  | 2. Field-name fallbacks (fN names) | **2,091** | Field indices emitted as f0/f1/f2 without meaningful names |
+  | 3. Raw register names (rN/uN/tN/vN) | **230,339** | 178,904 vN + 46,430 tN + 5,005 uN in output text |
+  | 4. Dynamic type attributions | **5,666** (1,202 actionable) | Variables typed as Dynamic lose type information |
+  | 5. Source-visible raw goto comments | **0** (source) / **2,084** (IR) | 0 source-visible; 20 IR goto_top_level, 1265 IR label_total |
+
+- **OSwitch shape breakdown (first 200 classified):** nested_oswitch=62 (62%), simple_oswitch=37 (37%), oswitch_with_trap=1 (1%)
+- **Trap functions:** 348 functions contain OTrap opcode
+- **Largest function:** `init` (findex=45462, 109,814 nops, 4,728 nregs)
+- **Virtual type conservatism:** 2,063 virtual types in pool, 1,143 functions with virtual vars, 2,172 virtual var attributions
+- **Orphan functions:** 0 (all functions assigned to classes/enums)
+- **Tests added:** 16 in `TestSession85ReadabilityCensusClassifiers` (raw register names, anonymous struct detection, virtual conservatism, largest functions, blocker identification)
+- **Validation:**
+  - Focused tests: 16 passed
+  - Full pytest: 982 passed, 5 skipped (+16 new tests, baseline 966/5)
+  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged)
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged)
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged)
+  - Session 71 census: 38 OSwitch/2 structured/36 remaining/9 nested/27 shared_merge (unchanged)
+  - ASCII safety: default clean (0); explicit path on new script/report artifacts clean; test file pre-existing non-ASCII unchanged
+  - No Track A/Track B metric definitions changed
+  - Census classifier definitions are new and not compared to any previous baseline
+- **Files changed:**
+  - `scripts/session85_full_farever_census.py` (new, ~1030 lines)
+  - `tests/test_decompile.py` (+262 lines, TestSession85ReadabilityCensusClassifiers with 16 tests)
+  - `MEMORY.md`: session update
+- **Scope compliance:**
+  - No parser behavior changed
+  - No disassembler behavior changed
+  - No decompiler IR semantics changed
+  - No HaxeWriter output formatting changed
+  - No ControlStructurer behavior changed
+  - No TypeResolver behavior changed
+  - No identifier sanitization changed
+  - No string-literal escaping changed
+  - No CLI or GUI behavior changed
+  - No Tier 2-5 work
+  - No Farever-specific logic in core code (Farever evidence guides census priorities only)
+  - No existing metric definitions changed (census classifiers are new and standalone)
+  - No solved frontiers reopened
+- **Recommendation for next session (Session 86):** The census reveals 2,426 OSwitch functions as the #1 readability blocker. A **behavior-changing milestone targeting switch structuring** for the nested OSwitch pattern (62% of classified OSwitch) would be the highest-impact next step. Exclusions: no Tier 2-5, no TypeResolver changes, no field-name recovery, no broad ControlStructurer cleanup. A diagnostic-only OSwitch deep dive (like Session 71 but for Farever) could precede behavior work if preferred.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.

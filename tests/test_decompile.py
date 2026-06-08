@@ -9327,3 +9327,265 @@ class TestSession83DecompileCancellation:
         verified by the headless tests above.
         """
         pytest.skip("PyQt6 not available -- worker-level QThread tests skipped")
+
+
+class TestSession85ReadabilityCensusClassifiers:
+    """Session 85: Focused tests for new readability census classifier functions.
+
+    Tests verify that the new diagnostic-only classifier functions in
+    scripts/session85_full_farever_census.py work correctly on synthetic
+    data. No decompiler behavior changes -- diagnostic-only census.
+    """
+
+    # ── detect_raw_register_names ──────────────────────────────────────
+
+    def test_raw_register_names_empty_sources(self):
+        from scripts.session85_full_farever_census import detect_raw_register_names
+        result = detect_raw_register_names({})
+        assert result["total_raw_register_names"] == 0
+        assert result["per_pattern"] == {}
+
+    def test_raw_register_names_no_matches(self):
+        from scripts.session85_full_farever_census import detect_raw_register_names
+        sources = {"test.hx": "var x = 1;\nvar y = 2;\n"}
+        result = detect_raw_register_names(sources)
+        assert result["total_raw_register_names"] == 0
+
+    def test_raw_register_names_r10_plus(self):
+        from scripts.session85_full_farever_census import detect_raw_register_names
+        sources = {"test.hx": "var r10 = x;\nvar r100 = y;\n"}
+        result = detect_raw_register_names(sources)
+        assert result["total_raw_register_names"] == 2
+        assert result["per_pattern"].get("rN", 0) == 2
+
+    def test_raw_register_names_all_patterns(self):
+        from scripts.session85_full_farever_census import detect_raw_register_names
+        sources = {"test.hx": "r1 = u2 + t3 + v4;\n"}
+        result = detect_raw_register_names(sources)
+        assert result["total_raw_register_names"] == 4
+        assert result["per_pattern"]["rN"] == 1
+        assert result["per_pattern"]["uN"] == 1
+        assert result["per_pattern"]["tN"] == 1
+        assert result["per_pattern"]["vN"] == 1
+
+    def test_raw_register_names_multiple_files(self):
+        from scripts.session85_full_farever_census import detect_raw_register_names
+        sources = {
+            "a.hx": "var r10 = 1;\n",
+            "b.hx": "var r20 = 2;\nvar u30 = 3;\n",
+        }
+        result = detect_raw_register_names(sources)
+        assert result["total_raw_register_names"] == 3
+        assert len(result["top_files"]) == 2
+
+    # ── detect_anonymous_struct_output ─────────────────────────────────
+
+    def test_anonymous_struct_empty_sources(self):
+        from scripts.session85_full_farever_census import detect_anonymous_struct_output
+        result = detect_anonymous_struct_output({})
+        assert result["dynamic_object_declarations"] == 0
+        assert result["anonymous_new_comments"] == 0
+        assert result["struct_literal_patterns"] == 0
+
+    def test_anonymous_struct_dynamic_obj(self):
+        from scripts.session85_full_farever_census import detect_anonymous_struct_output
+        sources = {"test.hx": "var x: Dynamic = {\n  // field\n};\n"}
+        result = detect_anonymous_struct_output(sources)
+        assert result["dynamic_object_declarations"] == 1
+
+    def test_anonymous_struct_anon_new(self):
+        from scripts.session85_full_farever_census import detect_anonymous_struct_output
+        sources = {"test.hx": "// new Foo -- anonymous\n"}
+        result = detect_anonymous_struct_output(sources)
+        assert result["anonymous_new_comments"] == 1
+
+    def test_anonymous_struct_no_matches(self):
+        from scripts.session85_full_farever_census import detect_anonymous_struct_output
+        sources = {"test.hx": "var x = 42;\nreturn x;\n"}
+        result = detect_anonymous_struct_output(sources)
+        assert result["dynamic_object_declarations"] == 0
+        assert result["anonymous_new_comments"] == 0
+        assert result["struct_literal_patterns"] == 0
+
+    # ── detect_virtual_conservatism ────────────────────────────────────
+
+    def test_virtual_conservatism_empty_result(self):
+        from scripts.session85_full_farever_census import detect_virtual_conservatism
+        from hl_parser import HLParser
+        from hl_decompile import DecompileResult
+        # Create minimal parser with no types
+        parser = HLParser.__new__(HLParser)
+        parser.types = []
+        parser.strings = []
+        result = DecompileResult(functions={}, classes={}, enums={},
+                                 orphan_functions=[], errors=[])
+        r = detect_virtual_conservatism(result, parser)
+        assert r["total_virtual_types_in_pool"] == 0
+        assert r["functions_with_virtual_vars"] == 0
+
+    def test_virtual_conservatism_with_virtual_type(self):
+        from scripts.session85_full_farever_census import detect_virtual_conservatism
+        from hl_parser import HLParser, TypeDef
+        from hl_decompile import DecompileResult, IRFunction, FunctionSig
+        from hl_decompile import K_VIRTUAL, K_VOID
+        # Create parser with one K_VIRTUAL type
+        parser = HLParser.__new__(HLParser)
+        parser.types = [TypeDef(kind=K_VIRTUAL, name=0)]
+        parser.strings = ["_virtual_0"]
+        # Create IR function referencing that virtual type
+        ir_fn = IRFunction(
+            name="test", findex=0, func_idx=0,
+            sig=FunctionSig("test", [], K_VOID, is_method=False, parent_class=None),
+            body=[], variables={"x": 0}, raw_regnames={}, errors=[],
+        )
+        result = DecompileResult(functions={0: ir_fn}, classes={}, enums={},
+                                 orphan_functions=[], errors=[])
+        r = detect_virtual_conservatism(result, parser)
+        assert r["total_virtual_types_in_pool"] == 1
+        assert r["functions_with_virtual_vars"] == 1
+        assert r["virtual_var_attributions"] == 1
+
+    def test_virtual_conservatism_no_virtual_vars(self):
+        from scripts.session85_full_farever_census import detect_virtual_conservatism
+        from hl_parser import HLParser, TypeDef
+        from hl_decompile import DecompileResult, IRFunction, FunctionSig
+        from hl_decompile import K_VIRTUAL, K_VOID, K_DYN
+        parser = HLParser.__new__(HLParser)
+        parser.types = [
+            TypeDef(kind=K_VIRTUAL, name=0),
+            TypeDef(kind=K_DYN),
+        ]
+        parser.strings = ["_virtual_0", "_dyn_1"]
+        ir_fn = IRFunction(
+            name="test", findex=0, func_idx=0,
+            sig=FunctionSig("test", [], K_VOID, is_method=False, parent_class=None),
+            body=[], variables={"x": 1}, raw_regnames={}, errors=[],
+        )
+        result = DecompileResult(functions={0: ir_fn}, classes={}, enums={},
+                                 orphan_functions=[], errors=[])
+        r = detect_virtual_conservatism(result, parser)
+        assert r["total_virtual_types_in_pool"] == 1
+        assert r["functions_with_virtual_vars"] == 0
+        assert r["virtual_var_attributions"] == 0
+
+    # ── compute_largest_functions ──────────────────────────────────────
+
+    def test_largest_functions_empty(self):
+        from scripts.session85_full_farever_census import compute_largest_functions
+        from hl_parser import HLParser
+        from hl_decompile import DecompileResult
+        parser = HLParser.__new__(HLParser)
+        parser.functions = []
+        result = DecompileResult(functions={}, classes={}, enums={},
+                                 orphan_functions=[], errors=[])
+        r = compute_largest_functions(parser, result, max_count=5)
+        assert r["largest_by_nops"] == []
+        assert r["largest_by_nregs"] == []
+        assert r["largest_by_ir_body"] == []
+
+    def test_largest_functions_with_data(self):
+        from scripts.session85_full_farever_census import compute_largest_functions
+        from hl_parser import HLParser, FunctionDef
+        from hl_decompile import DecompileResult, IRFunction, FunctionSig
+        from hl_decompile import K_VOID
+        # Create parser with functions
+        parser = HLParser.__new__(HLParser)
+        parser.functions = [
+            FunctionDef(type=0, findex=0, nregs=3, nops=10, reg_types=[],
+                        name="small", malformed=False),
+            FunctionDef(type=0, findex=1, nregs=20, nops=100, reg_types=[],
+                        name="large", malformed=False),
+            FunctionDef(type=0, findex=2, nregs=10, nops=50, reg_types=[],
+                        name="medium", malformed=False),
+        ]
+        # Create IR functions
+        ir_fns = {}
+        for i, fn in enumerate(parser.functions):
+            ir_fns[i] = IRFunction(
+                name=fn.name, findex=i, func_idx=i,
+                sig=FunctionSig(fn.name, [], K_VOID, is_method=False, parent_class=None),
+                body=[], variables={}, raw_regnames={}, errors=[],
+            )
+        result = DecompileResult(functions=ir_fns, classes={}, enums={},
+                                 orphan_functions=[], errors=[])
+        r = compute_largest_functions(parser, result, max_count=5)
+        assert len(r["largest_by_nops"]) == 3
+        assert r["largest_by_nops"][0]["name"] == "large"
+        assert r["largest_by_nops"][0]["nops"] == 100
+        assert r["largest_by_nops"][1]["name"] == "medium"
+        assert r["largest_by_nops"][2]["name"] == "small"
+
+    # ── _identify_top_blockers ─────────────────────────────────────────
+
+    def test_identify_top_blockers_empty(self):
+        from scripts.session85_full_farever_census import _identify_top_blockers
+        census = {
+            "readability_metrics": {
+                "source_visible_raw_goto_comments": 0,
+                "ir_goto_total": 0,
+                "ir_goto_top_level": 0,
+                "ir_goto_inside_if": 0,
+                "ir_goto_inside_while": 0,
+                "ir_goto_inside_switch": 0,
+                "ir_label_total": 0,
+                "ir_label_top_level": 0,
+                "structured_if_count": 0,
+                "structured_while_count": 0,
+                "structured_switch_count": 0,
+                "functions_with_oswitch": 0,
+                "oswitch_classification": {"classification": {}},
+                "functions_with_trap": 0,
+                "field_name_fallbacks": 0,
+                "total_dynamic_attributions": 0,
+                "actionable_dynamic_attributions": 0,
+                "virtual_type_conservatism": {},
+                "anonymous_struct_output": {},
+                "raw_register_names": {"total_raw_register_names": 0, "per_pattern": {}},
+                "orphan_functions": {"count": 0, "details": []},
+                "largest_functions": {},
+            }
+        }
+        blockers = _identify_top_blockers(census)
+        assert len(blockers) == 0
+
+    def test_identify_top_blockers_with_data(self):
+        from scripts.session85_full_farever_census import _identify_top_blockers
+        census = {
+            "readability_metrics": {
+                "source_visible_raw_goto_comments": 100,
+                "ir_goto_total": 500,
+                "ir_goto_top_level": 50,
+                "ir_goto_inside_if": 200,
+                "ir_goto_inside_while": 150,
+                "ir_goto_inside_switch": 100,
+                "ir_label_total": 50,
+                "ir_label_top_level": 10,
+                "structured_if_count": 300,
+                "structured_while_count": 100,
+                "structured_switch_count": 5,
+                "functions_with_oswitch": 50,
+                "oswitch_classification": {
+                    "classification": {
+                        "nested_oswitch": 10,
+                        "simple_oswitch": 30,
+                        "oswitch_with_trap": 10,
+                    }
+                },
+                "functions_with_trap": 20,
+                "field_name_fallbacks": 500,
+                "total_dynamic_attributions": 1000,
+                "actionable_dynamic_attributions": 200,
+                "virtual_type_conservatism": {},
+                "anonymous_struct_output": {},
+                "raw_register_names": {
+                    "total_raw_register_names": 300,
+                    "per_pattern": {"rN": 200, "uN": 50, "tN": 30, "vN": 20},
+                },
+                "orphan_functions": {"count": 10, "details": []},
+                "largest_functions": {},
+            }
+        }
+        blockers = _identify_top_blockers(census)
+        assert len(blockers) >= 3  # goto, oswitch, field fallbacks
+        assert blockers[0]["title"] == "Source-visible raw goto comments"
+        assert blockers[0]["count"] == 100
