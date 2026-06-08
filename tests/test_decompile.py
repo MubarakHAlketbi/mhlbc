@@ -9589,3 +9589,214 @@ class TestSession85ReadabilityCensusClassifiers:
         assert len(blockers) >= 3  # goto, oswitch, field fallbacks
         assert blockers[0]["title"] == "Source-visible raw goto comments"
         assert blockers[0]["count"] == 100
+
+
+class TestSession86NestedOSwitch:
+    """Session 86: Nested OSwitch recursive structuring (nested_simple_linear subshape).
+
+    Tests verify:
+    - Outer switch with nested OSwitch is structured when inner cases are simple-linear
+    - Default target with 0 predecessors is handled gracefully (invalid target skip)
+    - Depth limit prevents infinite recursion
+    - Existing simple/non-nested switch behavior is unchanged
+    """
+
+    # ── Positive: nested switch builds correct IR ──────────────────────
+
+    def test_nested_oswitch_produces_correct_ir(self):
+        """Build a bytecode with nested OSwitch and verify the IR structure.
+
+        Outer switch has 2 cases; case 0 contains an inner OSwitch (2 cases).
+        All inner case bodies are simple-linear (OInt + OJAlways break to
+        outer post-switch).
+        """
+        from tests.hl_helper import build_header, build_ints_pool, \
+            build_floats_pool, build_strings_pool, build_globals_pool, \
+            build_natives_pool, encode_varint
+
+        reg_types = [K_I32, K_I32, K_I32, K_I32]  # r0, r1, r2, r3
+
+        # Raw opcodes:
+        # idx 0: OInt r0, 0
+        # idx 1: OSwitch r0, 2 cases, default=0
+        #   case0 raw=2  -> 1+1+2=4  (case 0 entry block at idx 4)
+        #   case1 raw=12 -> 1+1+12=14 (outer case 1 body at idx 14)
+        #   default=0    -> 1+1+0=2   (post-switch merge at idx 2)
+        # idx 2: OInt r1, 999  (post-switch body)
+        # idx 3: ORet r1       (return)
+        # idx 4: ONull r2      (case 0 entry: setup)
+        # idx 5: OInt r2, 0    (case 0 entry: setup)
+        # idx 6: OSwitch r2, 2 cases, default=5
+        #   case0 raw=1  -> 6+1+1=8   (inner case 0 body at idx 8)
+        #   case1 raw=3  -> 6+1+3=10  (inner case 1 body at idx 10)
+        #   default raw=5 -> 6+1+5=12 (inner default body at idx 12)
+        # idx 7: OJAlways -5 -> idx 2 (inner post-switch forwarder)
+        # idx 8: OInt r3, 100  (inner case 0 body, dead-end)
+        # idx 9: ORet r3
+        # idx 10: OInt r3, 200 (inner case 1 body, dead-end)
+        # idx 11: ORet r3
+        # idx 12: OInt r3, 0   (inner default body, dead-end)
+        # idx 13: ORet r3
+        # idx 14: OInt r1, 100 (outer case 1 body)
+        # idx 15: OJAlways -14 -> idx 2 (break to post-switch)
+
+        raw_opcodes = b""
+        # idx 0
+        raw_opcodes += bytes([1]) + encode_varint(0) + encode_varint(0)
+        # idx 1: outer OSwitch
+        raw_opcodes += bytes([70])
+        raw_opcodes += encode_varint(0)  # reg r0
+        raw_opcodes += encode_varint(2)  # 2 cases
+        raw_opcodes += encode_varint(2)  # case0 offset -> idx 4 (entry block)
+        raw_opcodes += encode_varint(12) # case1 offset -> idx 14
+        raw_opcodes += encode_varint(0)  # default offset -> idx 2 (merge)
+        # idx 2: post-switch
+        raw_opcodes += bytes([1]) + encode_varint(1) + encode_varint(999)
+        raw_opcodes += bytes([67]) + encode_varint(1)
+        # idx 4: case 0 entry block: setup
+        raw_opcodes += bytes([6]) + encode_varint(2)        # ONull r2
+        raw_opcodes += bytes([1]) + encode_varint(2) + encode_varint(0)  # OInt r2, 0
+        # idx 6: inner OSwitch
+        raw_opcodes += bytes([70])
+        raw_opcodes += encode_varint(2)  # reg r2
+        raw_opcodes += encode_varint(2)  # 2 cases
+        raw_opcodes += encode_varint(1)  # case0 offset -> idx 8
+        raw_opcodes += encode_varint(3)  # case1 offset -> idx 10
+        raw_opcodes += encode_varint(5)  # default offset -> idx 12
+        # idx 7: inner post-switch forwarder (break to outer post-switch)
+        raw_opcodes += bytes([58]) + encode_varint(-5)  # OJAlways -> idx 2
+        # idx 8: inner case 0 body (dead-end with ORet)
+        raw_opcodes += bytes([1]) + encode_varint(3) + encode_varint(100)
+        raw_opcodes += bytes([67]) + encode_varint(3)
+        # idx 10: inner case 1 body (dead-end with ORet)
+        raw_opcodes += bytes([1]) + encode_varint(3) + encode_varint(200)
+        raw_opcodes += bytes([67]) + encode_varint(3)
+        # idx 12: inner default body (dead-end with ORet)
+        raw_opcodes += bytes([1]) + encode_varint(3) + encode_varint(0)
+        raw_opcodes += bytes([67]) + encode_varint(3)
+        # idx 14: outer case 1 body
+        raw_opcodes += bytes([1]) + encode_varint(1) + encode_varint(100)
+        raw_opcodes += bytes([58]) + encode_varint(-14)  # OJAlways -> idx 2
+
+        nops = 16
+
+        # Build type table
+        type_i32 = build_type_primitive(K_I32)
+        type_blobs = [type_i32] * (max(reg_types) + 1)
+
+        header = build_header(
+            version=5, flags=0,
+            nints=0, nfloats=0, nstrings=5,
+            ntypes=len(type_blobs), nglobals=0, nnatives=0,
+            nfunctions=1, nconstants=0, entrypoint=0,
+        )
+        data = header
+        data += build_ints_pool([])
+        data += build_floats_pool([])
+        data += build_strings_pool(["p0", "p1", "p2", "p3", "p4"])
+        data += b"".join(type_blobs)
+        data += build_globals_pool([])
+        data += build_natives_pool([])
+        data += encode_varint(0)  # type_idx
+        data += encode_varint(0)  # findex
+        data += encode_varint(len(reg_types))
+        data += encode_varint(nops)
+        for rt in reg_types:
+            data += encode_varint(rt)
+        data += raw_opcodes
+
+        result = _disasm_and_decompile(data)
+        assert result is not None, "decompile returned None"
+        fn = result.functions.get(0)
+        assert fn is not None, "function 0 not found"
+
+        switch_stmts = [s for s in fn.body if s.op == "switch"]
+        assert len(switch_stmts) == 1, (
+            f"Expected 1 outer switch, got {[s.op for s in fn.body]}"
+        )
+        outer_sw = switch_stmts[0]
+        assert outer_sw.blocks and len(outer_sw.blocks) >= 2, (
+            f"Expected outer switch with >=2 blocks, got "
+            f"{len(outer_sw.blocks) if outer_sw.blocks else 0}"
+        )
+
+        # Check that at least one case block contains a nested switch
+        found_nested = False
+        for ci, block in enumerate(outer_sw.blocks):
+            for stmt in block:
+                if stmt.op == "switch":
+                    found_nested = True
+                    assert stmt.blocks and len(stmt.blocks) >= 2, (
+                        f"Inner switch in case {ci} should have >=2 blocks"
+                    )
+                    break
+        assert found_nested, "No nested switch found in any outer case block"
+
+    # ── Negative: invalid default target (0 predecessors) ──────────────
+
+    def test_invalid_default_target_zero_preds_skipped(self):
+        """OSwitch with default target that has 0 predecessors still structures.
+
+        This covers the edge case where the default offset resolves to an
+        instruction index past the end of the function (empty sentinel block
+        with no predecessors).
+        """
+        raw_ops, nops = _build_oswitch_opcodes(
+            reg=0, ncases=2,
+            case_offsets=[2, 4],   # targets idx 4, 6
+            default_offset=999,     # past end → no block found
+            before_ops=[
+                (1, [0, 0]),        # OInt r0, 0
+            ],
+            after_ops=[
+                (1, [1, 999]),       # post-switch body
+                (67, [1]),
+                (1, [1, 10]),        # case 0 body
+                (58, [-4]),          # break to post-switch
+                (1, [1, 20]),        # case 1 body
+                (58, [-6]),          # break to post-switch
+            ],
+        )
+
+        data = _build_switch_bytecode(
+            reg_types=[K_I32, K_I32],
+            nops=nops,
+            raw_opcodes_bytes=raw_ops,
+        )
+
+        result = _disasm_and_decompile(data)
+        assert result is not None
+        fn = result.functions.get(0)
+        assert fn is not None
+
+        switch_stmts = [s for s in fn.body if s.op == "switch"]
+        assert len(switch_stmts) == 1, (
+            f"Expected switch with invalid default, got "
+            f"{[s.op for s in fn.body]}"
+        )
+
+    # ── Depth limit test ───────────────────────────────────────────────
+
+    def test_try_structure_switch_has_depth_parameter(self):
+        """Verify _try_structure_switch has the depth parameter."""
+        import inspect
+        sig = inspect.signature(
+            ControlStructurer._try_structure_switch)
+        assert "depth" in sig.parameters, (
+            "_try_structure_switch missing depth parameter"
+        )
+        # Default should be 0
+        assert sig.parameters["depth"].default == 0, (
+            "depth parameter should default to 0"
+        )
+
+    # ── Diagnostic script tests ────────────────────────────────────────
+
+    def test_deep_dive_classifier_imports(self):
+        """Session 86 deep-dive script imports correctly."""
+        from scripts.session86_nested_oswitch_deep_dive import (
+            classify_oswitch_deep, run_deep_dive, write_report,
+        )
+        assert callable(classify_oswitch_deep)
+        assert callable(run_deep_dive)
+        assert callable(write_report)

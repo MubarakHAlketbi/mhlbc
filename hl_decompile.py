@@ -3372,12 +3372,18 @@ class ControlStructurer:
                                visited: Set[int],
                                result: List[IRStmt],
                                loop_info: Dict[int, Dict],
-                               stop_at_merge: Optional[int] = None) -> bool:
+                               stop_at_merge: Optional[int] = None,
+                               depth: int = 0) -> bool:
         """Attempt to structure a simple OSwitch region.
 
         Session 69 extends the original simple-linear-case-body criteria to
         also accept case bodies with internal structured if/else (the pattern
         proven in Sessions 68 and 69 — e.g. writeParam fidx=38661).
+
+        Session 86 extends to accept nested OSwitch (switch-of-switch) when
+        the inner switch's case bodies are simple-linear chains and there is
+        no OTrap interference.  Recursion depth is limited to 1 (outer +
+        inner) to prevent infinite recursion.
 
         Returns True if the switch was successfully structured.
         Falls back (returns False) for complex / ambiguous cases.
@@ -3389,13 +3395,16 @@ class ControlStructurer:
           (a) a strictly linear chain (no internal if/else/loop) ending with
               OJAlways break to the post-switch block or ORet dead-end; OR
           (b) a region with internal structured if/else where all paths
-              reconverge before the break and the region is exclusive
+              reconverge before the break and the region is exclusive; OR
+          (c) a nested OSwitch (switch-of-switch) where the inner switch
+              also meets criteria (a) or (b) and depth < 1
         - Default block, when present, is included only if it is NOT the
           merge point of all cases (i.e. its sole predecessor is the OSwitch
           block itself).
         - Post-switch block exists (fall-through or default-target merge).
         - No case entry is a loop header.
-        - No nested OSwitch in any case region.
+        - Nested OSwitch is allowed only when depth == 0 and the inner
+          switch's post-switch block is the outer post-switch block.
         """
         last = blk.instructions[-1]
         if last.opcode != 70:
@@ -3435,11 +3444,16 @@ class ControlStructurer:
                     # Default block is a merge point → use as post-switch.
                     # Skip adding it to case_order.
                     post_switch_bid = default_bid
-                else:
+                elif db is not None and len(db.predecessors) == 1:
                     # Default block has sole predecessor (the OSwitch) →
                     # it's a real case body. Add to case_order.
                     if default_bid not in case_order:
                         case_order.append(default_bid)
+                else:
+                    # Default block has 0 predecessors (empty sentinel block
+                    # or out-of-bounds target).  Not a real case body.
+                    # Keep the fall-through as post-switch block.
+                    pass
 
         # ── Compute default_case_idx for writer ──
         # Tells the writer which case body (if any) corresponds to the HL default target.
@@ -3497,29 +3511,53 @@ class ControlStructurer:
                     return False
                 seen_blocks[bid] = ci
 
-        # ── Verify no nested OSwitch in any case region ──
-        for ci, region in enumerate(case_regions):
-            for bid in region:
-                b = block_map.get(bid)
-                if b and b.instructions and b.instructions[-1].opcode == 70:
-                    # Nested OSwitch → too complex for this structuring pass
-                    return False
+        # ── Verify no deeper nesting (depth limit) ──
+        # Depth 0 = outer switch, depth 1 = inner switch (allowed).
+        # Depth >= 1 means we are already inside a nested switch;
+        # any further OSwitch in case regions is too deep.
+        if depth >= 1:
+            for ci, region in enumerate(case_regions):
+                for bid in region:
+                    b = block_map.get(bid)
+                    if b and b.instructions and b.instructions[-1].opcode == 70:
+                        # Deeper nesting → too complex
+                        return False
+
+        # ── Detect nested OSwitch in case regions ──
+        # When depth == 0, we allow one level of nesting.  Identify which
+        # case regions contain a nested OSwitch so we can use the recursive
+        # walker instead of the simple/internal-flow walkers.
+        nested_case_indices: Set[int] = set()
+        if depth == 0:
+            for ci, region in enumerate(case_regions):
+                for bid in region:
+                    b = block_map.get(bid)
+                    if b and b.instructions and b.instructions[-1].opcode == 70:
+                        nested_case_indices.add(ci)
+                        break
 
         # ── Collect case body IR statements ──
         # Try the simple linear walker first; fall back to the internal-flow
         # walker for regions that have structured control flow (if/else).
+        # For cases with nested OSwitch, use the recursive nested-switch walker.
         case_bodies: List[List[IRStmt]] = []
         blocks_to_mark: Set[int] = set()
         all_ok = True
         for ci, bid in enumerate(case_order):
-            # First try simple walker
-            ok, stmts, local_blocks = self._walk_simple_case_body(
-                bid, post_switch_bid, block_map, func_stmts)
-            if not ok:
-                # Try the more permissive internal-flow walker
-                ok, stmts, local_blocks = self._walk_case_region_with_internal_flow(
-                    bid, post_switch_bid, block_map, func_stmts, loop_info,
-                    case_regions[ci])
+            if ci in nested_case_indices:
+                # Nested OSwitch case → use recursive walker
+                ok, stmts, local_blocks = self._walk_case_region_with_nested_switch(
+                    bid, post_switch_bid, block_map, func_stmts, visited,
+                    loop_info, stop_at_merge, case_regions[ci])
+            else:
+                # First try simple walker
+                ok, stmts, local_blocks = self._walk_simple_case_body(
+                    bid, post_switch_bid, block_map, func_stmts)
+                if not ok:
+                    # Try the more permissive internal-flow walker
+                    ok, stmts, local_blocks = self._walk_case_region_with_internal_flow(
+                        bid, post_switch_bid, block_map, func_stmts, loop_info,
+                        case_regions[ci])
             if not ok:
                 all_ok = False
                 break
@@ -3632,6 +3670,79 @@ class ControlStructurer:
                 return False, [], set()
 
         return True, body_stmts, local_visited
+
+
+    def _walk_case_region_with_nested_switch(
+        self, start_bid: int, post_switch_bid: int,
+        block_map: Dict[int, BasicBlock],
+        func_stmts: Dict[int, List[IRStmt]],
+        outer_visited: Set[int],
+        loop_info: Dict[int, Dict],
+        stop_at_merge: Optional[int],
+        exclusive_region: Set[int],
+    ) -> Tuple[bool, List[IRStmt], Set[int]]:
+        """Walk a case region that contains a nested OSwitch.
+
+        The case entry block ends with OSwitch (the inner switch).  We walk
+        any non-OSwitch instructions in the entry block, then recursively
+        call ``_try_structure_switch`` for the inner OSwitch with depth=1.
+
+        Returns ``(ok, stmts, block_ids)``.
+        """
+        if start_bid not in exclusive_region:
+            return False, [], set()
+
+        cb = block_map.get(start_bid)
+        if cb is None:
+            return False, [], set()
+
+        # The case entry block must end with OSwitch for direct recursive
+        # structuring.  If it ends with a conditional jump (if/else) that
+        # leads to a nested OSwitch, delegate to the internal-flow walker.
+        last_instr = cb.instructions[-1] if cb.instructions else None
+        if last_instr is None:
+            return False, [], set()
+
+        if last_instr.opcode != 70:
+            # Case entry block doesn't end with OSwitch → it may have
+            # conditional jumps that lead to a nested OSwitch.  Delegate
+            # to the internal-flow walker which handles if/else and will
+            # encounter the nested OSwitch via _walk_block.
+            return self._walk_case_region_with_internal_flow(
+                start_bid, post_switch_bid, block_map, func_stmts,
+                loop_info, exclusive_region)
+
+        # Walk non-OSwitch instructions in the entry block
+        stmts: List[IRStmt] = []
+        for instr in cb.instructions[:-1]:
+            s_list = func_stmts.get(instr.index, [])
+            stmts.extend(s_list)
+
+        # Recursively structure the inner OSwitch with depth=1
+        # Use a local result list so the inner switch's IR is captured
+        # separately, then appended to this case body.
+        inner_result: List[IRStmt] = []
+        inner_visited: Set[int] = set()
+
+        ok = self._try_structure_switch(
+            cb, block_map, func_stmts, inner_visited, inner_result,
+            loop_info, stop_at_merge=post_switch_bid, depth=1)
+        if not ok:
+            return False, [], set()
+
+        stmts.extend(inner_result)
+
+        # Collect all blocks walked by the inner switch
+        local_blocks: Set[int] = set()
+        local_blocks.add(start_bid)
+        local_blocks.update(inner_visited)
+
+        # Verify every walked block is within the exclusive region
+        for bid in local_blocks:
+            if bid not in exclusive_region:
+                return False, [], set()
+
+        return True, stmts, local_blocks
 
 
     def _walk_simple_case_body(self, start_bid: int,
