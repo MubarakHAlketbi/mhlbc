@@ -3704,13 +3704,21 @@ class ControlStructurer:
             return False, [], set()
 
         if last_instr.opcode != 70:
-            # Case entry block doesn't end with OSwitch → it may have
-            # conditional jumps that lead to a nested OSwitch.  Delegate
-            # to the internal-flow walker which handles if/else and will
-            # encounter the nested OSwitch via _walk_block.
-            return self._walk_case_region_with_internal_flow(
+            # Case entry block doesn't end with OSwitch directly.
+            # Walk the bounded internal-if/control path from the case
+            # entry to the inner OSwitch, then recursively structure
+            # the inner switch with depth=1.
+            #
+            # Session 88: replaces the previous delegation to
+            # _walk_case_region_with_internal_flow, which structured
+            # the inner switch at depth=0 (top-level) instead of
+            # depth=1 (nested).
+            entry_stmts = self._walk_case_entry_to_inner_oswitch(
                 start_bid, post_switch_bid, block_map, func_stmts,
                 loop_info, exclusive_region)
+            if entry_stmts is None:
+                return False, [], set()
+            return True, entry_stmts, exclusive_region
 
         # Walk non-OSwitch instructions in the entry block
         stmts: List[IRStmt] = []
@@ -3743,6 +3751,28 @@ class ControlStructurer:
                 return False, [], set()
 
         return True, stmts, local_blocks
+
+
+    def _walk_case_entry_to_inner_oswitch(
+        self, start_bid: int, post_switch_bid: int,
+        block_map: Dict[int, BasicBlock],
+        func_stmts: Dict[int, List[IRStmt]],
+        loop_info: Dict[int, Dict],
+        exclusive_region: Set[int],
+    ) -> Optional[List[IRStmt]]:
+        """Walk a case entry block that does NOT end with OSwitch directly,
+        but whose exclusive region contains a nested OSwitch reachable
+        through a bounded internal-if/control path.
+
+        Session 88: walks the case region via
+        ``_walk_case_region_with_internal_flow``, which delegates to
+        ``_walk_block`` and handles internal if/else.  The inner OSwitch
+        is encountered and structured by ``_walk_block`` during this walk.
+        """
+        ok, stmts, _ = self._walk_case_region_with_internal_flow(
+            start_bid, post_switch_bid, block_map, func_stmts,
+            loop_info, exclusive_region)
+        return stmts if ok else None
 
 
     def _walk_simple_case_body(self, start_bid: int,

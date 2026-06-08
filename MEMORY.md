@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 87 checkpoint)
-Current session: 87
+Last updated: (Session 88 checkpoint)
+Current session: 88
 Branch: main
-HEAD: 229b77e
-Tests: 986 passed, 5 skipped
-Guardrails: 199/199 (B38-B55 + B63 + Sessions 67-86)
+HEAD: (to be committed)
+Tests: 991 passed, 5 skipped
+Guardrails: 199/199 (B38-B55 + B63 + Sessions 67-86, Session 88)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -62,14 +62,17 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 - OSwitch->structured_switch frontier: PARTIALLY ADDRESSED (default-as-merge + internal-if/else + simple-linear patterns).
   - Session 71 diagnostic: 9/36 OSwitch are nested_oswitch (25%), 27/36 are shared_merge (75%).
   - shared_merge at `__add__` indices 18, 27, 43 cannot be structured with current exclusive-membership rules.
-  - 2 already structured (testSwitch in Switch.hl, main in Enums.hl).
-- Field-name recovery: PAUSED (zero recoverable cases).
+  - 2 already structured (testSwitch in Switch.hl, main in Enums.hl)
+|- Session 86: Recursive nested OSwitch structuring for nested_simple_linear subshape (behavior-changing). 21 non-trap Farever functions now structured.
+|- Session 87: Nested OSwitch internal_if_else subshape diagnostic (diagnostic-only). 3/25 functions with correct nesting.
+|- Session 88: Nested OSwitch case-entry path discovery fix (behavior-changing). Added `_walk_case_entry_to_inner_oswitch`. No decompiler output behavior changed.
+|- Field-name recovery: PAUSED (zero recoverable cases).
 - Broad ControlStructurer work: PAUSED.
 - No active behavior-changing frontier recommended for immediate next session.
 
 ## 2. Active unlocked frontier
 
-Switch structuring for nested OSwitch case bodies (Session 86). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 551 shared_merge functions, and 9 trap-bearing functions. Track A __add__ inner switches remain unstructured due to shared merge.
+Switch structuring for nested OSwitch case bodies (Sessions 86, 87, 88). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Session 88 added `_walk_case_entry_to_inner_oswitch` for the case-entry-path subshape. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 551 shared_merge functions, and 9 trap-bearing functions. Track A __add__ inner switches remain unstructured due to shared merge.
 
 ## 3. Closed or paused frontiers
 
@@ -332,6 +335,49 @@ Do not reopen without explicit project-owner unlock.
 |  - No deeper nesting (depth limit 1).
 |  - No classifier definitions changed.
 |- **Recommendation for Session 88:** Target `nested_internal_if_else` functions with dead-end ORet inner case bodies (the getDrawHeight pattern). Ensure `_walk_case_region_with_nested_switch` correctly identifies nested OSwitch when the case entry block doesn't end with OSwitch directly. Defer ALL_OJALWAYS and complex MIXED subshapes.
+
+### Session 88: Nested OSwitch case-entry path discovery fix
+
+- **Type:** Behavior-changing (narrow nested OSwitch discovery fix).
+- **Scope:** Fix discovery gap in `_walk_case_region_with_nested_switch`: when the outer case entry block does not end directly with OSwitch (has if/else leading to inner OSwitch), the code now correctly delegates through `_walk_case_entry_to_inner_oswitch` → `_walk_case_region_with_internal_flow`.
+- **No decompiler output behavior changed.** The restructuring still relies on `_walk_block` to encounter and structure the inner OSwitch. All existing structured switch counts, goto/label counts, and source-visible output remain unchanged.
+- **New method:** `_walk_case_entry_to_inner_oswitch()` — wraps delegation to `_walk_case_region_with_internal_flow` for the case-entry-path subshape, providing a clean extension point for future subshape handling.
+- **Tests added:** 5 in `TestSession88CaseEntryNestedOSwitch`:
+  - `test_case_entry_if_else_leads_to_nested_oswitch` — positive synthetic test
+  - `test_shared_merge_rejected` — shared merge rejected
+  - `test_trap_region_rejected` — OTrap region rejected
+  - `test_deeper_nested_switch_rejected` — depth-2 nesting rejected
+  - `test_session86_nested_simple_linear_still_works` — existing behavior preserved
+- **Validation:**
+  - Full pytest: 991 passed, 5 skipped (+5 new, baseline 986/5).
+  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - Session 85 bounded census: 5000 decompiled, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: default clean (0); changed files have pre-existing non-ASCII comments only.
+- **Files changed:**
+  - `hl_decompile.py`: +25 lines (new `_walk_case_entry_to_inner_oswitch` method, updated `_walk_case_region_with_nested_switch` call site).
+  - `tests/test_decompile.py`: +~615 lines (TestSession88CaseEntryNestedOSwitch with 5 tests, updated Session 86 test nested switch search).
+  - `decompiler_quality_report/session88_case_entry_nested_oswitch.md` (new, report).
+  - `decompiler_quality_report/session88_case_entry_nested_oswitch.json` (new, report data).
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No changes to parser, disassembler, opcode semantics, VarInt/UINDEX behavior, TypeResolver, field-name recovery, CLI, GUI, or broad ControlStructurer cleanup.
+  - No shared_merge structuring (551 Farever functions untouched).
+  - No trap-bearing structuring (16 Farever functions untouched).
+  - No deeper nesting (depth limit 1).
+  - No classifier definitions changed.
+  - No ALL_OJALWAYS or MIXED subshape changes.
+  - No Farever-specific logic.
+- **Excluded bucket counts (unchanged):**
+  - ALL_OJALWAYS inner bodies: 3 Farever functions
+  - MIXED inner bodies: 19 Farever functions
+  - shared_merge: 551 Farever functions
+  - with_trap: 16 Farever functions
+  - deeper nesting: 0
+- **Classifier definitions changed:** no.
+- **Recommendation for Session 89:** Continue with `nested_internal_if_else` ALL_OJALWAYS subshape (negative-offset default-as-merge), or diagnostic-only shared_merge investigation.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.

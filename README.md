@@ -10,15 +10,15 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 85 (Full Farever readability census). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 88 (Nested OSwitch case-entry path discovery fix). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 986 passed, 5 skipped |
-| Guardrails | 199 (B38-B55 + B63 + Sessions 67-86) |
+| Full pytest baseline | 991 passed, 5 skipped |
+| Guardrails | 199 (B38-B55 + B63 + Sessions 67-86, Session 88) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
@@ -26,9 +26,9 @@ This README reflects the accepted state after Session 85 (Full Farever readabili
 | OSwitch remaining (Track A) | 36 (9 nested_oswitch, 27 shared_merge per Session 71) |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
-| Current recommendation | Session 86: recursive nested OSwitch structuring implemented for nested_simple_linear subshape. 21 Farever functions structured. Next: extend to nested_internal_if_else subshape (OJAlways breaks to outer post-switch). |
+| Current recommendation | Session 88: nested OSwitch case-entry path discovery fix added. Next: extend to nested_internal_if_else ALL_OJALWAYS subshape, or diagnostic shared_merge investigation. |
 
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). Session 84 (docs-only) release-hardening checkpoint. Session 85 (diagnostic-only) produced a full Farever readability census identifying 2,426 OSwitch functions as the #1 blocker. Session 86 (behavior-changing) implemented recursive nested OSwitch structuring for the nested_simple_linear subshape (outer switch with nested OSwitch where inner case bodies are simple-linear chains), covering 21 non-trap Farever functions.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). Session 84 (docs-only) release-hardening checkpoint. Session 85 (diagnostic-only) produced a full Farever readability census identifying 2,426 OSwitch functions as the #1 blocker. Session 86 (behavior-changing) implemented recursive nested OSwitch structuring for the nested_simple_linear subshape. Session 87 (diagnostic-only) investigated the nested_internal_if_else subshape. Session 88 (behavior-changing) added `_walk_case_entry_to_inner_oswitch` for the case-entry-path discovery gap.
 
 ---
 
