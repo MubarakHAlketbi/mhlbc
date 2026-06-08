@@ -1,10 +1,10 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 86 checkpoint)
-Current session: 86
+Last updated: (Session 87 checkpoint)
+Current session: 87
 Branch: main
-HEAD: 20e93cc
+HEAD: 229b77e
 Tests: 986 passed, 5 skipped
 Guardrails: 199/199 (B38-B55 + B63 + Sessions 67-86)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
@@ -302,7 +302,36 @@ Do not reopen without explicit project-owner unlock.
   - `scripts/session86_nested_oswitch_deep_dive.py` (new, ~500 lines): diagnostic script for Farever nested OSwitch CFG subshape classification.
   - `MEMORY.md`: session update.
 - **Known limitation:** The `nested_simple_linear` subshape requires all inner case bodies to be dead-end (ORet). Inner case bodies that end with OJAlways break to the outer post-switch require the inner switch's default target to be the outer post-switch block (default-as-merge), which currently fails when the outer post-switch is before the inner switch in instruction order (negative relative offset). This affects some Farever functions where inner case breaks use OJAlways instead of ORet.
-- **Recommendation for Session 87:** Consider extending the nested OSwitch structuring to handle inner case bodies with OJAlways breaks to the outer post-switch (the `nested_internal_if_else` subshape, 118 non-trap functions). This requires resolving the negative-offset default-as-merge issue, possibly by allowing the inner switch's post-switch to inherit from the outer post-switch when the default target is out-of-bounds.
+|- **Recommendation for Session 87:** Consider extending the nested OSwitch structuring to handle inner case bodies with OJAlways breaks to the outer post-switch (the `nested_internal_if_else` subshape, 118 non-trap functions). This requires resolving the negative-offset default-as-merge issue, possibly by allowing the inner switch's post-switch to inherit from the outer post-switch when the default target is out-of-bounds.
+|
+|### Session 87: Nested OSwitch internal_if_else subshape diagnostic
+|
+|- **Type:** Diagnostic-only. No runtime behavior changed.
+|- **Scope:** Investigated extending Session 86 nested OSwitch recursive structuring to the `nested_internal_if_else` subshape (inner switch case bodies with internal if/else and/or OJAlways breaks to the outer post-switch).
+|- **Key finding:** The current Session 86 code already handles 3 of 25 Farever `nested_internal_if_else` functions (getDrawHeight, parseBox, parseBoxF) with correct nesting. The remaining 22 functions fail because the inner switch is in the main control-flow path (not a dead-end case body), requiring fundamentally different structuring logic.
+|- **Functions with correct nesting (nested_sw=1):**
+|  - getDrawHeight (fidx=16044): ALL_ORET inner case bodies, inner switch in dead-end if/else branch from case entry.
+|  - parseBox (fidx=6341): MIXED inner case bodies, same pattern.
+|  - parseBoxF (fidx=6388): MIXED inner case bodies, same pattern.
+|- **Failure analysis:** For the 22 non-nested functions, the inner switch is in the main control-flow path from case entry to post-switch. `_walk_block` structures the inner switch but places its IR in the wrong position (after the outer switch instead of inside its case body).
+|- **CFG proof completed:** All 9 CFG checks passed for the getDrawHeight subshape: outer switch ownership, inner switch ownership, inner case body boundaries, OJAlways break targets (none), outer post-switch merge ownership, default-as-outer-merge behavior, no shared_merge ambiguity, no OTrap interference, no deeper-than-depth-1 recursion.
+|- **Validation:**
+|  - Full pytest: 986 passed, 5 skipped (unchanged).
+|  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
+|  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+|  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+|  - ASCII safety: clean (0).
+|- **Files changed:**
+|  - `decompiler_quality_report/session87_nested_internal_if_else_oswitch.md` (new, diagnostic report).
+|  - `decompiler_quality_report/session87_nested_internal_if_else_oswitch.json` (new, diagnostic data).
+|  - `MEMORY.md`: session update.
+|- **Exclusions:**
+|  - No changes to hl_decompile.py, parser, disassembler, ControlStructurer, HaxeWriter, TypeResolver, CLI, or GUI.
+|  - No shared_merge structuring (551 Farever functions untouched).
+|  - No trap-bearing structuring (16 Farever functions untouched).
+|  - No deeper nesting (depth limit 1).
+|  - No classifier definitions changed.
+|- **Recommendation for Session 88:** Target `nested_internal_if_else` functions with dead-end ORet inner case bodies (the getDrawHeight pattern). Ensure `_walk_case_region_with_nested_switch` correctly identifies nested OSwitch when the case entry block doesn't end with OSwitch directly. Defer ALL_OJALWAYS and complex MIXED subshapes.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.
