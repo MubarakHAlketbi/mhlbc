@@ -3413,7 +3413,7 @@ class ControlStructurer:
         cases = last.jump_cases or []
         default_target = last.jump_default
 
-        if len(cases) < 2:
+        if len(cases) < 1:
             return False
 
         # ── Map case targets to block IDs ──
@@ -3483,9 +3483,15 @@ class ControlStructurer:
                 return False
             if bid in visited:
                 return False
-            # Sole predecessor: switch header
+            # Sole predecessor: switch header (or switch header + post-switch
+            # when there is only 1 case and the post-switch falls through to
+            # this case entry in instruction order).
             if cb.predecessors != [blk.id]:
-                return False
+                if not (len(case_order) == 1
+                        and post_switch_bid is not None
+                        and post_switch_bid in cb.predecessors
+                        and set(cb.predecessors) == {blk.id, post_switch_bid}):
+                    return False
             # Not a loop header
             if loop_info and bid in loop_info:
                 return False
