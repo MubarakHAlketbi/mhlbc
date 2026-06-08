@@ -4955,7 +4955,7 @@ class TestIdentifierSanitization:
 
         cases = [
             (")}", "Dynamic"),
-            (", f(", "f"),
+            (", f(", "__f"),
             ("Scaled(", "Scaled"),
             ("bad-name!", "bad_name"),
             ("", "Dynamic"),
@@ -9000,3 +9000,330 @@ class TestSession76OutputFilenameSanitization:
             os.unlink(fpath)
             import shutil
             shutil.rmtree(outdir, ignore_errors=True)
+
+
+class TestSession80HaxeIdentifierSanitization:
+    """TODO-014: Haxe identifier sanitization.
+
+    Tests that _sanitize_haxe_identifier and _sanitize_type_name
+    produce valid Haxe identifiers (no leading digits, no reserved
+    keyword collisions, safe fallbacks for empty/invalid input).
+    """
+
+    # -- _sanitize_haxe_identifier unit tests --------------------------
+
+    def test_haxe_ident_preserves_valid(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("foo") == "foo"
+        assert _sanitize_haxe_identifier("Bar") == "Bar"
+        assert _sanitize_haxe_identifier("_private") == "_private"
+        assert _sanitize_haxe_identifier("testSwitch") == "testSwitch"
+        assert _sanitize_haxe_identifier("MyClass") == "MyClass"
+
+    def test_haxe_ident_leading_digit_prefixed(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("123abc") == "_123abc"
+        assert _sanitize_haxe_identifier("1st") == "_1st"
+        assert _sanitize_haxe_identifier("0xDEAD") == "_0xDEAD"
+
+    def test_haxe_ident_keyword_suffixed(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        for kw in ["class", "function", "var", "if", "else",
+                    "switch", "case", "default", "return", "new",
+                    "this", "null", "true", "false"]:
+            assert _sanitize_haxe_identifier(kw) == kw + "_", \
+                f"Keyword {kw!r} should be suffixed"
+
+    def test_haxe_ident_empty_fallback(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("") == "_bad"
+        assert _sanitize_haxe_identifier(None) == "_bad"
+
+    def test_haxe_ident_invalid_chars_replaced(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("bad name") == "bad_name"
+        assert _sanitize_haxe_identifier("hyphen-ed") == "hyphen_ed"
+        assert _sanitize_haxe_identifier("dots.not") == "dots_not"
+
+    def test_haxe_ident_non_ascii_replaced(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("café") == "caf"
+        assert _sanitize_haxe_identifier("über") == "_ber"
+
+    def test_haxe_ident_deterministic(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("class") == _sanitize_haxe_identifier("class")
+        assert _sanitize_haxe_identifier("123abc") == _sanitize_haxe_identifier("123abc")
+        assert _sanitize_haxe_identifier("über") == _sanitize_haxe_identifier("über")
+
+    def test_haxe_ident_punctuation_only_fallback(self):
+        from hl_decompile import _sanitize_haxe_identifier
+        assert _sanitize_haxe_identifier("!!!") == "_bad"
+        assert _sanitize_haxe_identifier("@#$%") == "_bad"
+
+    def test_haxe_ident_generated_names_unchanged(self):
+        """Generated fallback names (fN, tN, vN, pN, rN, uN) are already valid."""
+        from hl_decompile import _sanitize_haxe_identifier
+        generated = ["f0", "f42", "t0", "t7", "v3", "v99",
+                      "p0", "p1", "r0", "r123", "u0", "u5"]
+        for name in generated:
+            assert _sanitize_haxe_identifier(name) == name, \
+                f"Generated name {name!r} should pass through unchanged"
+
+    # -- _sanitize_type_name integration tests -------------------------
+
+    def test_type_name_leading_digit(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("123foo") == "_123foo"
+        assert _sanitize_type_name("pkg._123foo") == "pkg._123foo"
+
+    def test_type_name_keyword(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("class") == "class_"
+        assert _sanitize_type_name("pkg.class") == "pkg.class_"
+
+    def test_type_name_preserves_valid(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("MyClass") == "MyClass"
+        assert _sanitize_type_name("hl.types.ArrayDyn") == "hl.types.ArrayDyn"
+        assert _sanitize_type_name("Std") == "Std"
+
+    def test_type_name_fallback(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("") == "Dynamic"
+        assert _sanitize_type_name(None) == "Dynamic"
+        assert _sanitize_type_name("!!!") == "Dynamic"
+
+    def test_type_name_invalid_chars(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("bad-name!") == "bad_name"
+        assert _sanitize_type_name(" spaces ") == "spaces"
+
+    def test_type_name_dotted_with_keyword(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("pkg.return") == "pkg.return_"
+        assert _sanitize_type_name("a.b.c.null") == "a.b.c.null_"
+
+    def test_type_name_dotted_with_leading_digit(self):
+        from hl_decompile import _sanitize_type_name
+        assert _sanitize_type_name("pkg.123foo") == "pkg._123foo"
+
+    def test_output_ascii_safe(self):
+        """Sanitized identifiers produce ASCII-only output."""
+        from hl_decompile import _sanitize_haxe_identifier, _sanitize_type_name
+        problematic = ["class", "123abc", "café", "über", "!!!", "bad name", ""]
+        for p in problematic:
+            r1 = _sanitize_haxe_identifier(p)
+            assert all(ord(c) < 128 for c in r1), \
+                f"_sanitize_haxe_identifier({p!r}) -> {r1!r} not ASCII"
+            r2 = _sanitize_type_name(p)
+            assert all(ord(c) < 128 for c in r2), \
+                f"_sanitize_type_name({p!r}) -> {r2!r} not ASCII"
+
+
+class TestSession82HaxeStringLiteralEscaping:
+    """Focused tests for _escape_haxe_string() — Haxe string literal escaping."""
+
+    def test_escape_plain_ascii(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("hello") == '"hello"'
+        assert _escape_haxe_string("abc123") == '"abc123"'
+        assert _escape_haxe_string("hello world") == '"hello world"'
+
+    def test_escape_double_quote(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string('say "hello"') == '"say \\"hello\\""'
+
+    def test_escape_backslash(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("a\\b") == '"a\\\\b"'
+        assert _escape_haxe_string("\\\\") == '"\\\\\\\\"'
+
+    def test_escape_newline(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("a\nb") == '"a\\nb"'
+        assert _escape_haxe_string("\n") == '"\\n"'
+
+    def test_escape_carriage_return(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("a\rb") == '"a\\rb"'
+        assert _escape_haxe_string("\r") == '"\\r"'
+
+    def test_escape_tab(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("a\tb") == '"a\\tb"'
+        assert _escape_haxe_string("\t") == '"\\t"'
+
+    def test_escape_control_chars(self):
+        from hl_decompile import _escape_haxe_string
+        # NUL, SOH, BEL
+        assert _escape_haxe_string("\x00") == '"\\u0000"'
+        assert _escape_haxe_string("\x01") == '"\\u0001"'
+        assert _escape_haxe_string("\x07") == '"\\u0007"'
+        assert _escape_haxe_string("\x0b") == '"\\u000b"'
+        assert _escape_haxe_string("\x1f") == '"\\u001f"'
+
+    def test_escape_bmp_non_ascii(self):
+        from hl_decompile import _escape_haxe_string
+        # accented Latin
+        assert _escape_haxe_string("\u00e9") == '"\\u00e9"'
+        assert _escape_haxe_string("\u00e0") == '"\\u00e0"'
+        assert _escape_haxe_string("\u00fc") == '"\\u00fc"'
+        # arrow
+        assert _escape_haxe_string("\u2192") == '"\\u2192"'
+        # CJK
+        assert _escape_haxe_string("\u4e2d") == '"\\u4e2d"'
+
+    def test_escape_non_bmp(self):
+        from hl_decompile import _escape_haxe_string
+        # emoji -> surrogate pair
+        assert _escape_haxe_string("\U0001f600") == '"\\ud83d\\ude00"'
+        assert _escape_haxe_string("\U0001f44d") == '"\\ud83d\\udc4d"'
+
+    def test_escape_empty_string(self):
+        from hl_decompile import _escape_haxe_string
+        assert _escape_haxe_string("") == '""'
+
+    def test_escape_mixed_content(self):
+        from hl_decompile import _escape_haxe_string
+        s = 'hello "world"\n\tend'
+        expected = '"hello \\"world\\"\\n\\tend"'
+        assert _escape_haxe_string(s) == expected
+
+    def test_escape_deterministic(self):
+        from hl_decompile import _escape_haxe_string
+        cases = ["", "a", '"', "\\", "\n", "\u00e9", "\U0001f600", "mixed\n\t\"\\"]
+        for c in cases:
+            assert _escape_haxe_string(c) == _escape_haxe_string(c), \
+                f"not deterministic for {c!r}"
+
+    def test_escape_output_ascii_safe(self):
+        from hl_decompile import _escape_haxe_string
+        cases = ["hello", '"', "\\", "\n", "\u00e9", "\u2192", "\U0001f600",
+                 "mixed\n\t\"\\\u00e9\U0001f600"]
+        for c in cases:
+            result = _escape_haxe_string(c)
+            assert all(ord(ch) < 128 for ch in result), \
+                f"_escape_haxe_string({c!r}) -> {result!r} not ASCII"
+
+    def test_escape_starts_ends_with_double_quote(self):
+        from hl_decompile import _escape_haxe_string
+        cases = ["", "a", '"', "\\", "\n", "\u00e9", "\U0001f600"]
+        for c in cases:
+            result = _escape_haxe_string(c)
+            assert result.startswith('"') and result.endswith('"'), \
+                f"_escape_haxe_string({c!r}) -> {result!r} missing quotes"
+
+
+class TestSession83DecompileCancellation:
+    """Tests for cooperative cancellation in decompile_all() and write_output().
+
+    These tests verify the cancel_check parameter added in Session 83.
+    They are headless (no PyQt6 required) and test the decompiler API directly.
+    Worker-level QThread tests require PyQt6 and are skipped in this environment.
+    """
+
+    FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures", "hl")
+
+    def _get_parser(self, fixture_name: str):
+        """Parse a compiled fixture and return the parser."""
+        from hl_parser import HLParser
+        hl_path = os.path.join(self.FIXTURES_DIR, fixture_name)
+        raw = open(hl_path, "rb").read()
+        p = HLParser(hl_path)
+        p.execute(io.BytesIO(raw))
+        return p
+
+    def _get_decompiler(self, parser):
+        """Build a Decompiler from a parsed fixture."""
+        from hl_disasm import Disassembler
+        from hl_decompile import Decompiler
+        dasm = Disassembler(parser)
+        dasm.disassemble_all()
+        return Decompiler(parser, dasm)
+
+    # ── decompile_all cancel_check tests ──────────────────────────────────
+
+    def test_decompile_all_cancel_immediate(self):
+        """cancel_check returning True immediately returns partial/empty result."""
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all(cancel_check=lambda: True)
+        # Cancelled before any function decompiled; class hierarchy may be built
+        # but no functions should be decompiled
+        assert len(result.functions) == 0, \
+            f"Expected 0 functions decompiled, got {len(result.functions)}"
+
+    def test_decompile_all_cancel_never(self):
+        """cancel_check returning False always completes normally."""
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all(cancel_check=lambda: False)
+        assert len(result.functions) > 0, \
+            "Expected functions to be decompiled when cancel_check never fires"
+
+    def test_decompile_all_cancel_midway(self):
+        """cancel_check returning True after N functions returns partial results."""
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        counter = [0]
+        def cancel_after_3():
+            counter[0] += 1
+            return counter[0] > 3
+        result = dec.decompile_all(cancel_check=cancel_after_3)
+        # Should have partial results (at most 3 functions)
+        assert len(result.functions) <= 3, \
+            f"Expected <= 3 functions decompiled, got {len(result.functions)}"
+
+    def test_decompile_all_cancel_check_none_default(self):
+        """Default cancel_check=None works as before (no cancellation)."""
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all()  # no cancel_check
+        assert len(result.functions) > 0, \
+            "Expected functions to be decompiled with default cancel_check=None"
+
+    # ── write_output cancel_check tests ───────────────────────────────────
+
+    def test_write_output_cancel_immediate(self):
+        """cancel_check returning True during write_output returns partial files."""
+        from hl_decompile import HaxeWriter
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all()
+        writer = HaxeWriter(dec.type_resolver, dec.parser, include_comments=True)
+        files = writer.write_output(result, cancel_check=lambda: True)
+        # Cancelled before any class/enum written; may have 0 files
+        assert isinstance(files, dict), "write_output should return a dict"
+
+    def test_write_output_cancel_never(self):
+        """cancel_check returning False always during write_output completes normally."""
+        from hl_decompile import HaxeWriter
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all()
+        writer = HaxeWriter(dec.type_resolver, dec.parser, include_comments=True)
+        files = writer.write_output(result, cancel_check=lambda: False)
+        assert len(files) > 0, \
+            "Expected files when cancel_check never fires during write_output"
+
+    def test_write_output_cancel_check_none_default(self):
+        """Default cancel_check=None works as before for write_output."""
+        from hl_decompile import HaxeWriter
+        dec = self._get_decompiler(self._get_parser("hello.hl"))
+        result = dec.decompile_all()
+        writer = HaxeWriter(dec.type_resolver, dec.parser, include_comments=True)
+        files = writer.write_output(result)  # no cancel_check
+        assert len(files) > 0, \
+            "Expected files with default cancel_check=None for write_output"
+
+    # ── Worker-level tests (skipped without PyQt6) ────────────────────────
+
+    def test_worker_cancellation_requires_pyqt6(self):
+        """Worker-level QThread cancellation tests require PyQt6.
+
+        HLDecompileWorker inherits from QThread. PyQt6 is not installed in
+        this environment, so worker-level tests cannot run. The cancellation
+        path is tested indirectly through decompile_all() and write_output()
+        cancel_check tests above.
+
+        The worker wiring (hl_worker.py) passes cancel_check=lambda:
+        self._check_cancelled() to both decompile_all() and write_output().
+        The decompile_all() and write_output() cancel_check behavior is
+        verified by the headless tests above.
+        """
+        pytest.skip("PyQt6 not available -- worker-level QThread tests skipped")

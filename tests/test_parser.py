@@ -1575,3 +1575,76 @@ def test_truncated_header_hlb_only():
     p = HLParser("/dev/null")
     with pytest.raises(HLParserError, match="missing version byte"):
         p.execute(stream=io.BytesIO(data))
+
+class TestSession81OSwitchUindexDiagnostic:
+    """TODO-009: OSwitch UINDEX strictness and malformed recovery (parser path)."""
+
+    def _build_oswitch_bytecode(self, opcode_bytes: bytes, nops: int = 1) -> bytes:
+        """Build a minimal HL bytecode with a single function containing custom OSwitch bytes."""
+        import io
+        # Build header + empty pools + function entry with raw opcode bytes
+        header = build_header(version=5, nints=0, nfloats=0, nstrings=0, nfunctions=1)
+        pools = build_ints_pool([]) + build_floats_pool([]) + build_strings_pool([])
+        # Function entry: type=0, findex=0, nregs=1, nops=nops, reg_types=[0], then raw opcodes
+        fn = encode_varint(0) + encode_varint(0)  # type_idx, findex
+        fn += encode_varint(1)                     # nregs = 1
+        fn += encode_varint(nops)                  # nops
+        fn += encode_varint(0)                     # reg_types[0] = 0
+        fn += opcode_bytes                         # raw opcode bytes
+        return header + pools + fn
+
+    def test_oswitch_zero_cases_parses(self):
+        """OSwitch with 0 cases parses without error."""
+        # OSwitch: p1=0, p2=0, default=42
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(0) + encode_varint(42)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1
+        assert p.functions[0].nops == 1
+
+    def test_oswitch_one_case_parses(self):
+        """OSwitch with 1 case parses without error."""
+        # OSwitch: p1=0, p2=1, case_offset=10, default=99
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(1) + encode_varint(10) + encode_varint(99)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1
+
+    def test_oswitch_negative_case_count_parses(self):
+        """OSwitch with negative case count parses without error (clamped to 0)."""
+        # OSwitch: p1=0, p2=-1, default=42
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(-1) + encode_varint(42)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1
+
+    def test_oswitch_negative_offset_parses(self):
+        """OSwitch with negative case offset parses without error."""
+        # OSwitch: p1=0, p2=1, case_offset=-5, default=42
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(1) + encode_varint(-5) + encode_varint(42)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1
+
+    def test_oswitch_truncated_parses(self):
+        """Truncated OSwitch (missing default) parses without crash."""
+        # OSwitch: p1=0, p2=1, case_offset=10 (no default)
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(1) + encode_varint(10)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1
+
+    def test_oswitch_large_count_parses(self):
+        """OSwitch with very large case count bounded by available data."""
+        # OSwitch: p1=0, p2=999, then 3 offsets + default
+        opcodes = bytes([70]) + encode_varint(0) + encode_varint(999)
+        opcodes += encode_varint(10) + encode_varint(20) + encode_varint(30) + encode_varint(99)
+        data = self._build_oswitch_bytecode(opcodes)
+        p = HLParser("/dev/null")
+        p.execute(stream=io.BytesIO(data))
+        assert len(p.functions) == 1

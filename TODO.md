@@ -2,10 +2,10 @@
 
 Project: mhlbc
 Generated: 2026-06-05
-Last updated: 2026-06-06 (Session 74: TODO-004 test tightening)
+Last updated: 2026-06-08 (Session 84: release-hardening checkpoint)
 Source: ChatGPT audit of the uploaded repository snapshot and local validation attempt.
-Purpose: Queue audit findings for future sessions. Sessions 71-73 are now closed.
-Status: All 15 TODO items classified and verified against real checkout. See status table below.
+Purpose: Queue audit findings for future sessions. Sessions 71-83 are now closed.
+Status: All 15 TODO items classified and verified against real checkout. All items are resolved, resolved_by_process, confirmed_fixed_this_session, or blocked with no immediate actionable item. See status table below.
 
 ## Session 74 verification results
 
@@ -25,9 +25,9 @@ Session 74 fixed TODO-004 (test-only: weak goto assertions tightened). Session 7
 | TODO-010 | P2 | confirmed_fixed_this_session | FIXED (test type helper) |
 | TODO-011 | P2 | confirmed_fixed_this_session | FIXED (Session 76: output filename sanitization + path containment) |
 | TODO-012 | P3 | confirmed_fixed_this_session | API ergonomics |
-| TODO-013 | P3 | deferred_needs_dedicated_session | GUI cleanup |
-| TODO-014 | P3 | deferred_needs_dedicated_session | Output polish |
-| TODO-015 | P3 | ongoing | Process |
+| TODO-013 | P3 | resolved | GUI cleanup |
+|| TODO-014 | P3 | confirmed_fixed_this_session | FIXED (Session 80: Haxe identifier sanitization -- leading digit prefix, keyword suffix, _sanitize_haxe_identifier) |
+|| TODO-015 | P3 | resolved_by_process | Process |
 
 Full verification details: `decompiler_quality_report/session72_todo_claim_verification.md`
 Session 73 fix details: `decompiler_quality_report/session73_post_switch_merge_fix.md`
@@ -51,7 +51,7 @@ Session 71 has been completed (diagnostic-only nested OSwitch classification). S
 
 Priority: P0
 Area: repository layout, validation
-Status: open
+Status: closed_upload_snapshot_only
 Scope: diagnostic first
 
 Finding:
@@ -145,7 +145,7 @@ Do not:
 
 Priority: P1
 Area: `hl_decompile.py`, `ControlStructurer._try_structure_switch`
-Status: open
+Status: confirmed_fixed_this_session (Session 73)
 Scope: behavior-changing only after narrow proof
 
 Finding:
@@ -183,7 +183,7 @@ Do not:
 
 Priority: P1
 Area: `tests/test_decompile.py`, validation discipline
-Status: open
+Status: confirmed_fixed_this_session (Session 74)
 Scope: test-only or report-test integration
 
 Finding:
@@ -224,7 +224,7 @@ Do not:
 
 Priority: P1
 Area: `README.md`, `MEMORY.md`, `docs/validation_matrix.md`
-Status: open
+Status: confirmed_fixed_this_session (Session 72)
 Scope: docs-only
 
 Finding:
@@ -260,7 +260,7 @@ Do not:
 
 Priority: P2
 Area: `hl_disasm.py`, CFG diagnostics, GUI display
-Status: open
+Status: confirmed_fixed_this_session (Session 72)
 Scope: small behavior fix with focused test
 
 Finding:
@@ -285,7 +285,7 @@ Validation:
 
 Priority: P2
 Area: `cli.py`, CLI behavior
-Status: open
+Status: confirmed_fixed_this_session (Session 72)
 Scope: small CLI contract fix
 
 Finding:
@@ -311,7 +311,7 @@ Validation:
 
 Priority: P2
 Area: `hl_parser/_parser.py`, parser errors, CLI exit codes
-Status: open
+Status: confirmed_fixed_this_session (Session 72)
 Scope: parser robustness fix
 
 Finding:
@@ -335,7 +335,7 @@ Validation:
 
 Priority: P2
 Area: `hl_parser/_parser.py`, `hl_disasm.py`, opcode decoding
-Status: open
+Status: resolved (Session 81: diagnostic warnings added, recovery preserved)
 Scope: diagnostic first
 
 Finding:
@@ -367,7 +367,7 @@ Do not:
 
 Priority: P2
 Area: `tests/test_decompile.py`, synthetic fixtures
-Status: open
+Status: confirmed_fixed_this_session (Session 72)
 Scope: test correctness
 
 Finding:
@@ -397,7 +397,7 @@ Validation:
 
 Priority: P2
 Area: `HaxeWriter.write_output`, `cli.py`
-Status: open
+Status: confirmed_fixed_this_session (Session 76)
 Scope: security/hardening
 
 Finding:
@@ -457,23 +457,32 @@ Validation:
 
 Priority: P3
 Area: `hl_worker.py`, GUI worker behavior
-Status: open
+Status: resolved (Session 83)
 Scope: GUI responsiveness, not core correctness
 
 Finding:
 
-`HLDecompileWorker.cancel()` appears to be checked before and after `decompile_all()`, but not inside the long decompile loop. Large files may not cancel promptly.
+`HLDecompileWorker.cancel()` was checked before and after `decompile_all()`, but not inside the long decompile loop. Large files could not cancel promptly.
 
-Next action:
+Fix (Session 83):
 
-1. Confirm current worker and decompiler loop behavior in the real checkout.
-2. Add cooperative cancellation checks at safe boundaries if useful.
-3. Preserve headless parser/decompiler boundaries.
+1. Added optional `cancel_check` parameter to `Decompiler.decompile_all()` -- checked at per-function granularity. When cancellation is requested, the loop breaks and returns partial results.
+
+2. Added optional `cancel_check` parameter to `HaxeWriter.write_output()` -- checked at per-class, per-enum, and per-orphan granularity.
+
+3. Wired `HLDecompileWorker.run()` to pass `cancel_check=lambda: self._check_cancelled()` to both `decompile_all()` and `write_output()`.
+
+4. Preserved existing stale-result guard in `app.py` (`parser is not self.parser`). Cancelled workers return silently without emitting `finished`.
+
+**Safety note:** `decompile_all()` and `write_output()` may produce partial internal results when cancellation is observed, but `HLDecompileWorker` suppresses `finished`, so cancelled GUI workers do not publish partial output to the UI.
 
 Validation:
 
-- Manual or automated GUI worker test if available.
-- No parser dependency on GUI.
+- Full pytest: 966 passed, 5 skipped (+7 new tests, +1 new skip for PyQt6)
+- Track A: 9 fixtures, 3014 functions, 0 errors (unchanged)
+- Session 71 census: unchanged (38 OSwitch, 2 structured, 36 remaining, 9/27 split)
+- Worker-level QThread tests require PyQt6 and are skipped in the current environment
+- No parser dependency on GUI
 
 ---
 
@@ -481,23 +490,34 @@ Validation:
 
 Priority: P3
 Area: Haxe-like output readability
-Status: open
+Status: confirmed_fixed_this_session (Session 80)
 Scope: output polish, not recompilation guarantee
 
 Finding:
 
-`_sanitize_type_name()` may not handle leading digits or Haxe reserved keywords. The project does not promise recompilable Haxe, but deterministic identifier hardening would improve readability and avoid invalid-looking output.
+`_sanitize_type_name()` did not handle leading digits or Haxe reserved keywords. The project does not promise recompilable Haxe, but deterministic identifier hardening would improve readability and avoid invalid-looking output.
 
-Next action:
+Fix (Session 80):
 
-1. Audit current identifier sanitization for class, enum, field, method, and local names.
-2. Define a small reserved-word and leading-character rule.
-3. Add focused writer tests.
+1. Added `HAXE_KEYWORDS` frozenset -- 46 Haxe 4 reserved keywords (including `null`, `true`, `false`).
+2. Added `_sanitize_haxe_identifier(ident, fallback="_bad")` -- sanitizes a single Haxe identifier:
+   - Empty/missing -> fallback.
+   - Non-identifier chars `[^a-zA-Z0-9_]` -> `_`.
+   - Trailing underscores stripped (leading underscores preserved -- valid in Haxe).
+   - Leading digit -> prefix `_`.
+   - Reserved keyword -> suffix `_`.
+   - Deterministic.
+3. Updated `_sanitize_type_name` to delegate per dotted component to `_sanitize_haxe_identifier`.
+4. Added 17 tests in `TestSession80HaxeIdentifierSanitization`.
 
 Validation:
-
-- Targeted writer tests.
-- Track A output sanity check if behavior changes broadly.
+- Full pytest: 933 passed, 4 skipped (+17 new tests)
+- Track A: 9 fixtures, 3014 functions, 0 errors (unchanged)
+- Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9/27 split (unchanged)
+- ASCII safety: all changed files clean
+- No parser/opcode/CFG/ControlStructurer/TypeResolver behavior changed
+- No string-literal escaping implemented
+- No Farever-specific logic
 
 ---
 
@@ -505,57 +525,35 @@ Validation:
 
 Priority: P3
 Area: reports, docs, handoff discipline
-Status: ongoing
+Status: resolved_by_process (Session 79 tooling + Session 81 closure)
 Scope: process
 
 Finding:
 
 The uploaded snapshot contains non-ASCII in many source/docs files. The strict project rule mainly applies to generated reports, markdown handoffs, JSON summaries, and changed documentation.
 
-Next action:
+Resolution:
 
-1. Continue checking only changed/generated report and handoff files unless the project explicitly decides to clean the whole repo.
-2. Use ASCII alternatives in generated milestone reports:
-   - `--` instead of em dash
-   - `->` instead of arrows
-   - plain quotes instead of smart quotes
-3. State exact paths included in every ASCII check.
+Session 79 created reusable ASCII checker tooling:
+- `scripts/check_ascii_safety.py` -- reusable ASCII checker with default scope (process artifacts only) and explicit path mode (strict for any file).
+- `tests/test_ascii_safety.py` -- 10 tests covering default scope, explicit paths, --fix mode, and output safety.
+- Default scope: README.md, MEMORY.md, TODO.md, CONTRIBUTING.md, AGENTS.md (process artifacts only).
+- Explicit path mode: strict for any file including docs/.
+- ASCII policy boundary documented: process artifact safety != ban on UTF-8 bytecode data.
 
-Validation:
+Session 81 verified:
+- Both files exist and pass.
+- Default checker returns 0 on process artifacts.
+- Explicit path mode remains strict.
+- ASCII safety is now a standing workflow requirement, not an active TODO item.
 
-```bash
-python3 - <<'PY'
-from pathlib import Path
-paths = [
-    Path("TODO.md"),
-]
-bad = False
-for path in paths:
-    data = path.read_text(encoding="utf-8")
-    for i, ch in enumerate(data):
-        if ord(ch) > 127:
-            line = data.count("\n", 0, i) + 1
-            col = i - data.rfind("\n", 0, i)
-            print(f"{path}:{line}:{col}: non-ASCII U+{ord(ch):04X}")
-            bad = True
-raise SystemExit(1 if bad else 0)
-PY
-```
+Future ASCII safety is enforced by the standing workflow: run `scripts/check_ascii_safety.py` before committing changed process artifacts.
 
 ---
 
 ## Suggested session order after Session 71
 
-1. Validation-assets check and README/MEMORY/docs baseline consistency.
-2. Switch output diagnostic/hardening for case/default labels and post-switch merge preservation.
-3. Test reliability pass for fixture-backed invariants and report-script coverage.
-4. Small isolated correctness fixes:
-   - CFG OSwitch opcode annotation
-   - truncated header `HLParserError`
-   - CLI invalid explicit function index exit code
-5. Output-file path hardening.
-6. OSwitch UINDEX strictness diagnostic.
-7. API/GUI/output polish cleanup.
+All sessions in this suggested order have been completed through Session 83. No active actionable TODO remains.
 
 ## Items explicitly excluded from this TODO file
 

@@ -26,6 +26,19 @@ from hl_logger import VerboseLogger, ERROR, WARN, INFO, DEBUG, TRACE
 from hl_disasm import (Instruction, BasicBlock, Disassembler, OpcodeDecoder,
                         _OPCODE_NARGS, _OPCODE_NAMES, _JUMP_OPCODES, _VARARG_OPCODES)
 
+# Haxe 4 reserved keywords — identifiers matching these are suffixed with _
+# to avoid invalid Haxe output.
+HAXE_KEYWORDS: frozenset = frozenset({
+    "abstract", "break", "case", "cast", "catch", "class", "continue",
+    "default", "do", "dynamic", "else", "enum", "extern", "final", "for",
+    "function", "if", "implements", "import", "in", "inline", "interface",
+    "macro", "new", "override", "package", "private", "public", "return",
+    "static", "switch", "this", "throw", "trace", "try", "typedef",
+    "untyped", "using", "var", "while",
+    # Built-in literal keywords that would shadow Haxe values
+    "null", "true", "false",
+})
+
 # ============================================================================
 # Type-kind constants (mirrored from hl_parser to keep this module headless)
 # ============================================================================
@@ -1580,7 +1593,7 @@ class ExprBuilder:
         if op == 5:  # OString
             dst = self._reg_var(args[0])
             val = self._resolve_string(args[1])
-            return IRStmt("assign", dst=dst, src=IRConst(repr(val)))
+            return IRStmt("assign", dst=dst, src=IRConst(_escape_haxe_string(val)))
 
         if op == 6:  # ONull
             dst = self._reg_var(args[0])
@@ -3792,23 +3805,103 @@ class FunctionSigBuilder:
         )
 
 
+def _sanitize_haxe_identifier(ident: str, fallback: str = "_bad") -> str:
+    """Sanitize a single Haxe identifier (no dots).
+
+    Rules:
+    - Empty/missing → fallback.
+    - Replace non-identifier characters (not in [a-zA-Z0-9_]) with _.
+    - Strip leading/trailing underscores.
+    - If result is empty → fallback.
+    - If starts with a digit → prefix with _.
+    - If matches a Haxe reserved keyword → suffix with _.
+    - Deterministic: same input always produces same output.
+    """
+    if not ident:
+        return fallback
+    # Replace non-identifier characters with underscore
+    cleaned = re.sub(r'[^a-zA-Z0-9_]', '_', ident)
+    # Strip trailing underscores only (leading underscores are valid in Haxe)
+    cleaned = cleaned.rstrip('_')
+    if not cleaned:
+        return fallback
+    # Prefix leading digits
+    if cleaned[0].isdigit():
+        cleaned = '_' + cleaned
+    # Suffix reserved keywords
+    if cleaned in HAXE_KEYWORDS:
+        cleaned += '_'
+    return cleaned
+
+
+def _escape_haxe_string(s: str) -> str:
+    """Escape a string value as a Haxe string literal (including surrounding double quotes).
+
+    Produces ASCII-safe output:
+    - Printable ASCII (0x20-0x7e) except ``\"`` and ``\\`` is kept as-is.
+    - ``\"`` -> ``\\\"``
+    - ``\\`` -> ``\\\\``
+    - Newline -> ``\\n``
+    - Carriage return -> ``\\r``
+    - Tab -> ``\\t``
+    - Other control characters (0x00-0x1f) -> ``\\uXXXX``
+    - BMP non-ASCII (U+0080-U+FFFF) -> ``\\uXXXX``
+    - Non-BMP (U+10000+) -> surrogate pair ``\\uXXXX\\uXXXX``
+
+    Note: Non-BMP surrogate-pair encoding follows standard Unicode practice
+    used by Haxe target languages (JS, C++, Java, C#). This has not been
+    verified against a Haxe compiler directly.
+    """
+    result: list[str] = []
+    for ch in s:
+        cp = ord(ch)
+        if cp == 0x22:       # double quote "
+            result.append('\\"')
+        elif cp == 0x5c:     # backslash \\
+            result.append('\\\\')
+        elif cp == 0x0a:     # newline \\n
+            result.append('\\n')
+        elif cp == 0x0d:     # carriage return \\r
+            result.append('\\r')
+        elif cp == 0x09:     # tab \\t
+            result.append('\\t')
+        elif 0x20 <= cp <= 0x7e:  # printable ASCII (safe range)
+            result.append(ch)
+        elif cp <= 0xffff:   # control chars (below 0x20) or BMP non-ASCII
+            result.append(f'\\u{cp:04x}')
+        else:                # non-BMP (U+10000+) -> surrogate pair
+            cp_offset = cp - 0x10000
+            high = 0xD800 + (cp_offset >> 10)
+            low = 0xDC00 + (cp_offset & 0x3FF)
+            result.append(f'\\u{high:04x}\\u{low:04x}')
+    escaped = ''.join(result)
+    return f'"{escaped}"'
+
+
 def _sanitize_type_name(name: str) -> str:
     """Sanitize a type name for safe Haxe-like output.
 
     - Handles dotted paths (packages): pkg.Class → pkg.Class
     - Strips null/empty names
     - Replaces invalid Haxe identifier characters
+    - Prefixes leading digits with _
+    - Suffixes reserved Haxe keywords with _
     - Preserves deterministic output
     """
     if not name or not name.strip():
         return "Dynamic"
-    # Replace spaces, hyphens, and other invalid chars with underscores
-    cleaned = re.sub(r'[^a-zA-Z0-9_.]', '_', name.strip())
-    # Remove leading/trailing underscores and dots
-    cleaned = cleaned.strip('_.')
-    if not cleaned:
+    # Split into dotted components, sanitize each, filter empty
+    parts = name.strip().split('.')
+    sanitized = []
+    for p in parts:
+        s = _sanitize_haxe_identifier(p, fallback="Dynamic")
+        if s and s != "Dynamic":
+            sanitized.append(s)
+        elif not s:
+            sanitized.append("Dynamic")
+    if not sanitized:
         return "Dynamic"
-    return cleaned
+    return '.'.join(sanitized)
 
 
 def _sanitize_output_filename(name: str,
@@ -4423,13 +4516,17 @@ class HaxeWriter:
 
     def write_output(self, result: DecompileResult,
                      single_func_idx: Optional[int] = None,
-                     output_dir: Optional[str] = None) -> Dict[str, str]:
+                     output_dir: Optional[str] = None,
+                     cancel_check=None) -> Dict[str, str]:
         """Write decompiled output as a dict of filename → source text.
 
         Args:
             result: Complete decompilation result.
             single_func_idx: If set, only decompile this function (no classes).
             output_dir: If set, generate per-class files.
+            cancel_check: Optional callable returning True when cancellation
+                          is requested. Checked per-class/enum in the
+                          output loop. When cancelled, returns partial files.
 
         Returns:
             Dict[filename → source_text].
@@ -4447,6 +4544,8 @@ class HaxeWriter:
 
         # Class files
         for cls_name, cls_def in result.classes.items():
+            if cancel_check is not None and cancel_check():
+                break
             cls_methods = []
             for ir_fn in result.functions.values():
                 sig = ir_fn.sig
@@ -4459,12 +4558,16 @@ class HaxeWriter:
 
         # Enum files
         for enum_name, enum_def in result.enums.items():
+            if cancel_check is not None and cancel_check():
+                break
             src = self.write_enum(enum_def)
             files[_sanitize_output_filename(enum_name, suffix=".hx")] = src
 
         # Orphan functions (no parent class)
         orphan_srcs: List[str] = []
         for oidx in result.orphan_functions:
+            if cancel_check is not None and cancel_check():
+                break
             ir_fn = result.functions.get(oidx)
             if ir_fn:
                 orphan_srcs.append(self.write_function(ir_fn))
@@ -4658,11 +4761,16 @@ class Decompiler:
             lambda tag, msg, level=INFO: None)
 
     def decompile_all(self,
-                      progress_callback=None) -> DecompileResult:
+                      progress_callback=None,
+                      cancel_check=None) -> DecompileResult:
         """Decompile all valid functions and build class hierarchy.
 
         Args:
             progress_callback: Optional callback(status_str, progress_int).
+            cancel_check: Optional callable returning True when cancellation
+                          is requested. Checked per-function in the
+                          decompile loop. When cancelled, returns partial
+                          results.
 
         Returns:
             DecompileResult with all decompiled functions and class defs.
@@ -4691,6 +4799,12 @@ class Decompiler:
 
         # Step 2: Decompile each function
         for i in range(nfuncs):
+            # Check cancellation at per-function granularity
+            if cancel_check is not None and cancel_check():
+                self._log("DECOMPILE", "Cancellation requested, returning partial results",
+                          level=INFO)
+                break
+
             fn = self.parser.functions[i]
             if fn.malformed or fn.nops <= 0:
                 continue

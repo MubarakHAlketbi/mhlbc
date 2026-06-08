@@ -630,15 +630,25 @@ class HLParser:
                 p2 = self.read_varint(stream, context=f"opcode[{i}].p2")
                 if op_idx == 70:
                     # OSwitch: p2 IS the case count (UINDEX/VarInt)
+                    # UINDEX validation: negative case count is a violation
+                    if p2 < 0:
+                        self._warn("OPCODE", f"opcode[{i}]: OSwitch negative case count (p2={p2}), "
+                                   f"treating as 0 — UINDEX violation")
                     # Read p2 case offsets, then one default offset
                     case_count = min(p2, self._remaining_bytes(stream))
                     for j in range(case_count):
                         if self._remaining_bytes(stream) < 1:
                             break
-                        self.read_varint(stream, context=f"opcode[{i}].case[{j}]")
+                        val = self.read_varint(stream, context=f"opcode[{i}].case[{j}]")
+                        if val < 0:
+                            self._warn("OPCODE", f"opcode[{i}].case[{j}]: negative offset ({val}) "
+                                       f"— UINDEX violation")
                     # Read the default offset
                     if self._remaining_bytes(stream) > 0:
-                        self.read_varint(stream, context=f"opcode[{i}].default")
+                        default_val = self.read_varint(stream, context=f"opcode[{i}].default")
+                        if default_val < 0:
+                            self._warn("OPCODE", f"opcode[{i}].default: negative offset ({default_val}) "
+                                       f"— UINDEX violation")
                 else:
                     # OCallN family / OMakeEnum: count is a single byte
                     count_byte = stream.read(1)

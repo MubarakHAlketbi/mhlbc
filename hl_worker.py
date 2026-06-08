@@ -79,13 +79,20 @@ class HLDecompileWorker(QThread):
             if self._check_cancelled():
                 return
             self.progress.emit("Decompiling all functions...", 50)
-            result = decompiler.decompile_all()
+            # Pass cancel_check for per-function cancellation granularity
+            result = decompiler.decompile_all(
+                cancel_check=lambda: self._check_cancelled()
+            )
             if self._check_cancelled():
                 return
             self.progress.emit("Writing output...", 80)
             writer = HaxeWriter(decompiler.type_resolver, self.parser,
                                 include_comments=True)
-            files = writer.write_output(result)
+            # Pass cancel_check for per-class/enum cancellation granularity
+            files = writer.write_output(
+                result,
+                cancel_check=lambda: self._check_cancelled()
+            )
             if self._check_cancelled():
                 return
             self.progress.emit("Done", 100)

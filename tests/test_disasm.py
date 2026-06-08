@@ -727,3 +727,68 @@ class TestCLIDisasmInvalidFunctionIndex:
             f"got {result.returncode}: stderr={result.stderr}"
         )
         assert "out of range" in result.stderr.lower()
+
+class TestSession81OSwitchUindexDiagnostic:
+    """TODO-009: OSwitch UINDEX strictness and malformed recovery (disassembler path)."""
+
+    def test_oswitch_zero_cases(self):
+        """OSwitch with 0 cases decodes correctly."""
+        opcodes = encode_op(70, 0, 0) + encode_op(42)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].opcode == 70
+        assert instrs[0].args == [0, 0, 42]
+        assert instrs[0].jump_cases is None or instrs[0].jump_cases == []
+        assert instrs[0].jump_default == 42
+
+    def test_oswitch_one_case(self):
+        """OSwitch with 1 case decodes correctly."""
+        opcodes = encode_op(70, 0, 1) + encode_op(10) + encode_op(99)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].args == [0, 1, 99]
+        assert instrs[0].jump_cases == [10]
+        assert instrs[0].jump_default == 99
+
+    def test_oswitch_negative_case_count(self):
+        """OSwitch with negative case count is clamped to 0 (current behavior)."""
+        opcodes = encode_op(70, 0, -1) + encode_op(42)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        # p2=-1 clamped to 0, default=42 read as p3
+        assert instrs[0].args == [0, -1, 42]
+        assert instrs[0].jump_cases is None or instrs[0].jump_cases == []
+        assert instrs[0].jump_default == 42
+
+    def test_oswitch_negative_offset(self):
+        """OSwitch with negative case offset is stored as-is (current behavior)."""
+        opcodes = encode_op(70, 0, 1) + encode_varint(-5) + encode_varint(42)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].jump_cases == [-5]
+        assert instrs[0].jump_default == 42
+
+    def test_oswitch_truncated_no_default(self):
+        """Truncated OSwitch (no default offset) stops early without crash."""
+        opcodes = encode_op(70, 0, 1) + encode_varint(10)  # missing default
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].jump_cases == [10]
+        # Default should be None when args < 3
+        assert instrs[0].jump_default is None
+
+    def test_oswitch_large_count_bounded(self):
+        """Very large case count is bounded by available data."""
+        # p2=999 but only 3 offsets available
+        opcodes = encode_op(70, 0, 999) + encode_varint(10) + encode_varint(20) + encode_varint(30)
+        decoder = OpcodeDecoder()
+        instrs = decoder.decode_instructions(opcodes, 1)
+        assert len(instrs) == 1
+        assert instrs[0].jump_cases is not None
+        assert len(instrs[0].jump_cases) == 3
+        assert instrs[0].jump_cases == [10, 20, 30]

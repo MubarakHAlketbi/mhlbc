@@ -363,6 +363,10 @@ class OpcodeDecoder:
 
                 if opcode == 70:  # OSwitch
                     # p2 = case count (unsigned)
+                    # UINDEX validation: negative case count is a violation
+                    if p2 < 0:
+                        self._log("DISASM", f"  instr[{i}]: OSwitch negative case count (p2={p2}), "
+                                  f"treating as 0 — UINDEX violation", level=WARN)
                     ncases = max(0, p2)
                     cases = []
                     for _ in range(ncases):
@@ -370,6 +374,9 @@ class OpcodeDecoder:
                             break
                         try:
                             v, c = _read_varint(data, pos)
+                            if v < 0:
+                                self._log("DISASM", f"  instr[{i}].case[{len(cases)}]: "
+                                          f"negative offset ({v}) — UINDEX violation", level=WARN)
                             cases.append(v)
                             pos += c
                         except IndexError:
@@ -378,6 +385,9 @@ class OpcodeDecoder:
                     if pos < data_len:
                         try:
                             p3, c3 = _read_varint(data, pos)
+                            if p3 < 0:
+                                self._log("DISASM", f"  instr[{i}].default: "
+                                          f"negative offset ({p3}) — UINDEX violation", level=WARN)
                             args.append(p3)
                             pos += c3
                         except IndexError:

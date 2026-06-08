@@ -10,15 +10,15 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 78 (build_cfg API hardening). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 83 (GUI decompile cancellation granularity). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 906 passed, 4 skipped |
-| Guardrails | 144 (B38-B55 + B63 + Sessions 67-78) |
+| Full pytest baseline | 966 passed, 5 skipped |
+| Guardrails | 195 (B38-B55 + B63 + Sessions 67-83) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
@@ -26,9 +26,9 @@ This README reflects the accepted state after Session 78 (build_cfg API hardenin
 | OSwitch remaining (Track A) | 36 (9 nested_oswitch, 27 shared_merge per Session 71) |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
-| Current recommendation | Checkpoint complete - next: TODO-012 (Disassembler.build_cfg() API hardening) |
+| Current recommendation | All TODO items resolved or blocked. No active behavior-changing frontier. |
 
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. No active behavior-changing frontier currently unlocked.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). No active behavior-changing frontier currently unlocked.
 
 ---
 
@@ -152,9 +152,9 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ## Recommended next step
 
-The release-hardening checkpoint (Session 77) is complete. Session 78 fixed TODO-012 (build_cfg API hardening). The accepted baseline is stable: full pytest 906 passed, 4 skipped; Track A 9/9 fixtures, 3014 functions, 0 errors; all measured scopes at 0 top-level gotos.
+The release-hardening checkpoint (Session 84) is complete. All sessions through 83 are done. All TODO items (1-15) are resolved, resolved_by_process, or blocked with no immediate actionable item. The accepted baseline is stable: full pytest 966 passed, 5 skipped; Track A 9/9 fixtures, 3014 functions, 0 errors; all measured scopes at 0 top-level gotos.
 
-Preferred next small task: **TODO-014 - identifier sanitization** (output polish). Alternative: **TODO-013 - GUI cancellation granularity** if desired. **TODO-009 remains blocked** until bytecode evidence is available.
+No active behavior-changing frontier is currently recommended. Consider a new diagnostic investigation only with a clearly scoped question, or await project-owner direction for the next target.
 
 No Tier 2-5 unlock is recommended.
 
@@ -244,7 +244,7 @@ Architecture rule: the parser and CLI must remain headless. GUI code must not be
 
 ## Reproducible validation
 
-Use these commands for the current accepted baseline (post-Session 78).
+Use these commands for the current accepted baseline (post-Session 83).
 
 ```bash
 # Full pytest baseline
@@ -254,18 +254,18 @@ cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 Expected accepted result:
 
 ```text
-906 passed, 4 skipped
+966 passed, 5 skipped
 ```
 
 ```bash
-# Guardrails (144 tests: B38-B55 + B63 + Sessions 67-78)
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76 or Session78"
+# Guardrails (195 tests: B38-B55 + B63 + Sessions 67-83)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76 or Session78 or Session79 or Session80 or Session81 or Session82 or Session83"
 ```
 
 Expected accepted result:
 
 ```text
-140 passed
+194 passed, 1 skipped
 ```
 
 ```bash
@@ -585,7 +585,7 @@ Current Tier 1 state:
 - Track B samples 200 and 500 decompile with 0 errors.
 - Diagnostic frontiers are exhausted.
 - Session 63 and Session 65 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
-- Checkpoint complete (Session 77). Preferred next: TODO-012 (Disassembler.build_cfg() API hardening) or TODO-014 (identifier sanitization). TODO-009 blocked pending bytecode evidence.
+- Checkpoint complete (Session 84). All TODO items resolved or blocked. No active behavior-changing frontier.
 
 ### Tier 2: Bytecode manipulation, frozen
 

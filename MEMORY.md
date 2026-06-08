@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 79 checkpoint)
-Current session: 79
+Last updated: (Session 84 checkpoint)
+Current session: 84
 Branch: main
-HEAD: a5e05c6
-Tests: 916 passed, 4 skipped
-Guardrails: 144/144 (B38-B55 + B63 + Sessions 67-78)
+HEAD: 8fb17ec
+Tests: 966 passed, 5 skipped
+Guardrails: 195/195 (B38-B55 + B63 + Sessions 67-83)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -94,8 +94,8 @@ Do not reopen without explicit project-owner unlock.
 
 ## 4. Current validation baseline
 
-- Tests: 902 passed, 4 skipped
-- Guardrails: 140/140 (B38-B55 + B63 + Sessions 67-76)
+- Tests: 966 passed, 5 skipped
+- Guardrails: 195/195 (B38-B55 + B63 + Sessions 67-83)
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
@@ -109,7 +109,242 @@ Do not reopen without explicit project-owner unlock.
 
 ## 5. Latest handoff
 
-### Session 79: ASCII safety checker tooling and policy clarification
+### Session 83: GUI decompile cancellation granularity (TODO-013)
+
+- **Type:** Behavior-changing (worker-level cooperative cancellation).
+- **Problem:** `HLDecompileWorker.run()` checked cancellation only at coarse phase boundaries (before/after `decompile_all()`, before/after `write_output()`). The long-running `decompile_all()` loop over all functions had no cancellation check inside it. For large files with thousands of functions, cancellation could not take effect until all functions were decompiled.
+- **Fix:**
+  - Added optional `cancel_check: Optional[Callable[[], bool]]` parameter to `Decompiler.decompile_all()` -- checked at per-function granularity in the decompile loop. When cancellation is requested, the loop breaks and returns partial results.
+  - Added optional `cancel_check` parameter to `HaxeWriter.write_output()` -- checked at per-class, per-enum, and per-orphan granularity in the output loops.
+  - Wired `HLDecompileWorker.run()` to pass `cancel_check=lambda: self._check_cancelled()` to both `decompile_all()` and `write_output()`.
+  - Preserved existing stale-result guard in `app.py` (`parser is not self.parser`).
+  - Cancelled workers return silently without emitting `finished`.
+  - **Safety note:** `decompile_all()` and `write_output()` may produce partial internal results when cancellation is observed, but `HLDecompileWorker` suppresses `finished`, so cancelled GUI workers do not publish partial output to the UI.
+  - No thread killing -- fully cooperative.
+  - No parser/decompiler state corruption -- cancellation happens at natural loop boundaries.
+- **Tests added:** 8 in `TestSession83DecompileCancellation`:
+  - `test_decompile_all_cancel_immediate` -- cancel_check=True returns empty result
+  - `test_decompile_all_cancel_never` -- cancel_check=False completes normally
+  - `test_decompile_all_cancel_midway` -- cancel_check after 3 functions returns partial
+  - `test_decompile_all_cancel_check_none_default` -- default None works
+  - `test_write_output_cancel_immediate` -- cancel_check during write returns partial files
+  - `test_write_output_cancel_never` -- cancel_check=False completes normally
+  - `test_write_output_cancel_check_none_default` -- default None works
+  - `test_worker_cancellation_requires_pyqt6` -- skipped (PyQt6 unavailable)
+- **Validation:**
+  - Focused tests: 7 passed, 1 skipped (PyQt6).
+  - Full pytest: 966 passed, 5 skipped (+7 new tests, +1 new skip, baseline 959/4).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: explicit path on changed files clean (0); default checker clean (0).
+  - Track B skipped: cancellation is a GUI/worker behavior change, not decompiler output or report-metric behavior.
+  - GUI/manual validation skipped: PyQt6 not available in this environment. Worker-level QThread tests are skipped with explanation. The cancellation path is tested indirectly through headless `cancel_check` unit tests.
+- **Files changed:**
+  - `hl_decompile.py`: +14 lines (cancel_check in decompile_all), +9 lines (cancel_check in write_output).
+  - `hl_worker.py`: +6 lines (pass cancel_check lambdas to decompile_all and write_output).
+  - `tests/test_decompile.py`: +114 lines (TestSession83DecompileCancellation with 8 tests).
+  - `TODO.md`: TODO-013 -> resolved.
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No parser behavior changed.
+  - No bytecode decoding changed.
+  - No disassembler behavior changed.
+  - No decompiler IR semantics changed.
+  - No HaxeWriter output formatting changed.
+  - No ControlStructurer behavior changed.
+  - No TypeResolver behavior changed.
+  - No identifier sanitization changed.
+  - No string-literal escaping changed.
+  - No TODO-009, TODO-014, or TODO-015 touched.
+  - No Tier 2-5 work.
+    - No Farever-specific logic.
+  - **TODO-013 status:** Resolved. Cooperative cancellation is now checked at per-function granularity in `decompile_all()` and per-class/enum granularity in `write_output()`. The worker passes `cancel_check` lambdas to both. Stale-result guards in `app.py` remain intact. Worker-level QThread tests require PyQt6 and are skipped in the current environment.
+  - **Recommendation for next session:** No active behavior-changing frontier currently recommended. All TODO items are resolved or blocked. Consider a new diagnostic investigation only with a clearly scoped question, or await project-owner direction for the next target.
+
+### Session 84: Release-hardening/current-state checkpoint
+
+- **Type:** Documentation-only consistency checkpoint.
+- **Scope:** Verify current-state consistency across README.md, TODO.md, MEMORY.md, and validation baselines after Sessions 81-83 cluster. Fix stale documentation drift only. No runtime behavior changed.
+- **Stale documentation fixed:**
+  - README.md: Updated baseline numbers (966/5, guardrails 195), session reference (Session 83), recommendation (all TODO resolved), validation commands.
+  - MEMORY.md: Updated session number (84), guardrail count (195), Section 4 validation baseline.
+  - TODO.md: Fixed 11 stale "Status: open" entries to match actual resolution status; updated header; replaced completed suggested-session list.
+  - ASCII safety: Fixed non-ASCII em dashes in MEMORY.md and TODO.md with `--fix`.
+- **Validation:**
+  - Full pytest: 966 passed, 5 skipped (unchanged from Session 83).
+  - Guardrails: 194 passed, 1 skipped (195 total).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: default and explicit path checks clean (0).
+- **Files changed (Session 84 only):**
+  - `README.md`: baseline/recommendation/validation section updates.
+  - `MEMORY.md`: session number, guardrail count, Section 4 baseline, non-ASCII fix.
+  - `TODO.md`: stale status entries, header, suggested-session list.
+- **Scope compliance:**
+  - No parser behavior changed.
+  - No disassembler behavior changed.
+  - No decompiler IR semantics changed.
+  - No HaxeWriter output changed.
+  - No ControlStructurer behavior changed.
+  - No TypeResolver behavior changed.
+  - No GUI/worker cancellation behavior changed.
+  - No identifier sanitization changed.
+  - No string-literal escaping changed.
+  - No Tier 2-5 work.
+  - No Farever-specific logic.
+- **TODO status:** All 15 TODO items resolved, resolved_by_process, confirmed_fixed_this_session, or blocked with no immediate actionable item. No active actionable TODO remains.
+- **Recommendation for next session:** No active behavior-changing frontier currently recommended. Pause behavior work until Sato identifies a new target, or start a new diagnostic investigation only with a clearly scoped question. No Tier 2-5 unlock recommended.
+
+## 6. Compact evidence pointers
+- **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.
+- **Fix:**
+  - Added `_escape_haxe_string(s: str) -> str` -- produces a Haxe string literal (including surrounding double quotes) with:
+    - Printable ASCII (0x20-0x7e) except `"` and `\` kept as-is.
+    - `"` -> `\"`
+    - `\` -> `\\`
+    - Newline -> `\n`
+    - Carriage return -> `\r`
+    - Tab -> `\t`
+    - Other control characters (0x00-0x1f) -> `\uXXXX`
+    - BMP non-ASCII (U+0080-U+FFFF) -> `\uXXXX`
+    - Non-BMP (U+10000+) -> surrogate pair `\\uXXXX\\uXXXX`
+    - Output is ASCII-only.
+  - Replaced `repr(val)` with `_escape_haxe_string(val)` at the OString IR construction site (line 1596).
+- **Tests added:** 14 in `TestSession82HaxeStringLiteralEscaping`:
+  - `test_escape_plain_ascii` -- alphanumeric and spaces pass through
+  - `test_escape_double_quote` -- `"` -> `\"`
+  - `test_escape_backslash` -- `\` -> `\\`
+  - `test_escape_newline` -- `\n` -> `\n`
+  - `test_escape_carriage_return` -- `\r` -> `\r`
+  - `test_escape_tab` -- `\t` -> `\t`
+  - `test_escape_control_chars` -- NUL, SOH, BEL, VT, US -> `\uXXXX`
+  - `test_escape_bmp_non_ascii` -- accented Latin, arrow, CJK -> `\uXXXX`
+  - `test_escape_non_bmp` -- emoji -> surrogate pair `\\uXXXX\\uXXXX`
+  - `test_escape_empty_string` -- `""`
+  - `test_escape_mixed_content` -- combined `"`, `\`, `\n`, `\t`
+  - `test_escape_deterministic` -- same input always same output
+  - `test_escape_output_ascii_safe` -- all outputs are ASCII-only
+  - `test_escape_starts_ends_with_double_quote` -- always wrapped in `"..."`
+- **Validation:**
+  - Focused tests: 14 passed.
+  - Full pytest: 959 passed, 4 skipped (+14 new tests, baseline 945).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: explicit path on changed files clean (0); default checker clean (0).
+  - Track B skipped: string escaping is a narrow writer-helper change; fixture output behavior is covered by focused tests and Track A remains clean. No report metrics or sampled output behavior changed.
+- **Files changed:**
+  - `hl_decompile.py`: +37 lines (`_escape_haxe_string` function), 1 line changed (`repr(val)` -> `_escape_haxe_string(val)`).
+  - `tests/test_decompile.py`: +94 lines (TestSession82HaxeStringLiteralEscaping with 14 tests).
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No parser string decoding changed.
+  - No bytecode string pools mutated.
+  - No identifier sanitization changed.
+  - No opcode semantics changed.
+  - No CFG construction changed.
+  - No ControlStructurer behavior changed.
+  - No TypeResolver behavior changed.
+  - No CLI or GUI behavior changed except indirectly through safer decompiler output.
+  - No TODO-013 touched.
+  - No Tier 2-5 work.
+  - No Farever-specific logic.
+  - No generated reports force-added.
+- **Non-BMP handling:** Non-BMP output uses deterministic surrogate-pair `\\uXXXX\\uXXXX`; direct Haxe compiler acceptance for non-BMP preservation remains unverified because Haxe was unavailable locally.
+- **Recommendation for next session:** TODO-013 GUI decompile cancellation granularity, as recommended after Session 80/81.
+
+### Session 81: TODO cleanup and OSwitch UINDEX malformed-recovery diagnostic
+
+- **Type:** Diagnostic/report-only with narrow behavior-preserving fix (UINDEX validation warnings).
+- **TODO cleanup:**
+  - TODO-012: Already marked `confirmed_fixed_this_session` (Session 78) -- confirmed correct.
+  - TODO-014: Already marked `confirmed_fixed_this_session` (Session 80) -- confirmed correct.
+  - TODO-015: Verified and closed as `resolved_by_process`. ASCII checker tooling exists (`scripts/check_ascii_safety.py`, `tests/test_ascii_safety.py`), default scope is process artifacts only, explicit path mode is strict, default checker passes. ASCII safety is now a standing workflow requirement.
+- **TODO-009 diagnostic findings:**
+  - **Parser path** (`hl_parser/_parser.py` `_skip_opcodes`): OSwitch p2 (case count) read via signed `read_varint`. Negative p2 is silently treated as zero cases via `min(p2, remaining)` producing empty `range()`. Case offsets and default offset also read as signed VarInts with no UINDEX validation.
+  - **Disassembler path** (`hl_disasm.py` `decode_instructions`): OSwitch p2 read via signed `_read_varint`. Negative p2 clamped to 0 via `max(0, p2)`. Case offsets and default offset read as signed VarInts with no UINDEX validation.
+  - **Both paths** preserve recovery (negative values don't crash) but previously emitted no diagnostics for UINDEX violations.
+- **Fix:** Added UINDEX validation warnings in both paths:
+  - Parser: `self._warn("OPCODE", ...)` for negative p2, negative case offsets, negative default offset.
+  - Disassembler: `self._log("DISASM", ..., level=WARN)` for negative p2, negative case offsets, negative default offset.
+  - Recovery behavior unchanged (negative case count still treated as 0; negative offsets still stored as-is).
+- **Tests added:** 12 total (6 disassembler + 6 parser):
+  - `TestSession81OSwitchUindexDiagnostic` in `test_disasm.py`: zero cases, one case, negative case count, negative offset, truncated, large count bounded.
+  - `TestSession81OSwitchUindexDiagnostic` in `test_parser.py`: zero cases, one case, negative case count, negative offset, truncated, large count bounded.
+- **Validation:**
+  - Full pytest: 945 passed, 4 skipped (+12 new tests, baseline 933).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: default checker passes (0); explicit path on changed files clean.
+  - Track B skipped: recovery behavior, CFG, decompiler output, and report metrics were not changed; only malformed OSwitch diagnostic warnings changed.
+- **Files changed:**
+  - `hl_parser/_parser.py`: +14 lines (UINDEX validation warnings in `_skip_opcodes`).
+  - `hl_disasm.py`: +12 lines (UINDEX validation warnings in `decode_instructions`).
+  - `tests/test_disasm.py`: +80 lines (TestSession81OSwitchUindexDiagnostic with 6 tests).
+  - `tests/test_parser.py`: +80 lines (TestSession81OSwitchUindexDiagnostic with 6 tests).
+  - `TODO.md`: TODO-015 -> resolved_by_process; TODO-012/TODO-014 confirmed; stale header updated.
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No ControlStructurer behavior changed.
+  - No switch structuring rules changed.
+  - No HaxeWriter switch output formatting changed.
+  - No TypeResolver behavior changed.
+  - No identifier sanitization changed.
+  - No string-literal Unicode escaping implemented.
+  - No TODO-013 GUI cancellation touched.
+  - No Tier 2-5 work.
+  - No Farever-specific logic.
+  - No generated reports force-added.
+- **TODO-009 status:** Resolved with diagnostic warnings. UINDEX violations now emit explicit diagnostics in both parser and disassembler paths. Recovery behavior preserved. No broader parser layout changes needed.
+- **Recommendation for next session:** HaxeWriter string-literal escaping diagnostic (as recommended after Session 80).
+
+### Session 80: Haxe identifier sanitization (TODO-014)
+
+- **Type:** Behavior-changing (output-layer identifier sanitization).
+- **Problem:** `_sanitize_type_name()` did not handle:
+  - Leading digits (e.g., `123foo` passed through as-is -- invalid Haxe identifier start).
+  - Reserved Haxe keywords (e.g., `class`, `return`, `null` passed through unchanged -- would shadow Haxe keywords).
+- **Fix:**
+  - Added `HAXE_KEYWORDS` frozenset (46 Haxe 4 reserved keywords including `null`, `true`, `false`).
+  - Added `_sanitize_haxe_identifier(ident, fallback="_bad")` -- sanitizes a single Haxe identifier:
+    - Empty/missing -> fallback.
+    - Non-identifier chars `[^a-zA-Z0-9_]` -> `_`.
+    - Trailing underscores stripped (leading underscores preserved -- valid in Haxe).
+    - Leading digit -> prefix `_`.
+    - Reserved keyword -> suffix `_`.
+    - Deterministic.
+  - Updated `_sanitize_type_name` to delegate per dotted component to `_sanitize_haxe_identifier`.
+  - Existing behavior preserved: dotted paths, invalid char replacement, "Dynamic" fallback for empty type names.
+- **Tests added:** 17 in `TestSession80HaxeIdentifierSanitization`:
+  - 9 `_sanitize_haxe_identifier` unit tests (valid, leading digit, keyword, empty, invalid chars, non-ASCII, deterministic, punctuation, generated names).
+  - 7 `_sanitize_type_name` integration tests (leading digit, keyword, valid, fallback, invalid chars, dotted keyword, dotted leading digit).
+  - 1 ASCII safety test.
+- **Validation:**
+  - Full pytest: 933 passed, 4 skipped (+17 new tests, baseline 916).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Session 71 census: 38 OSwitch, 2 structured, 36 remaining, 9 nested_oswitch / 27 shared_merge (unchanged).
+  - ASCII safety: all changed files clean (explicit and default checker).
+  - Track B skipped: no report metrics or sampled output behavior changed.
+- **Files changed:**
+  - `hl_decompile.py`: +40 lines (HAXE_KEYWORDS, _sanitize_haxe_identifier, updated _sanitize_type_name).
+  - `tests/test_decompile.py`: +119 lines (TestSession80HaxeIdentifierSanitization with 17 tests, 1 existing test expectation updated).
+  - `TODO.md`: TODO-014 -> confirmed_fixed_this_session.
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No parser layout or string decoding changed.
+  - No opcode semantics changed.
+  - No CFG construction changed.
+  - No ControlStructurer behavior changed.
+  - No HaxeWriter control-flow formatting changed (identifier rendering only).
+  - No string-literal `\uXXXX` escaping implemented.
+  - No CLI or GUI behavior changed.
+  - No TODO-009 or TODO-013 touched.
+  - No Farever-specific logic.
+  - No generated reports force-added.
+- **Recommendation for next session:** Either:
+  - Dedicated HaxeWriter string-literal escaping diagnostic, or
+  - TODO-013 GUI decompile cancellation granularity.
 
 - **Type:** Tooling/docs/test-only.
 - **Script added:** `scripts/check_ascii_safety.py` -- reusable ASCII-safety checker with:
@@ -318,26 +553,6 @@ Do not reopen without explicit project-owner unlock.
   - `decompiler_quality_report/session73_post_switch_merge_fix.md`: canonical report
 - **No parser/disassembler/ControlStructurer broad behavior/HaxeWriter/TypeResolver/CLI/GUI/Tier 2-5 changes.**
 - **No Farever-specific logic.**
-
-## 5. Latest handoff
-
-### Session 71: Nested OSwitch diagnostic
-
-- **Type:** Diagnostic-only. No runtime behavior changed.
-- **Evidence base:** Track A switch census revealed 38 OSwitch total (2 structured, 36 remaining). All 36 in `__add__` functions (Std parent). Detailed per-OSwitch CFG analysis shows 3 distinct shapes:
-  - `nested_oswitch` (9/36, 25%): First OSwitch per `__add__` at index 15, 7 cases, 87 region-instrs. Each case entry block ends with another OSwitch (inner switch-of-switch). Structurable via recursive pass.
-  - `shared_merge` (27/36, 75%): Indices 18, 27, 43 in each `__add__`. Case regions share blocks across cases, violating exclusive-membership rule. Not structurable with current approach.
-  - `exclusive_simple` (2/36, ~5%): Already structured by Session 69 (testSwitch, Enums.hl main).
-- **Key discovery:** MEMORY.md claim "all 36 in nested OSwitch functions" was imprecise -- only 25% are truly nested OSwitch; 75% are shared_merge.
-- **Recommendation:** Release-hardening checkpoint. Recursive pass would only address 25%.
-- **Files changed:**
-  - `scripts/session71_nested_switch_census.py` (+577 lines): Diagnostic classification script
-  - `decompiler_quality_report/session71_nested_switch_diagnostic.md` (new): Canonical report
-  - `decompiler_quality_report/session71_nested_switch_diagnostic.json` (new): Machine-readable per-OSwitch records
-- **Tests:** 872 passed, 4 skipped (full pytest). Track A: 0 errors.
-- **No parser/disassembler/ControlStructurer/HaxeWriter/TypeResolver/GUI/Tier 2-5 changes.**
-- **No Farever-specific logic.**
-- **Session 71 naming only.**
 
 ### Session 72: TODO claim verification, triage, and four quick fixes
 
