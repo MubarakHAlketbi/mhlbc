@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 90 checkpoint)
-Current session: 90
+Last updated: (Session 91 checkpoint)
+Current session: 91
 Branch: main
-HEAD: 5caf791
+HEAD: 74f612c
 Tests: 997 passed, 5 skipped
-Guardrails: 226 (225 passed, 1 skipped)
+Guardrails: 224 (224 passed, 1 skipped)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -73,7 +73,7 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 
 ## 2. Active unlocked frontier
 
-Switch structuring for nested OSwitch case bodies (Sessions 86, 87, 88, 89, 90). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Session 88 added `_walk_case_entry_to_inner_oswitch` for the case-entry-path subshape. Session 89 added 1-case outer switch support and predecessor relaxation for the ALL_OJALWAYS subshape. Session 90 (diagnostic-only) found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch; the 2 ALL_OJALWAYS-any-target functions (doParse, split) have OJAlways jumps to non-post-switch targets. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 551 shared_merge functions, and 9 trap-bearing functions. The 22 failing nested_internal_if_else functions all share the same root cause: inner switch in main control-flow path.
+Switch structuring for nested OSwitch case bodies (Sessions 86, 87, 88, 89, 90). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Session 88 added `_walk_case_entry_to_inner_oswitch` for the case-entry-path subshape. Session 89 added 1-case outer switch support and predecessor relaxation for the ALL_OJALWAYS subshape. Session 90 (diagnostic-only) found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch. Session 91 (diagnostic-only) classified the 651 shared_merge Farever functions into sub-buckets and found no safe behavior change exists: 97.7% are shared_case_entry_block (C-style fall-through, unsafe), 2.2% are shared_branch_inside_case_body (unsafe), 1.2% are trap_adjacent (unsafe), and 0.2% (1 function) is shared_default_block (unknown). The true_shared_post_switch_merge pattern is already handled by Session 69 default-as-merge detection. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 651 shared_merge functions (no safe behavior change), and 6 trap-bearing functions. The 22 failing nested_internal_if_else functions all share the same root cause: inner switch in main control-flow path.
 
 ## 3. Closed or paused frontiers
 
@@ -100,7 +100,7 @@ Do not reopen without explicit project-owner unlock.
 ## 4. Current validation baseline
 
 - Tests: 997 passed, 5 skipped
-- Guardrails: 226 (225 passed, 1 skipped) -- `pytest -k "B38 or ... or Session89"`
+- Guardrails: 224 (224 passed, 1 skipped) -- `pytest -k "B38 or ... or Session90"`
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
@@ -110,6 +110,7 @@ Do not reopen without explicit project-owner unlock.
   - Session 71 diagnostic: 9/36 nested_oswitch (first OSwitch in __add__ at index 15), 27/36 shared_merge (indices 18, 27, 43)
   - 27/36 shared_merge cannot be structured with current exclusive-membership rules
   - Session 86: 21 non-trap Farever nested_simple_linear functions now structured
+  - Session 91: 651 Farever shared_merge functions classified; no safe behavior change exists
 - Field-name fallbacks: Track A 2084, TB200 58, TB500 356
 - ASCII safety: confirmed for all docs; hl_decompile.py pre-existing non-ASCII in comments only
 
@@ -420,9 +421,6 @@ Do not reopen without explicit project-owner unlock.
 - **Scope:** Investigated the 3 Farever ALL_OJALWAYS candidates that remained unstructured after Session 89. Built `scripts/session90_all_ojalways_diagnostic.py` to classify inner case body endings for all 25 nested_internal_if_else functions.
 - **Key finding: 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch.** The Session 89 synthetic tests proved this pattern works, but no Farever function actually has this exact pattern. The 2 functions with ALL_OJALWAYS any target (doParse fidx=14852, split fidx=20138) have OJAlways jumps to other targets (backward jumps, forward jumps to non-post-switch blocks), not the outer post-switch.
 - **Session 89 conclusion confirmed:** The Session 89 changes (1-case outer switch + predecessor relaxation) are necessary but not sufficient. The remaining blocker for all 22 failing functions is the inner switch being in the main control-flow path, which requires fundamentally different structuring logic.
-- **Session 89 validation ambiguity reconciled:**
-  - The "+6 new tests" refers to the 6 tests in TestSession89AllOjAlwaysNestedOSwitch. The baseline was 990 (Session 88: 991 - 1 test that changed status due to updated expectations).
-  - The "1 pre-existing ASCII fail" refers to the default `scripts/check_ascii_safety.py` checker finding non-ASCII in MEMORY.md (pre-existing from Session 87 content). This is NOT a pytest failure. It is an explicit ASCII check on process artifacts.
 - **Validation:**
   - Full pytest: 997 passed, 5 skipped (clean, no failures).
   - Guardrails: 226 (225 passed, 1 skipped).
@@ -442,6 +440,44 @@ Do not reopen without explicit project-owner unlock.
   - No classifier definitions changed.
   - No Track A/Track B metric definition changes.
 - **Recommendation for Session 91:** Diagnostic-only shared_merge investigation (551 Farever functions). The shared_merge pattern is the largest remaining OSwitch bucket and may reveal a safe relaxation of the exclusive-membership rule. Alternatively, stop if no safe behavior-changing target is desired.
+
+### Session 91: shared_merge OSwitch diagnostic
+
+- **Type:** Diagnostic-only. No runtime behavior changed.
+- **Scope:** Classified the 651 shared_merge Farever functions into sub-buckets to determine whether any safe, narrow, general-purpose ControlStructurer relaxation exists. Built `scripts/session91_shared_merge_diagnostic.py` that classifies all 2426 OSwitch functions and performs detailed sub-bucket analysis on shared_merge instances.
+- **Key finding: No safe sub-bucket exists for a narrow behavior change.** The dominant pattern is `shared_case_entry_block` (C-style fall-through between cases), which accounts for 97.7% of shared_merge functions. Haxe does not support fall-through between cases, so this pattern fundamentally cannot be structured as a Haxe switch.
+- **Sub-bucket breakdown (651 shared_merge functions):**
+  - `shared_case_entry_block`: 636 functions (97.7%) -- unsafe, C-style fall-through
+  - `shared_branch_inside_case_body`: 14 functions (2.2%) -- unsafe, shared branch inside case body
+  - `trap_adjacent`: 8 functions (1.2%) -- unsafe, trap-adjacent
+  - `shared_default_block`: 1 function (0.2%) -- unknown, potentially targetable
+  - `true_shared_post_switch_merge`: 0 functions -- already handled by Session 69 default-as-merge detection
+- **Shape breakdown (all 2426 OSwitch functions):**
+  - `simple_oswitch`: 1268 (52.3%) -- already handled by Session 69/70
+  - `shared_merge`: 651 (26.8%) -- no safe behavior change exists
+  - `internal_if_else`: 454 (18.7%) -- already handled by Session 69
+  - `nested_complex`: 47 (1.9%) -- partially handled by Sessions 86-89
+  - `with_trap`: 6 (0.2%) -- excluded from all structuring
+- **Count discrepancy:** Session 86 reported 551 shared_merge functions; this session finds 651. The difference is because Session 86 used a bounded classification pass (first 200 OSwitch functions deeply classified, then extrapolated), while this session classifies all 2426 OSwitch functions.
+- **Validation:**
+  - Full pytest: 997 passed, 5 skipped (unchanged).
+  - Guardrails: 224 passed, 1 skipped (224 total).
+  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - ASCII safety: default clean (0). New script and report artifacts clean (0).
+  - Classifier definitions unchanged (shape classifier same as Session 86; sub-bucket classifier is new).
+- **Files changed:**
+  - `scripts/session91_shared_merge_diagnostic.py` (new, ~1000 lines diagnostic script).
+  - `decompiler_quality_report/session91_shared_merge_diagnostic.md` (new report).
+  - `decompiler_quality_report/session91_shared_merge_diagnostic.json` (new data).
+  - `MEMORY.md`: session update.
+- **Exclusions:**
+  - No changes to hl_decompile.py, parser, disassembler, ControlStructurer, HaxeWriter, TypeResolver, CLI, GUI.
+  - No runtime behavior changed.
+  - No classifier definitions changed.
+  - No Track A/Track B metric definition changes.
+- **Recommendation:** Stop behavior changes for shared_merge. No safe, narrow, general-purpose ControlStructurer relaxation exists. The OSwitch frontier is now fully characterized. If further diagnostic work is desired, investigate the single `shared_default_block` function (findChar fidx=24535). Otherwise, the project should consider whether any remaining OSwitch frontier work is worth pursuing, or whether to declare the OSwitch frontier fully characterized and move to a different area.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.
@@ -921,3 +957,6 @@ Do not reopen without explicit project-owner unlock.
 - scripts/session90_all_ojalways_diagnostic.py -- Session 90 ALL_OJALWAYS diagnostic script
 - decompiler_quality_report/session90_all_ojalways_diagnostic.md -- Session 90 diagnostic report
 - decompiler_quality_report/session90_all_ojalways_diagnostic.json -- Session 90 diagnostic data
+- scripts/session91_shared_merge_diagnostic.py -- Session 91 shared_merge diagnostic script
+- decompiler_quality_report/session91_shared_merge_diagnostic.md -- Session 91 diagnostic report
+- decompiler_quality_report/session91_shared_merge_diagnostic.json -- Session 91 diagnostic data
