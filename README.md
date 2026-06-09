@@ -10,7 +10,7 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 91 (shared_merge OSwitch diagnostic). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 93 (next-frontier readability blocker selection). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
@@ -27,8 +27,6 @@ This README reflects the accepted state after Session 91 (shared_merge OSwitch d
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
 | Current recommendation | Session 93 (diagnostic-only): Next-frontier readability blocker selection finds **2,859,450 source-visible raw register-name occurrences** (vN=2,208,016, tN=585,687, uN=65,747) as the #1 measured readability frontier. These are regex hits in generated source, not unique variables or proven naming bugs. vN/tN may include expected compiler temporaries. uN ("used/unknown-style") is more suspicious and is the highest-priority subset for the next diagnostic. Recommended next step: diagnostic-only root-cause classification of raw register-name occurrences, prioritizing uN first, then classifying vN/tN expected temporaries vs actionable fallback naming gaps. No renaming behavior until evidence proves a safe rule. |
-
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). Session 84 (docs-only) release-hardening checkpoint. Session 85 (diagnostic-only) produced a full Farever readability census identifying 2,426 OSwitch functions as the #1 blocker. Session 86 (behavior-changing) implemented recursive nested OSwitch structuring for the nested_simple_linear subshape. Session 87 (diagnostic-only) investigated the nested_internal_if_else subshape. Session 88 (behavior-changing) added `_walk_case_entry_to_inner_oswitch` for the case-entry-path discovery gap. Session 89 (behavior-changing) added 1-case outer switch support and predecessor relaxation for ALL_OJALWAYS nested OSwitch structuring. Session 90 (diagnostic-only) investigated the 3 ALL_OJALWAYS Farever candidates and found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch; the remaining blocker for all 22 failing functions is the inner switch in the main control-flow path.
 
 ---
 
@@ -150,14 +148,6 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ---
 
-## Recommended next step
-
-Session 93 (diagnostic-only) performed a next-frontier readability blocker selection after the OSwitch frontier was fully characterized. **2,859,450 source-visible raw register-name occurrences** (vN=2,208,016, tN=585,687, uN=65,747) are the #1 measured readability frontier. These are regex hits in generated source, not unique variables or proven naming bugs. vN/tN may include expected compiler temporaries. uN ("used/unknown-style") is more suspicious and is the highest-priority subset for the next diagnostic. Recommended next step: diagnostic-only root-cause classification of raw register-name occurrences, prioritizing uN first, then classifying vN/tN expected temporaries vs actionable fallback naming gaps. No renaming behavior until evidence proves a safe rule.
-
-No Tier 2-5 unlock is recommended.
-
----
-
 ## Installation
 
 Parser, CLI, scripts, and tests use Python. Install the repository dependencies first:
@@ -242,7 +232,7 @@ Architecture rule: the parser and CLI must remain headless. GUI code must not be
 
 ## Reproducible validation
 
-Use these commands for the current accepted baseline (post-Session 91).
+Use these commands for the current accepted baseline (post-Session 93).
 
 ```bash
 # Full pytest baseline
@@ -530,37 +520,18 @@ Use the project documents as the source of truth for the subsystem you are touch
 
 ## Milestone summary
 
-The original gate list is no longer the clearest way to understand current status. The project is now in named frontier milestones. Recent accepted milestones:
+The project uses named frontier milestones (Session N). The original B-series gates (B38-B60) established the core decompiler foundation. Recent milestones:
 
-| Milestone | Result |
-|-----------|--------|
-| B38 | Added narrow simple switch structuring infrastructure. |
-| B39 | Expanded standard fixture coverage to 9 Track A fixtures. |
-| B40 | Added if/else merge-boundary handling. |
-| B41 | Refined natural-loop handling and unary expression parentheses. |
-| B42 | Reconciled Track A and Track B metric scopes. |
-| B43/B44 | Audited field layout and corrected constant-numbering interpretation; no field behavior fix needed. |
-| B45 | Hardened docs/process around type-kind constants. |
-| B46 | Added recursive ControlStructurer frontier census. |
-| B47 | Suppressed terminal gotos to proven common merge blocks inside if branches. |
-| B48 | Classified top-level goto target patterns. |
-| B49 | Verified immediate goto-to-label cleanup already existed and added guardrail tests. |
-| B50 | Proved sampled backward_jump cases are IR-position artifacts, not true bytecode loop backedges. |
-| B51 | Classified forward_to_common_merge by CFG evidence and selected B52 target. |
-| B52 | Removed forward_to_next_label cases under conservative syntactic guard. |
-| B53 | Rebaselined the post-B52 frontier and reconciled metrics. |
-| B54 | Fixed null-target classification regression through OSetThis consumer delegation. |
-| B55 | Fixed HaxeWriter if/else indentation. |
-| B56 | Completed opcode register-semantics audit. |
-| B57 | Fixed null-target OSetThis consumer delegation behavior. |
-| B58 | Completed return-region CFG fallthrough cleanup and to_if_target diagnostic. |
-| B59 | Exhausted goto-frontier diagnostics and disproved the switch-case gap target. |
-| B60 | Completed field-name/TypeResolver diagnostic refresh and ControlStructurer feasibility map. |
-| Session 61 | Reproduced the accepted validation baseline, fixed README reproducibility gaps, and produced the next-phase decision map. |
-| Session 62 | Closeout checkpoint, MEMORY.md handoff update. |
-| Session 63 / B63 | Bounded ControlStructurer behavior change: suppressed conditional-jump header gotos (62-75% reduction). 846p+4s, 86 guardrails, 0 errors. |
-| Session 64 | Closeout consistency audit: restored Session 60 historical continuity, fixed report/MEMORY/README staleness. |
-| Session 65 | Bounded ControlStructurer behavior change: suppressed conditional-jump no-merge fallback gotos (100% conditional-jump elimination across all scopes). 846p+4s, 88 guardrails, 0 errors. |
+- **B38--B60**: Core infrastructure -- switch structuring, fixture coverage, goto/label diagnostics, field/TypeResolver audits, ControlStructurer feasibility map.
+- **Sessions 61--65**: Conditional-jump goto suppression (B63/B65) -- 100% conditional-jump elimination, 0 top-level gotos across all scopes.
+- **Sessions 66--71**: OJAlways switch-case-break absorption (Sessions 67+68) and OSwitch diagnostic (Session 71) -- 36 remaining Track A OSwitch characterized (9 nested, 27 shared_merge).
+- **Sessions 72--76**: TODO verification, post-switch merge preservation, test tightening, switch case labels, output filename hardening.
+- **Sessions 80--84**: Haxe identifier sanitization, string-literal escaping, GUI cancellation granularity, release-hardening checkpoint.
+- **Sessions 85--91**: Full Farever readability census (Session 85), nested OSwitch structuring (Sessions 86, 88, 89), nested_internal_if_else diagnostic (Sessions 87, 90), shared_merge diagnostic (Session 91) -- OSwitch frontier fully characterized, no safe behavior change exists for remaining patterns.
+- **Session 92**: Documentation/consistency cleanup.
+- **Session 93**: Next-frontier readability blocker selection -- identified 2.86M raw register-name occurrences (vN/tN/uN) as #1 source-visible frontier.
+
+See `MEMORY.md` for detailed session handoffs and `reports/` for canonical milestone reports.
 
 ---
 
@@ -584,9 +555,9 @@ Current Tier 1 state:
 - Parser navigation is stable for current fixtures and the accepted Farever benchmark.
 - Track A is locked at 9/9 fixtures with 0 errors.
 - Track B samples 200 and 500 decompile with 0 errors.
-- Diagnostic frontiers are exhausted.
-- Session 63 and Session 65 behavior-changing work (conditional-jump goto suppression) is complete. No active behavior-changing work remains.
-- Checkpoint complete (Session 84). All TODO items resolved or blocked. No active behavior-changing frontier.
+- OSwitch frontier fully characterized (Session 91) -- no safe behavior change exists for remaining patterns.
+- Session 93 identified **raw register-name occurrences (vN/tN/uN)** as the #1 source-visible readability frontier (2.86M occurrences). Next step: diagnostic-only root-cause classification.
+- All TODO items resolved or blocked (Session 84 checkpoint).
 
 ### Tier 2: Bytecode manipulation, frozen
 
