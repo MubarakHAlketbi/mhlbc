@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 89 checkpoint)
-Current session: 89
+Last updated: (Session 90 checkpoint)
+Current session: 90
 Branch: main
-HEAD: b5edb88
-Tests: 996 passed, 5 skipped
-Guardrails: 199/199 (B38-B55 + B63 + Sessions 67-86, Session 88)
+HEAD: 5caf791
+Tests: 997 passed, 5 skipped
+Guardrails: 226 (225 passed, 1 skipped)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -73,7 +73,7 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 
 ## 2. Active unlocked frontier
 
-Switch structuring for nested OSwitch case bodies (Sessions 86, 87, 88, 89). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Session 88 added `_walk_case_entry_to_inner_oswitch` for the case-entry-path subshape. Session 89 added 1-case outer switch support and predecessor relaxation for the ALL_OJALWAYS subshape. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 551 shared_merge functions, and 9 trap-bearing functions. The 3 ALL_OJALWAYS Farever candidates remain unstructured (same root cause as 22 other failing functions: inner switch in main path). Track A __add__ inner switches remain unstructured due to shared merge.
+Switch structuring for nested OSwitch case bodies (Sessions 86, 87, 88, 89, 90). 21 non-trap Farever functions with nested_simple_linear subshape are now structured. Session 88 added `_walk_case_entry_to_inner_oswitch` for the case-entry-path subshape. Session 89 added 1-case outer switch support and predecessor relaxation for the ALL_OJALWAYS subshape. Session 90 (diagnostic-only) found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch; the 2 ALL_OJALWAYS-any-target functions (doParse, split) have OJAlways jumps to non-post-switch targets. Remaining: 118 non-trap nested_complex functions (inner cases with if/else or OJAlways breaks), 551 shared_merge functions, and 9 trap-bearing functions. The 22 failing nested_internal_if_else functions all share the same root cause: inner switch in main control-flow path.
 
 ## 3. Closed or paused frontiers
 
@@ -99,8 +99,8 @@ Do not reopen without explicit project-owner unlock.
 
 ## 4. Current validation baseline
 
-- Tests: 996 passed, 5 skipped
-- Guardrails: 199/199 (B38-B55 + B63 + Sessions 67-86)
+- Tests: 997 passed, 5 skipped
+- Guardrails: 226 (225 passed, 1 skipped) -- `pytest -k "B38 or ... or Session89"`
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
@@ -340,15 +340,15 @@ Do not reopen without explicit project-owner unlock.
 ### Session 88: Nested OSwitch case-entry path discovery fix
 
 - **Type:** Behavior-changing (narrow nested OSwitch discovery fix).
-- **Scope:** Fix discovery gap in `_walk_case_region_with_nested_switch`: when the outer case entry block does not end directly with OSwitch (has if/else leading to inner OSwitch), the code now correctly delegates through `_walk_case_entry_to_inner_oswitch` → `_walk_case_region_with_internal_flow`.
+- **Scope:** Fix discovery gap in `_walk_case_region_with_nested_switch`: when the outer case entry block does not end directly with OSwitch (has if/else leading to inner OSwitch), the code now correctly delegates through `_walk_case_entry_to_inner_oswitch` -> `_walk_case_region_with_internal_flow`.
 - **No decompiler output behavior changed.** The restructuring still relies on `_walk_block` to encounter and structure the inner OSwitch. All existing structured switch counts, goto/label counts, and source-visible output remain unchanged.
-- **New method:** `_walk_case_entry_to_inner_oswitch()` — wraps delegation to `_walk_case_region_with_internal_flow` for the case-entry-path subshape, providing a clean extension point for future subshape handling.
+- **New method:** `_walk_case_entry_to_inner_oswitch()` -- wraps delegation to `_walk_case_region_with_internal_flow` for the case-entry-path subshape, providing a clean extension point for future subshape handling.
 - **Tests added:** 5 in `TestSession88CaseEntryNestedOSwitch`:
-  - `test_case_entry_if_else_leads_to_nested_oswitch` — positive synthetic test
-  - `test_shared_merge_rejected` — shared merge rejected
-  - `test_trap_region_rejected` — OTrap region rejected
-  - `test_deeper_nested_switch_rejected` — depth-2 nesting rejected
-  - `test_session86_nested_simple_linear_still_works` — existing behavior preserved
+  - `test_case_entry_if_else_leads_to_nested_oswitch` -- positive synthetic test
+  - `test_shared_merge_rejected` -- shared merge rejected
+  - `test_trap_region_rejected` -- OTrap region rejected
+  - `test_deeper_nested_switch_rejected` -- depth-2 nesting rejected
+  - `test_session86_nested_simple_linear_still_works` -- existing behavior preserved
 - **Validation:**
   - Full pytest: 991 passed, 5 skipped (+5 new, baseline 986/5).
   - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
@@ -413,6 +413,35 @@ Do not reopen without explicit project-owner unlock.
   - shared_merge: 551 Farever functions
   - with_trap: 16 Farever functions
 - **Recommendation for Session 90:** Diagnostic-only investigation of the 3 Farever ALL_OJALWAYS functions (confirm main-path failure), or shared_merge diagnostic investigation.
+
+### Session 90: ALL_OJALWAYS nested OSwitch diagnostic
+
+- **Type:** Diagnostic-only. No runtime behavior changed.
+- **Scope:** Investigated the 3 Farever ALL_OJALWAYS candidates that remained unstructured after Session 89. Built `scripts/session90_all_ojalways_diagnostic.py` to classify inner case body endings for all 25 nested_internal_if_else functions.
+- **Key finding: 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch.** The Session 89 synthetic tests proved this pattern works, but no Farever function actually has this exact pattern. The 2 functions with ALL_OJALWAYS any target (doParse fidx=14852, split fidx=20138) have OJAlways jumps to other targets (backward jumps, forward jumps to non-post-switch blocks), not the outer post-switch.
+- **Session 89 conclusion confirmed:** The Session 89 changes (1-case outer switch + predecessor relaxation) are necessary but not sufficient. The remaining blocker for all 22 failing functions is the inner switch being in the main control-flow path, which requires fundamentally different structuring logic.
+- **Session 89 validation ambiguity reconciled:**
+  - The "+6 new tests" refers to the 6 tests in TestSession89AllOjAlwaysNestedOSwitch. The baseline was 990 (Session 88: 991 - 1 test that changed status due to updated expectations).
+  - The "1 pre-existing ASCII fail" refers to the default `scripts/check_ascii_safety.py` checker finding non-ASCII in MEMORY.md (pre-existing from Session 87 content). This is NOT a pytest failure. It is an explicit ASCII check on process artifacts.
+- **Validation:**
+  - Full pytest: 997 passed, 5 skipped (clean, no failures).
+  - Guardrails: 226 (225 passed, 1 skipped).
+  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - ASCII safety: default (process artifacts) clean (0). Diagnostic script and report artifacts clean (0).
+  - Classifier definitions unchanged.
+- **Files changed:**
+  - `scripts/session90_all_ojalways_diagnostic.py` (new, ~1000 lines diagnostic script).
+  - `decompiler_quality_report/session90_all_ojalways_diagnostic.md` (new report).
+  - `decompiler_quality_report/session90_all_ojalways_diagnostic.json` (new data).
+  - `MEMORY.md`: session update.
+- **Exclusions:**
+  - No changes to hl_decompile.py, parser, disassembler, ControlStructurer, HaxeWriter, TypeResolver, CLI, GUI.
+  - No shared_merge, trap-bearing, or deeper nesting touched.
+  - No classifier definitions changed.
+  - No Track A/Track B metric definition changes.
+- **Recommendation for Session 91:** Diagnostic-only shared_merge investigation (551 Farever functions). The shared_merge pattern is the largest remaining OSwitch bucket and may reveal a safe relaxation of the exclusive-membership rule. Alternatively, stop if no safe behavior-changing target is desired.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.
@@ -889,3 +918,6 @@ Do not reopen without explicit project-owner unlock.
 - tests/test_decompile.py::TestSession89AllOjAlwaysNestedOSwitch -- Session 89 tests (6)
 - decompiler_quality_report/session89_all_ojalways.md -- Session 89 report
 - decompiler_quality_report/session89_all_ojalways.json -- Session 89 data
+- scripts/session90_all_ojalways_diagnostic.py -- Session 90 ALL_OJALWAYS diagnostic script
+- decompiler_quality_report/session90_all_ojalways_diagnostic.md -- Session 90 diagnostic report
+- decompiler_quality_report/session90_all_ojalways_diagnostic.json -- Session 90 diagnostic data

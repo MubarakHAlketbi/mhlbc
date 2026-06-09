@@ -10,15 +10,15 @@ mhlbc does **not** promise recompilable Haxe source today. Its current output ta
 
 ## Current project status
 
-This README reflects the accepted state after Session 89 (ALL_OJALWAYS nested OSwitch for single-case outer switches). All measured scopes remain at 0 top-level gotos and 0 errors.
+This README reflects the accepted state after Session 90 (ALL_OJALWAYS nested OSwitch diagnostic). All measured scopes remain at 0 top-level gotos and 0 errors.
 
 | Area | Accepted state |
 |------|----------------|
 | Branch | `main` |
 | Active tier | Tier 1: Core Decompiler |
 | Later tiers | Frozen unless explicitly unlocked |
-| Full pytest baseline | 996 passed, 5 skipped |
-| Guardrails | 199 (B38-B55 + B63 + Sessions 67-86, Session 88) |
+| Full pytest baseline | 997 passed, 5 skipped |
+| Guardrails | 226 (225 passed, 1 skipped) |
 | Track A | 9/9 fixtures, 3014 functions, 0 errors |
 | Track B sample=200 | 200 functions decompiled, 0 errors |
 | Track B sample=500 | 500 functions decompiled, 0 errors |
@@ -26,9 +26,9 @@ This README reflects the accepted state after Session 89 (ALL_OJALWAYS nested OS
 | OSwitch remaining (Track A) | 36 (9 nested_oswitch, 27 shared_merge per Session 71) |
 | Field-name fallbacks | Track A: 2084, TB200: 58, TB500: 356 |
 | ControlStructurer top-level gotos | Track A: 0, TB200: 0, TB500: 0 |
-| Current recommendation | Session 89: ALL_OJALWAYS nested OSwitch for single-case outer switches. Next: diagnostic investigation of remaining 3 Farever ALL_OJALWAYS candidates (main-path issue), or shared_merge diagnostic. |
+| Current recommendation | Session 90 (diagnostic-only): 0 Farever functions have ALL inner case bodies ending with OJAlways to outer post-switch. Next: diagnostic-only shared_merge investigation over the 551 shared_merge Farever functions, from a clean baseline. |
 
-Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). Session 84 (docs-only) release-hardening checkpoint. Session 85 (diagnostic-only) produced a full Farever readability census identifying 2,426 OSwitch functions as the #1 blocker. Session 86 (behavior-changing) implemented recursive nested OSwitch structuring for the nested_simple_linear subshape. Session 87 (diagnostic-only) investigated the nested_internal_if_else subshape. Session 88 (behavior-changing) added `_walk_case_entry_to_inner_oswitch` for the case-entry-path discovery gap. Session 89 (behavior-changing) added 1-case outer switch support and predecessor relaxation for ALL_OJALWAYS nested OSwitch structuring.
+Session 63 (B63) closed the conditional-jump header-goto subset (62-75% reduction). Session 65 (B65) closed the conditional-jump no-merge fallback subset (100% conditional-jump elimination). Session 67 closed the direct OJAlways switch-case-break subset (40/41 predSW-proven cases). Session 68 closed the final indirect OJAlways case (writeParam with internal if/else in case body), achieving 0 top-level gotos across all measured scopes. Session 69 extended switch structuring to handle case bodies with internal if/else and default-as-merge detection, structuring 2 Track A switches (up from 0) and the writeParam benchmark function. Session 70 removed the remaining source-visible case-break goto comments from simple-linear switch cases, cleaning testSwitch and writeParam output. Session 71 (diagnostic-only) classified the 36 remaining Track A OSwitch: 9 nested_oswitch (structurable), 27 shared_merge (not safe for current rules). Sessions 72-76 completed TODO claim verification, post-switch merge preservation, test tightening, structured switch case labels, and output filename hardening. Session 80 fixed Haxe identifier sanitization. Session 82 added Haxe-compatible string-literal escaping. Session 83 resolved GUI decompile cancellation granularity (TODO-013). Session 84 (docs-only) release-hardening checkpoint. Session 85 (diagnostic-only) produced a full Farever readability census identifying 2,426 OSwitch functions as the #1 blocker. Session 86 (behavior-changing) implemented recursive nested OSwitch structuring for the nested_simple_linear subshape. Session 87 (diagnostic-only) investigated the nested_internal_if_else subshape. Session 88 (behavior-changing) added `_walk_case_entry_to_inner_oswitch` for the case-entry-path discovery gap. Session 89 (behavior-changing) added 1-case outer switch support and predecessor relaxation for ALL_OJALWAYS nested OSwitch structuring. Session 90 (diagnostic-only) investigated the 3 ALL_OJALWAYS Farever candidates and found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch; the remaining blocker for all 22 failing functions is the inner switch in the main control-flow path.
 
 ---
 
@@ -152,7 +152,7 @@ Design-only planning for ControlStructurer or TypeResolver can proceed without u
 
 ## Recommended next step
 
-Session 86 implemented recursive nested OSwitch structuring for the `nested_simple_linear` subshape (21 non-trap Farever functions). The next step is to extend this to the `nested_internal_if_else` subshape (118 non-trap Farever functions), where inner case bodies end with OJAlways breaks to the outer post-switch instead of ORet dead-ends. This requires resolving the negative-offset default-as-merge issue by allowing the inner switch's post-switch to inherit from the outer post-switch when the default target is out-of-bounds.
+Session 90 (diagnostic-only) found that 0 Farever functions have ALL inner case bodies ending with OJAlways to the outer post-switch. The remaining blocker for all 22 failing nested_internal_if_else functions is the inner switch in the main control-flow path, which requires fundamentally different structuring logic. The recommended next step is a diagnostic-only shared_merge investigation (551 Farever functions), which may reveal a safe relaxation of the exclusive-membership rule. Alternatively, stop if no safe behavior-changing target is desired.
 
 No Tier 2-5 unlock is recommended.
 
@@ -242,7 +242,7 @@ Architecture rule: the parser and CLI must remain headless. GUI code must not be
 
 ## Reproducible validation
 
-Use these commands for the current accepted baseline (post-Session 86).
+Use these commands for the current accepted baseline (post-Session 90).
 
 ```bash
 # Full pytest baseline
@@ -252,18 +252,18 @@ cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q
 Expected accepted result:
 
 ```text
-986 passed, 5 skipped
+997 passed, 5 skipped
 ```
 
 ```bash
-# Guardrails (199 tests: B38-B55 + B63 + Sessions 67-86)
-cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76 or Session78 or Session79 or Session80 or Session81 or Session82 or Session83 or Session85 or Session86"
+# Guardrails (226 tests: B38-B55 + B63 + Sessions 67-89)
+cd ~/mhlbc && ~/.local/bin/uv run pytest --tb=no -q -k "B38 or B39 or B40 or B41 or B42 or B43 or B44 or B45 or B46 or B47 or B48 or B49 or B50 or B51 or B52 or B53 or B54 or B55 or B63 or Session67 or Session68 or Session69 or Session70 or Session71 or Session72 or Session73 or Session74 or Session75 or Session76 or Session78 or Session79 or Session80 or Session81 or Session82 or Session83 or Session85 or Session86 or Session88 or Session89"
 ```
 
 Expected accepted result:
 
 ```text
-194 passed, 1 skipped
+225 passed, 1 skipped
 ```
 
 ```bash
