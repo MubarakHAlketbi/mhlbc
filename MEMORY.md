@@ -1,12 +1,12 @@
 # MEMORY.md
 
 Current accepted state for mhlbc.
-Last updated: (Session 91 checkpoint)
-Current session: 91
+Last updated: (Session 93 checkpoint)
+Current session: 93
 Branch: main
-HEAD: 74f612c
+HEAD: 04b0622
 Tests: 997 passed, 5 skipped
-Guardrails: 224 (224 passed, 1 skipped)
+Guardrails: 226 (225 passed, 1 skipped)
 Track A: 9/9 fixtures, 3014 functions, 0 errors, 0 unknown opcodes
 Track B: sample=200 and sample=500, seed=42, 0 errors
 
@@ -69,7 +69,7 @@ Track B: sample=200 and sample=500, seed=42, 0 errors
 ||- Session 89: ALL_OJALWAYS nested OSwitch structuring for single-case outer switches (behavior-changing). Two narrow fixes in `_try_structure_switch`: (1) len(cases) < 2 -> < 1 allows 1-case switches; (2) predecessor check relaxed for 1-case switches where post-switch falls through to case entry. No output change for existing Track A/Track B fixtures. 3 Farever ALL_OJALWAYS candidates remain unstructured (inner switch in main path, same as the 22 other failing nested_internal_if_else functions).
 |- Field-name recovery: PAUSED (zero recoverable cases).
 - Broad ControlStructurer work: PAUSED.
-- No active behavior-changing frontier recommended for immediate next session.
+- No active behavior-changing frontier recommended for immediate next session. The OSwitch frontier is fully characterized. Optional diagnostic-only follow-up: investigate the single shared_default_block function findChar fidx=24535.
 
 ## 2. Active unlocked frontier
 
@@ -100,7 +100,7 @@ Do not reopen without explicit project-owner unlock.
 ## 4. Current validation baseline
 
 - Tests: 997 passed, 5 skipped
-- Guardrails: 224 (224 passed, 1 skipped) -- `pytest -k "B38 or ... or Session90"`
+- Guardrails: 226 (225 passed, 1 skipped) -- `pytest -k "B38 or ... or Session91"`
 - Track A: 9/9 fixtures, 3014 functions, 0 errors
 - Track B: sample=200/sample=500, seed=42, 0 errors
 - CSfeas (post-Session 70): Track A 0, TB200 0, TB500 0 gotos
@@ -461,7 +461,7 @@ Do not reopen without explicit project-owner unlock.
 - **Count discrepancy:** Session 86 reported 551 shared_merge functions; this session finds 651. The difference is because Session 86 used a bounded classification pass (first 200 OSwitch functions deeply classified, then extrapolated), while this session classifies all 2426 OSwitch functions.
 - **Validation:**
   - Full pytest: 997 passed, 5 skipped (unchanged).
-  - Guardrails: 224 passed, 1 skipped (224 total).
+  - Guardrails: 226 passed, 1 skipped (226 total).
   - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
   - Track B sample=200: 200 decompiled, 0 errors (unchanged).
   - Track B sample=500: 500 decompiled, 0 errors (unchanged).
@@ -477,7 +477,98 @@ Do not reopen without explicit project-owner unlock.
   - No runtime behavior changed.
   - No classifier definitions changed.
   - No Track A/Track B metric definition changes.
-- **Recommendation:** Stop behavior changes for shared_merge. No safe, narrow, general-purpose ControlStructurer relaxation exists. The OSwitch frontier is now fully characterized. If further diagnostic work is desired, investigate the single `shared_default_block` function (findChar fidx=24535). Otherwise, the project should consider whether any remaining OSwitch frontier work is worth pursuing, or whether to declare the OSwitch frontier fully characterized and move to a different area.
+- **Recommendation:** Stop behavior changes for shared_merge. No safe, narrow, general-purpose ControlStructurer relaxation exists. The OSwitch frontier is now fully characterized. If further diagnostic work is desired, investigate the single `shared_default_block` function (findChar fidx=24535). Otherwise, the project should move to a different evidence-backed Tier 1 area.
+
+### Session 92: Documentation/consistency cleanup after Session 91
+
+- **Type:** Documentation/consistency cleanup. No runtime behavior changed.
+- **Scope:** Fix stale Session 90 references in README.md and MEMORY.md, reconcile guardrail count discrepancy, update recommendation to reflect Session 91 conclusion.
+- **Stale claims found and corrected:**
+  - README.md: `post-Session 90` -> `post-Session 91` (3 occurrences: status header, reproducible validation section, recommended next step).
+  - README.md: Recommended next step was still `shared_merge investigation (551 Farever functions)` -> replaced with `OSwitch frontier fully characterized; no active behavior-changing target; optional diagnostic-only follow-up on shared_default_block findChar fidx=24535`.
+  - README.md: Guardrail selector missing Session91 -> added.
+  - MEMORY.md: HEAD hash `74f612c` -> `04b0622`.
+  - MEMORY.md: Guardrail count `224 (224 passed, 1 skipped)` -> `226 (225 passed, 1 skipped)` in 3 locations (header, Section 4, Session 91 handoff).
+  - MEMORY.md: Guardrail selector `Session90` -> `Session91`.
+  - MEMORY.md: Session 91 recommendation text tightened to recommend moving to a different evidence-backed Tier 1 area.
+- **Guardrail count reconciliation:**
+  - README.md claimed 226 (225 passed, 1 skipped) -- CORRECT.
+  - MEMORY.md claimed 224 (224 passed, 1 skipped) -- WRONG.
+  - Root cause: Session 91 report incorrectly recorded 224 instead of 226. No tests were removed, renamed, or changed in Session 91 (diagnostic-only, no test file changes). The guardrail selector was not changed. The actual guardrail command produces 225 passed, 1 skipped = 226 total.
+  - Corrected MEMORY.md to match the proven count: 226 total, 225 passed, 1 skipped.
+- **Validation:**
+  - Full pytest: 997 passed, 5 skipped (unchanged).
+  - Guardrails: 225 passed, 1 skipped (226 total) -- confirmed with updated selector including Session91.
+  - Track A: 9/9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - ASCII safety: default check clean (0); explicit path on README.md and MEMORY.md clean (0).
+  - No Track B validation needed: docs-only cleanup, no report metrics or sampled output behavior changed.
+- **Files changed:**
+  - `README.md`: 5 edits (status header, recommendation, next step, reproducible validation section, guardrail selector).
+  - `MEMORY.md`: 7 edits (session number, HEAD hash, guardrail count in 3 locations, guardrail selector, recommendation text, Session 91 handoff recommendation).
+- **Scope compliance:**
+  - No parser behavior changed.
+  - No disassembler behavior changed.
+  - No decompiler IR semantics changed.
+  - No ControlStructurer behavior changed.
+  - No HaxeWriter behavior changed.
+  - No TypeResolver or field recovery changed.
+  - No CLI or GUI behavior changed.
+  - No Tier 2-5 work.
+  - No Farever-specific logic.
+- **Current accepted next step after cleanup:**
+  - Do not continue shared_merge behavior work.
+  - Treat the OSwitch frontier as fully characterized for current safe Tier 1 behavior.
+  - Optional future work: diagnostic-only look at the single shared_default_block function findChar fidx=24535.
+  - Otherwise move to a different evidence-backed Tier 1 area rather than reopening solved or unsafe OSwitch subfrontiers.
+
+### Session 93: Next-frontier readability blocker selection (diagnostic-only)
+
+- **Type:** Diagnostic/report-only. No runtime behavior changed.
+- **Scope:** Created `scripts/session93_next_readability_frontier.py` that reuses existing metric infrastructure from `decompiler_quality_report.py` and `session85_full_farever_census.py` to collect 11 classifier categories across full Farever parse (45463 functions) and full decompile (45458 functions) with bounded OSwitch bytecode scan (first 5000). Ranks blocker families by measured impact, safety, and actionability, separating source-visible vs IR-only and known exhausted/locked frontiers vs potentially actionable new ones.
+- **Exclusion context preserved:** OSwitch appears only as characterized (no safe behavior change); field-name fallbacks as exhausted; Dynamic attributions, virtual conservatism, call-return, null-target as locked (require TypeResolver unlock).
+- **Key finding:** The #1 remaining Tier 1 readability blocker is **2,859,450 source-visible raw register-name occurrences** (vN=2,208,016, tN=585,687, uN=65,747). These are regex hits in generated source text, **not unique variables or proven naming bugs**. vN/tN may include expected compiler temporaries. uN ("used/unknown-style") is more suspicious and is the highest-priority subset for the next diagnostic. This dwarfs all other blocker categories and is the only large source-visible frontier not yet characterized or proven exhausted.
+- **Ranked blocker table (top 8):**
+
+  | Rank | Blocker | Count | Visibility | Targetability |
+  |------|---------|-------|------------|---------------|
+  | 1 | Raw register-name occurrences (vN/tN/uN) | 2,859,450 | source_visible | needs_investigation |
+  | 2 | HaxeWriter readability artifacts | 75,664 | source_visible | needs_investigation |
+  | 3 | Dynamic type attributions | 50,711 | mixed | not_targetable (locked) |
+  | 4 | Virtual type conservatism | 19,602 | mixed | not_targetable (locked) |
+  | 5 | Field-name fallbacks (fN names) | 48,038 | source_visible | not_targetable (exhausted) |
+  | 6 | Goto/label IR artifacts | 17,937 | ir_only | not_targetable (characterized) |
+  | 7 | Null-without-target-type | 6,193 | ir_only | not_targetable (locked) |
+  | 8 | Unresolved call-return values | 4,792 | ir_only | not_targetable (locked) |
+
+- **Recommendation:** The raw register-name occurrences (vN/tN/uN) are the only large source-visible frontier not yet characterized or exhausted. vN/tN may include expected compiler temporaries; uN ("used/unknown-style") is more suspicious and is the highest-priority subset for the next diagnostic. Recommended next step: **diagnostic-only root-cause classification** of raw register-name occurrences, prioritizing uN first, then classifying vN/tN expected temporaries vs actionable fallback naming gaps. Semantic naming invention is forbidden -- any future behavior change must be evidence-backed and must not guess names, types, ownership, call targets, or intent. No renaming behavior until evidence proves a safe rule.
+- **Validation:**
+  - Full pytest: 997 passed, 5 skipped (unchanged from Session 92).
+  - Guardrails: 225 passed, 1 skipped (unchanged).
+  - Track A: 9 fixtures, 3014 functions, 0 errors (unchanged).
+  - Track B sample=200: 200 decompiled, 0 errors (unchanged).
+  - Track B sample=500: 500 decompiled, 0 errors (unchanged).
+  - ASCII safety: default check clean (0); explicit path on new artifacts clean (0).
+  - No classifier definitions changed (all Session 93 classifiers are new and not compared to any previous baseline).
+- **Files changed:**
+  - `scripts/session93_next_readability_frontier.py` (new, ~700 lines).
+  - `decompiler_quality_report/session93_next_readability_frontier.md` (new report).
+  - `decompiler_quality_report/session93_next_readability_frontier.json` (new data).
+  - `MEMORY.md`: session update.
+- **Scope compliance:**
+  - No parser behavior changed.
+  - No disassembler behavior changed.
+  - No decompiler IR semantics changed.
+  - No ControlStructurer behavior changed.
+  - No HaxeWriter output formatting changed.
+  - No TypeResolver behavior changed.
+  - No CLI or GUI behavior changed.
+  - No Tier 2-5 work.
+  - No Farever-specific logic in core code.
+  - No existing metric definitions changed (Session 93 classifiers are new).
+  - No solved frontiers reopened.
+- **Docs consulted:** AGENTS.md, MEMORY.md, README.md, CONTRIBUTING.md, docs/decompilation_patterns.md, docs/validation_matrix.md, docs/type_system.md, session91_shared_merge_diagnostic.md, session85_full_farever_census.py. No discrepancies found.
 
 ## 6. Compact evidence pointers
 - **Problem:** `OString` IR used Python `repr(val)` to produce string literals. Python `repr()` produces Python-style string literals (single/double quotes depending on content, Python escape sequences, non-ASCII passed through as-is). This is not Haxe-compatible.
